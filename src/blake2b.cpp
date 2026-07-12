@@ -1,8 +1,10 @@
 #include "armrx/blake2b.hpp"
 
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cstring>
+#include <stdexcept>
 
 namespace armrx {
 namespace {
@@ -92,9 +94,12 @@ void compress(std::array<std::uint64_t, 8>& h, const std::byte* block,
 
 } // namespace
 
-Hash512 blake2b_512(std::span<const std::byte> input) {
+std::vector<std::byte> blake2b(std::span<const std::byte> input, std::size_t output_bytes) {
+    if (output_bytes == 0U || output_bytes > 64U) {
+        throw std::invalid_argument{"BLAKE2b output length must be between 1 and 64 bytes"};
+    }
     std::array<std::uint64_t, 8> state = iv;
-    state[0] ^= 0x01010040ULL;
+    state[0] ^= 0x01010000ULL ^ static_cast<std::uint64_t>(output_bytes);
     std::uint64_t bytes{};
     while (input.size() > 128U) {
         bytes += 128U;
@@ -105,8 +110,17 @@ Hash512 blake2b_512(std::span<const std::byte> input) {
     std::memcpy(last.data(), input.data(), input.size());
     bytes += static_cast<std::uint64_t>(input.size());
     compress(state, last.data(), bytes, true);
+    std::array<std::byte, 64> digest{};
+    for (unsigned i = 0; i < state.size(); ++i) store64(digest.data() + 8U * i, state[i]);
+    std::vector<std::byte> output(output_bytes);
+    std::copy_n(digest.begin(), static_cast<std::ptrdiff_t>(output_bytes), output.begin());
+    return output;
+}
+
+Hash512 blake2b_512(std::span<const std::byte> input) {
+    const auto digest = blake2b(input, 64);
     Hash512 output{};
-    for (unsigned i = 0; i < state.size(); ++i) store64(output.data() + 8U * i, state[i]);
+    std::copy(digest.begin(), digest.end(), output.begin());
     return output;
 }
 

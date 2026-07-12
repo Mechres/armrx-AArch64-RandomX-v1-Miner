@@ -1,5 +1,6 @@
 #include "armrx/aes.hpp"
 #include "armrx/aes_generator.hpp"
+#include "armrx/argon2.hpp"
 #include "armrx/blake2b.hpp"
 #include "armrx/memory.hpp"
 
@@ -21,6 +22,15 @@ std::string hex(const armrx::Hash512& hash) {
     return result.str();
 }
 
+std::string hex(std::span<const std::byte> bytes) {
+    std::ostringstream result;
+    for (const auto byte : bytes) {
+        result << std::hex << std::setw(2) << std::setfill('0')
+               << std::to_integer<unsigned>(byte);
+    }
+    return result.str();
+}
+
 } // namespace
 
 int main() {
@@ -28,6 +38,11 @@ int main() {
     assert(hex(armrx::blake2b_512(empty)) ==
            "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419"
            "d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce");
+    assert(hex(armrx::blake2b(empty, 32)) ==
+           "0e5751c026e543b2e8ab2eb06099daa1d1e5df47778f7787faab45cdf12fe3a8");
+    const auto hprime = armrx::argon2_hprime(empty, 1024);
+    assert(hprime.size() == 1024U);
+    assert(hprime == armrx::argon2_hprime(empty, 1024));
     constexpr auto mib = 1024ULL * 1024ULL;
     const auto small = armrx::choose_randomx_mode(2ULL * 1024ULL * mib, 1);
     assert(small.mode == armrx::RandomXMode::light);
