@@ -6,6 +6,8 @@ option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
 
 add_library(armrx_core
+    src/aes.cpp
+    src/aes_generator.cpp
     src/blake2b.cpp
     src/cpu_features.cpp
     src/memory.cpp

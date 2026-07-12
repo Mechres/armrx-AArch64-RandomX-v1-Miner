@@ -1,3 +1,5 @@
+#include "armrx/aes.hpp"
+#include "armrx/aes_generator.hpp"
 #include "armrx/blake2b.hpp"
 #include "armrx/memory.hpp"
 
@@ -31,5 +33,36 @@ int main() {
     assert(small.mode == armrx::RandomXMode::light);
     const auto ample = armrx::choose_randomx_mode(3ULL * 1024ULL * mib, 4);
     assert(ample.mode == armrx::RandomXMode::fast);
+
+    // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
+    // then the first encryption round with round key 1.
+    constexpr armrx::AesBlock initial{
+        std::byte{0x00}, std::byte{0x10}, std::byte{0x20}, std::byte{0x30},
+        std::byte{0x40}, std::byte{0x50}, std::byte{0x60}, std::byte{0x70},
+        std::byte{0x80}, std::byte{0x90}, std::byte{0xa0}, std::byte{0xb0},
+        std::byte{0xc0}, std::byte{0xd0}, std::byte{0xe0}, std::byte{0xf0}};
+    constexpr armrx::AesBlock round_key{
+        std::byte{0xd6}, std::byte{0xaa}, std::byte{0x74}, std::byte{0xfd},
+        std::byte{0xd2}, std::byte{0xaf}, std::byte{0x72}, std::byte{0xfa},
+        std::byte{0xda}, std::byte{0xa6}, std::byte{0x78}, std::byte{0xf1},
+        std::byte{0xd6}, std::byte{0xab}, std::byte{0x76}, std::byte{0xfe}};
+    constexpr armrx::AesBlock expected{
+        std::byte{0x89}, std::byte{0xd8}, std::byte{0x10}, std::byte{0xe8},
+        std::byte{0x85}, std::byte{0x5a}, std::byte{0xce}, std::byte{0x68},
+        std::byte{0x2d}, std::byte{0x18}, std::byte{0x43}, std::byte{0xd8},
+        std::byte{0xcb}, std::byte{0x12}, std::byte{0x8f}, std::byte{0xe4}};
+    const auto encrypted = armrx::aes_encrypt_round(initial, round_key);
+    assert(encrypted == expected);
+    assert(armrx::aes_decrypt_round(encrypted, round_key) == initial);
+
+    armrx::AesState seed{};
+    armrx::AesGenerator1R single_step{seed};
+    armrx::AesGenerator1R buffered{seed};
+    const auto generated = single_step.next();
+    std::array<std::byte, 64> output{};
+    buffered.fill(output);
+    assert(generated == output);
+    assert(buffered.state() == output);
+    assert(generated != seed);
     return 0;
 }

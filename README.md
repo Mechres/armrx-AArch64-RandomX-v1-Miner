@@ -28,7 +28,7 @@ For cross compilation, provide an AArch64 CMake toolchain file and leave
 ## Implementation order
 
 1. BLAKE2b and deterministic byte/word helpers (complete).
-2. AES generators and RandomX cache initialization.
+2. AES round primitive and AesGenerator1R scratchpad generator (complete); AesGenerator4R and RandomX cache initialization.
 3. Dataset initialization plus the interpreter VM and official test vectors.
 4. AArch64 JIT backend, guarded by runtime AES feature detection.
 5. Stratum client, work scheduling, nonce partitioning, and share submission.
