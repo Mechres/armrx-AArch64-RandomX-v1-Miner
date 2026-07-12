@@ -1,6 +1,7 @@
 #include "armrx/aes.hpp"
 #include "armrx/aes_generator.hpp"
 #include "armrx/argon2.hpp"
+#include "armrx/dataset.hpp"
 #include "armrx/blake2b.hpp"
 #include "armrx/memory.hpp"
 
@@ -60,6 +61,17 @@ int main() {
     assert(small.mode == armrx::RandomXMode::light);
     const auto ample = armrx::choose_randomx_mode(3ULL * 1024ULL * mib, 4);
     assert(ample.mode == armrx::RandomXMode::fast);
+
+    assert(armrx::randomx_dataset_item_count() == 34078720ULL);
+    const auto seed0 = armrx::dataset_seed_registers(0);
+    assert(seed0[0] == 6364136223846793005ULL);
+    assert(seed0[1] == 15662221698380390097ULL);
+    assert(seed0[2] == 18384096042004490091ULL);
+    assert(seed0[3] == 15670078305396536945ULL);
+    assert(seed0[4] == 1233090996314240335ULL);
+    assert(seed0[5] == 14584374767940244257ULL);
+    assert(seed0[6] == 8609653616329052757ULL);
+    assert(seed0[7] == 15912571922823092835ULL);
 
     // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
     // then the first encryption round with round key 1.
