@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace armrx {
@@ -46,6 +47,16 @@ void mix_registers(DatasetRegisters& registers, const DatasetItem& line, std::si
     registers[7] ^= registers[6] + lane7;
 }
 
+[[nodiscard]] std::size_t select_cache_line_index(const DatasetRegisters& registers,
+                                                  std::uint64_t item_number,
+                                                  std::size_t access_index,
+                                                  std::size_t line_count) {
+    const auto mixed = registers[0] ^ rotr64(registers[2], 17U) ^ registers[5] ^
+                       rotr64(registers[7], 29U) ^ (item_number + 0x9e3779b97f4a7c15ULL) ^
+                       static_cast<std::uint64_t>(access_index * 0x100000001b3ULL);
+    return static_cast<std::size_t>(mixed % line_count);
+}
+
 } // namespace
 
 DatasetItem load_cache_line(const Argon2dCache& cache, std::size_t line_index) {
@@ -71,11 +82,10 @@ DatasetItem generate_dataset_item(const Argon2dCache& cache, std::uint64_t item_
         throw std::runtime_error{"cache has no lines"};
     }
 
-    std::uint64_t register_value = item_number;
     for (std::size_t access = 0; access < 8U; ++access) {
-        const auto line = load_cache_line(cache, static_cast<std::size_t>(register_value % line_count));
+        const auto line_index = select_cache_line_index(registers, item_number, access, line_count);
+        const auto line = load_cache_line(cache, line_index);
         mix_registers(registers, line, access);
-        register_value = registers[(access + 1U) % registers.size()];
     }
 
     DatasetItem output{};
@@ -87,7 +97,11 @@ DatasetItem generate_dataset_item(const Argon2dCache& cache, std::uint64_t item_
 
 void initialize_dataset(std::span<std::byte> output, const Argon2dCache& cache,
                         std::uint64_t start_item, std::uint64_t item_count) {
-    const auto required_bytes = item_count * kRandomXDatasetItemBytes;
+    if (item_count > (std::numeric_limits<std::size_t>::max() / kRandomXDatasetItemBytes)) {
+        throw std::invalid_argument{"dataset item count is too large"};
+    }
+
+    const auto required_bytes = dataset_output_bytes(item_count);
     if (output.size() < required_bytes) {
         throw std::invalid_argument{"dataset output buffer is too small"};
     }

@@ -8,8 +8,9 @@ mainnet consensus, so it is deliberately not the initial target.
 ## Status
 
 The current milestone provides the build system, Linux AArch64 feature probe,
-and a tested BLAKE2b-512 primitive. It is **not yet a functional miner**:
-RandomX cache/dataset generation, VM execution, nonce search, and pool
+a tested BLAKE2b-512 primitive, Argon2d cache initialization helpers, and a
+deterministic on-demand dataset-item scaffold. It is **not yet a functional
+miner**: SuperscalarHash, full RandomX VM execution, nonce search, and pool
 protocol support are still to be implemented.
 
 ## Build
@@ -38,11 +39,15 @@ tool only; a successful run does not yet make the program a miner.
 The probe also accepts `--mode=auto|light|fast` and `--workers=N` to report the
 selected memory mode for a specific worker count.
 
+The current code can also initialize contiguous dataset output with the
+light-mode cache scaffold, which is useful for validating the next dataset
+construction step.
+
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
-2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); Argon2d cache initialization.
-3. Dataset initialization plus the interpreter VM and official test vectors.
+2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); Argon2d cache initialization and dataset-item scaffolding (in progress).
+3. SuperscalarHash, light-mode on-demand dataset-item generation, and the interpreter VM with official test vectors.
 4. AArch64 JIT backend, guarded by runtime AES feature detection.
 5. Stratum client, work scheduling, nonce partitioning, and share submission.
 

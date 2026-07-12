@@ -91,6 +91,18 @@ int main() {
     assert(std::equal(dataset_output.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
                       dataset_output.end(), item1.begin(), item1.end()));
 
+    std::array<std::byte, armrx::kRandomXDatasetItemBytes * 3U> dataset_output_offset{};
+    armrx::initialize_dataset(dataset_output_offset, dataset_cache, 5, 3);
+    assert(armrx::dataset_output_bytes(3) == armrx::kRandomXDatasetItemBytes * 3U);
+    const auto item5 = armrx::generate_dataset_item(dataset_cache, 5);
+    const auto item6 = armrx::generate_dataset_item(dataset_cache, 6);
+    assert(std::equal(dataset_output_offset.begin(),
+                      dataset_output_offset.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
+                      item5.begin(), item5.end()));
+    assert(std::equal(dataset_output_offset.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
+                      dataset_output_offset.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes * 2U),
+                      item6.begin(), item6.end()));
+
     // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
     // then the first encryption round with round key 1.
     constexpr armrx::AesBlock initial{

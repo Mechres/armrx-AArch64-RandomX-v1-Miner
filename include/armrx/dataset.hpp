@@ -19,6 +19,10 @@ using DatasetItem = std::array<std::byte, kRandomXDatasetItemBytes>;
     return kRandomXDatasetBytes / kRandomXDatasetItemBytes;
 }
 
+[[nodiscard]] constexpr std::size_t dataset_output_bytes(std::uint64_t item_count) {
+    return static_cast<std::size_t>(item_count) * kRandomXDatasetItemBytes;
+}
+
 [[nodiscard]] constexpr DatasetRegisters dataset_seed_registers(std::uint64_t item_number) {
     constexpr std::uint64_t kDatasetSeedMultiplier = 6364136223846793005ULL;
     constexpr std::uint64_t kDatasetSeedAdd1 = 9298411001130361340ULL;
