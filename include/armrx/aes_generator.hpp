@@ -24,4 +24,18 @@ private:
     AesState state_;
 };
 
+// RandomX AesGenerator4R (specification §3.3), used to create each VM's
+// configuration and 256-instruction program buffer.
+class AesGenerator4R {
+public:
+    explicit AesGenerator4R(const AesState& seed);
+
+    [[nodiscard]] AesState next();
+    void fill(std::span<std::byte> output);
+    [[nodiscard]] const AesState& state() const { return state_; }
+
+private:
+    AesState state_;
+};
+
 } // namespace armrx

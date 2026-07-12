@@ -64,5 +64,13 @@ int main() {
     assert(generated == output);
     assert(buffered.state() == output);
     assert(generated != seed);
+
+    armrx::AesGenerator4R secure_step{seed};
+    armrx::AesGenerator4R secure_buffered{seed};
+    const auto secure_generated = secure_step.next();
+    secure_buffered.fill(output);
+    assert(secure_generated == output);
+    assert(secure_buffered.state() == output);
+    assert(secure_generated != seed);
     return 0;
 }
