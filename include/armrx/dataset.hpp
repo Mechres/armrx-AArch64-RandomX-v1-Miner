@@ -58,4 +58,10 @@ using DatasetItem = std::array<std::byte, kRandomXDatasetItemBytes>;
 void initialize_dataset(std::span<std::byte> output, const Argon2dCache& cache,
                         std::uint64_t start_item, std::uint64_t item_count);
 
+[[nodiscard]] constexpr bool dataset_range_is_valid(std::uint64_t start_item,
+                               std::uint64_t item_count) {
+    return start_item <= randomx_dataset_item_count() &&
+        item_count <= randomx_dataset_item_count() - start_item;
+}
+
 } // namespace armrx

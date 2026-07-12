@@ -97,6 +97,10 @@ DatasetItem generate_dataset_item(const Argon2dCache& cache, std::uint64_t item_
 
 void initialize_dataset(std::span<std::byte> output, const Argon2dCache& cache,
                         std::uint64_t start_item, std::uint64_t item_count) {
+    if (!dataset_range_is_valid(start_item, item_count)) {
+        throw std::invalid_argument{"dataset item range is invalid"};
+    }
+
     if (item_count > (std::numeric_limits<std::size_t>::max() / kRandomXDatasetItemBytes)) {
         throw std::invalid_argument{"dataset item count is too large"};
     }

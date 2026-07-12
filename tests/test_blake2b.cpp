@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <stdexcept>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -102,6 +103,14 @@ int main() {
     assert(std::equal(dataset_output_offset.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
                       dataset_output_offset.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes * 2U),
                       item6.begin(), item6.end()));
+
+    bool rejected_invalid_range = false;
+    try {
+        armrx::initialize_dataset(dataset_output_offset, dataset_cache, armrx::randomx_dataset_item_count(), 1);
+    } catch (const std::invalid_argument&) {
+        rejected_invalid_range = true;
+    }
+    assert(rejected_invalid_range);
 
     // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
     // then the first encryption round with round key 1.
