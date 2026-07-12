@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace armrx {
 
@@ -49,5 +50,8 @@ using DatasetItem = std::array<std::byte, kRandomXDatasetItemBytes>;
 
 [[nodiscard]] DatasetItem generate_dataset_item(const Argon2dCache& cache,
                                                 std::uint64_t item_number);
+
+void initialize_dataset(std::span<std::byte> output, const Argon2dCache& cache,
+                        std::uint64_t start_item, std::uint64_t item_count);
 
 } // namespace armrx

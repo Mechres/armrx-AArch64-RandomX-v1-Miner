@@ -85,4 +85,18 @@ DatasetItem generate_dataset_item(const Argon2dCache& cache, std::uint64_t item_
     return output;
 }
 
+void initialize_dataset(std::span<std::byte> output, const Argon2dCache& cache,
+                        std::uint64_t start_item, std::uint64_t item_count) {
+    const auto required_bytes = item_count * kRandomXDatasetItemBytes;
+    if (output.size() < required_bytes) {
+        throw std::invalid_argument{"dataset output buffer is too small"};
+    }
+
+    for (std::uint64_t offset = 0; offset < item_count; ++offset) {
+        const auto item = generate_dataset_item(cache, start_item + offset);
+        std::memcpy(output.data() + offset * kRandomXDatasetItemBytes, item.data(),
+                    kRandomXDatasetItemBytes);
+    }
+}
+
 } // namespace armrx

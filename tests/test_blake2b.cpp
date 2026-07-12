@@ -6,6 +6,7 @@
 #include "armrx/memory.hpp"
 
 #include <array>
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <iomanip>
@@ -81,6 +82,14 @@ int main() {
     assert(item0.size() == armrx::kRandomXDatasetItemBytes);
     assert(item0 != item1);
     assert(item0 != armrx::DatasetItem{});
+
+    std::array<std::byte, armrx::kRandomXDatasetItemBytes * 2U> dataset_output{};
+    armrx::initialize_dataset(dataset_output, dataset_cache, 0, 2);
+    assert(std::equal(dataset_output.begin(),
+                      dataset_output.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
+                      item0.begin(), item0.end()));
+    assert(std::equal(dataset_output.begin() + static_cast<std::ptrdiff_t>(armrx::kRandomXDatasetItemBytes),
+                      dataset_output.end(), item1.begin(), item1.end()));
 
     // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
     // then the first encryption round with round key 1.
