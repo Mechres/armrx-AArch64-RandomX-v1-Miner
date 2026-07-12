@@ -27,7 +27,7 @@ For cross compilation, provide an AArch64 CMake toolchain file and leave
 
 ## Implementation order
 
-1. BLAKE2b, including Argon2-compatible variable output and H', and deterministic byte/word helpers (complete).
+1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
 2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); RandomX cache initialization.
 3. Dataset initialization plus the interpreter VM and official test vectors.
 4. AArch64 JIT backend, guarded by runtime AES feature detection.

@@ -43,6 +43,13 @@ int main() {
     const auto hprime = armrx::argon2_hprime(empty, 1024);
     assert(hprime.size() == 1024U);
     assert(hprime == armrx::argon2_hprime(empty, 1024));
+    armrx::Argon2Block zero_block{};
+    assert(armrx::argon2_compress(zero_block, zero_block) == zero_block);
+    armrx::Argon2Block input_block{};
+    input_block[0] = 1;
+    const auto transformed = armrx::argon2_compress(input_block, zero_block);
+    assert(transformed != zero_block);
+    assert(transformed == armrx::argon2_compress(input_block, zero_block));
     constexpr auto mib = 1024ULL * 1024ULL;
     const auto small = armrx::choose_randomx_mode(2ULL * 1024ULL * mib, 1);
     assert(small.mode == armrx::RandomXMode::light);
