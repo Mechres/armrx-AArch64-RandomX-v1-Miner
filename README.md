@@ -25,10 +25,20 @@ ctest --test-dir build --output-on-failure
 For cross compilation, provide an AArch64 CMake toolchain file and leave
 `ARMRX_ENABLE_NATIVE` disabled.
 
+To exercise the full shared light-mode cache initialization without mining or
+network access:
+
+```sh
+./build/armrx --init-cache 'test key 000'
+```
+
+This allocates 256 MiB and runs the three Argon2d passes. It is a validation
+tool only; a successful run does not yet make the program a miner.
+
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
-2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); RandomX cache initialization.
+2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); Argon2d cache initialization.
 3. Dataset initialization plus the interpreter VM and official test vectors.
 4. AArch64 JIT backend, guarded by runtime AES feature detection.
 5. Stratum client, work scheduling, nonce partitioning, and share submission.

@@ -21,4 +21,18 @@ using Argon2Block = std::array<std::uint64_t, 128>;
                                           const Argon2Block& reference,
                                           const Argon2Block* destination = nullptr);
 
+// One-lane Argon2d memory fill used by RandomX cache initialization. It keeps
+// the memory blocks rather than producing a password-hashing tag.
+class Argon2dCache {
+public:
+    explicit Argon2dCache(std::size_t memory_blocks = 262144U, std::size_t passes = 3U);
+
+    void initialize(std::span<const std::byte> key);
+    [[nodiscard]] std::span<const Argon2Block> blocks() const { return blocks_; }
+
+private:
+    std::size_t passes_;
+    std::vector<Argon2Block> blocks_;
+};
+
 } // namespace armrx

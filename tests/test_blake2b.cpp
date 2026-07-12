@@ -50,6 +50,11 @@ int main() {
     const auto transformed = armrx::argon2_compress(input_block, zero_block);
     assert(transformed != zero_block);
     assert(transformed == armrx::argon2_compress(input_block, zero_block));
+    constexpr std::array<std::byte, 3> cache_key{std::byte{'k'}, std::byte{'e'}, std::byte{'y'}};
+    armrx::Argon2dCache tiny_cache{8, 1};
+    tiny_cache.initialize(cache_key);
+    assert(tiny_cache.blocks().size() == 8U);
+    assert(tiny_cache.blocks()[0] != zero_block);
     constexpr auto mib = 1024ULL * 1024ULL;
     const auto small = armrx::choose_randomx_mode(2ULL * 1024ULL * mib, 1);
     assert(small.mode == armrx::RandomXMode::light);
