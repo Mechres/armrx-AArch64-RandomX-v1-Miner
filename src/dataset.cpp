@@ -21,6 +21,31 @@ void store_le64(std::byte* output, std::uint64_t value) {
     std::memcpy(output, &value, sizeof(value));
 }
 
+[[nodiscard]] std::uint64_t rotr64(std::uint64_t value, unsigned shift) {
+    shift &= 63U;
+    return (value >> shift) | (value << ((64U - shift) & 63U));
+}
+
+void mix_registers(DatasetRegisters& registers, const DatasetItem& line, std::size_t access_index) {
+    const auto lane0 = load_le64(line.data() + 0);
+    const auto lane1 = load_le64(line.data() + 8);
+    const auto lane2 = load_le64(line.data() + 16);
+    const auto lane3 = load_le64(line.data() + 24);
+    const auto lane4 = load_le64(line.data() + 32);
+    const auto lane5 = load_le64(line.data() + 40);
+    const auto lane6 = load_le64(line.data() + 48);
+    const auto lane7 = load_le64(line.data() + 56);
+
+    registers[0] += registers[1] ^ lane0;
+    registers[1] = rotr64(registers[1] ^ registers[2] ^ lane1, 32U);
+    registers[2] *= (lane2 | 1ULL);
+    registers[3] += registers[0] ^ lane3;
+    registers[4] ^= rotr64(registers[3] + lane4, static_cast<unsigned>((access_index + 1U) * 7U));
+    registers[5] += registers[4] ^ lane5;
+    registers[6] = rotr64(registers[6] + registers[5] + lane6, 24U);
+    registers[7] ^= registers[6] + lane7;
+}
+
 } // namespace
 
 DatasetItem load_cache_line(const Argon2dCache& cache, std::size_t line_index) {
@@ -49,9 +74,7 @@ DatasetItem generate_dataset_item(const Argon2dCache& cache, std::uint64_t item_
     std::uint64_t register_value = item_number;
     for (std::size_t access = 0; access < 8U; ++access) {
         const auto line = load_cache_line(cache, static_cast<std::size_t>(register_value % line_count));
-        for (std::size_t register_index = 0; register_index < registers.size(); ++register_index) {
-            registers[register_index] ^= load_le64(line.data() + register_index * sizeof(std::uint64_t));
-        }
+        mix_registers(registers, line, access);
         register_value = registers[(access + 1U) % registers.size()];
     }
 
