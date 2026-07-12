@@ -35,6 +35,9 @@ network access:
 This allocates 256 MiB and runs the three Argon2d passes. It is a validation
 tool only; a successful run does not yet make the program a miner.
 
+The probe also accepts `--mode=auto|light|fast` and `--workers=N` to report the
+selected memory mode for a specific worker count.
+
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
