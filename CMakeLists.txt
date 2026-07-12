@@ -11,6 +11,7 @@ add_library(armrx_core
     src/argon2.cpp
     src/blake2b.cpp
     src/cpu_features.cpp
+    src/dataset.cpp
     src/memory.cpp
 )
 

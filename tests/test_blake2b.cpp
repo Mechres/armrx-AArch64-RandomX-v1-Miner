@@ -73,6 +73,15 @@ int main() {
     assert(seed0[6] == 8609653616329052757ULL);
     assert(seed0[7] == 15912571922823092835ULL);
 
+    armrx::Argon2dCache dataset_cache{8, 1};
+    constexpr std::array<std::byte, 3> dataset_key{std::byte{'k'}, std::byte{'e'}, std::byte{'y'}};
+    dataset_cache.initialize(dataset_key);
+    const auto item0 = armrx::generate_dataset_item(dataset_cache, 0);
+    const auto item1 = armrx::generate_dataset_item(dataset_cache, 1);
+    assert(item0.size() == armrx::kRandomXDatasetItemBytes);
+    assert(item0 != item1);
+    assert(item0 != armrx::DatasetItem{});
+
     // FIPS-197 AES-128 known-answer test: state after its initial AddRoundKey,
     // then the first encryption round with round key 1.
     constexpr armrx::AesBlock initial{

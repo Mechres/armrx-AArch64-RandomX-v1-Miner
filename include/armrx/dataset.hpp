@@ -1,5 +1,6 @@
 #pragma once
 
+#include "armrx/argon2.hpp"
 #include "armrx/randomx_config.hpp"
 
 #include <array>
@@ -8,9 +9,10 @@
 
 namespace armrx {
 
-using DatasetRegisters = std::array<std::uint64_t, 8>;
-
 inline constexpr std::uint64_t kRandomXDatasetItemBytes = 64ULL;
+
+using DatasetRegisters = std::array<std::uint64_t, 8>;
+using DatasetItem = std::array<std::byte, kRandomXDatasetItemBytes>;
 
 [[nodiscard]] constexpr std::size_t randomx_dataset_item_count() {
     return kRandomXDatasetBytes / kRandomXDatasetItemBytes;
@@ -38,5 +40,14 @@ inline constexpr std::uint64_t kRandomXDatasetItemBytes = 64ULL;
         seed ^ kDatasetSeedAdd7,
     };
 }
+
+[[nodiscard]] inline std::size_t cache_line_count(const Argon2dCache& cache) {
+    return cache.blocks().size() * (sizeof(Argon2Block) / kRandomXDatasetItemBytes);
+}
+
+[[nodiscard]] DatasetItem load_cache_line(const Argon2dCache& cache, std::size_t line_index);
+
+[[nodiscard]] DatasetItem generate_dataset_item(const Argon2dCache& cache,
+                                                std::uint64_t item_number);
 
 } // namespace armrx
