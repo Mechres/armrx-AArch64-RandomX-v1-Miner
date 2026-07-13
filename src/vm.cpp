@@ -12,6 +12,7 @@
 #include <iostream>
 #include <iomanip>
 #include <sys/mman.h>
+#include <unistd.h>
 
 namespace armrx {
 namespace {
@@ -155,9 +156,16 @@ static std::uint32_t map_to_randomx_flags(std::uint32_t flags) {
 } // namespace
 
 VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
-    scratchpad_.resize(2097152U); // 2 MiB Scratchpad
-    // Hint to kernel: promote to transparent huge pages (2 MiB) for TLB efficiency
-    ::madvise(scratchpad_.data(), scratchpad_.size(), MADV_HUGEPAGE);
+    // Allocate 2 MiB scratchpad via mmap for direct huge-page control
+    const std::size_t sp_size = 2097152U;
+    scratchpad_data_ = static_cast<std::byte*>(
+        ::mmap(nullptr, sp_size, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (scratchpad_data_ == MAP_FAILED) {
+        throw std::bad_alloc();
+    }
+    scratchpad_size_ = sp_size;
+    ::madvise(scratchpad_data_, sp_size, MADV_HUGEPAGE);
 #ifdef ARMRX_HAVE_JIT
     if (flags_ & kRandOMXFlagJit) {
         jit_ = std::make_unique<JitCompilerA64>();
@@ -166,7 +174,13 @@ VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
 #endif
 }
 
-VirtualMachine::~VirtualMachine() = default;
+VirtualMachine::~VirtualMachine() {
+    if (scratchpad_data_) {
+        ::munmap(scratchpad_data_, scratchpad_size_);
+        scratchpad_data_ = nullptr;
+        scratchpad_size_ = 0;
+    }
+}
 
 void VirtualMachine::set_cache(const Argon2dCache* cache) {
     cache_ = cache;
@@ -189,7 +203,7 @@ void VirtualMachine::allocate() {
 
 void VirtualMachine::init_scratchpad(void* seed) {
     auto* seed_bytes = reinterpret_cast<AesState*>(seed);
-    fill_aes_1r_x4(*seed_bytes, scratchpad_);
+    fill_aes_1r_x4(*seed_bytes, std::span<std::byte>(scratchpad_data_, scratchpad_size_));
 }
 
 void VirtualMachine::reset_rounding_mode() {
@@ -634,7 +648,7 @@ void VirtualMachine::compile_program() {
 }
 
 void VirtualMachine::execute_bytecode() {
-    std::byte* scratchpad = scratchpad_.data();
+    std::byte* scratchpad = scratchpad_data_;
     for (int pc = 0; pc < 256; ++pc) {
         auto& ibc = bytecode_[pc];
         switch (ibc.type) {
@@ -839,7 +853,7 @@ void VirtualMachine::run(const void* seed) {
 
         jit_->getProgramFunc()(
             &reg_, &mem_regs,
-            reinterpret_cast<void*>(scratchpad_.data()),
+            reinterpret_cast<void*>(scratchpad_data_),
             2048ULL);
 
         // Extract updated mx/ma back from mem_regs after JIT execution
@@ -862,17 +876,17 @@ void VirtualMachine::run(const void* seed) {
         spAddr1 &= kScratchpadL3Mask64;
 
         for (unsigned int i = 0; i < 8; ++i) {
-            reg_.r[i] ^= load64(scratchpad_.data() + spAddr0 + 8 * i);
+            reg_.r[i] ^= load64(scratchpad_data_ + spAddr0 + 8 * i);
         }
 
         for (unsigned int i = 0; i < 4; ++i) {
-            auto* addr = scratchpad_.data() + spAddr1 + 8 * i;
+            auto* addr = scratchpad_data_ + spAddr1 + 8 * i;
             reg_.f[i].lo = unsigned32ToSigned2sCompl(load32(addr + 0));
             reg_.f[i].hi = unsigned32ToSigned2sCompl(load32(addr + 4));
         }
 
         for (unsigned int i = 0; i < 4; ++i) {
-            auto* addr = scratchpad_.data() + spAddr1 + 8 * (4 + i);
+            auto* addr = scratchpad_data_ + spAddr1 + 8 * (4 + i);
             double lo = unsigned32ToSigned2sCompl(load32(addr + 0));
             double hi = unsigned32ToSigned2sCompl(load32(addr + 4));
 
@@ -898,7 +912,7 @@ void VirtualMachine::run(const void* seed) {
         std::swap(mx_, ma_);
 
         for (unsigned int i = 0; i < 8; ++i) {
-            store64(scratchpad_.data() + spAddr1 + 8 * i, reg_.r[i]);
+            store64(scratchpad_data_ + spAddr1 + 8 * i, reg_.r[i]);
         }
 
         for (unsigned int i = 0; i < 4; ++i) {
@@ -916,7 +930,7 @@ void VirtualMachine::run(const void* seed) {
         }
 
         for (unsigned int i = 0; i < 4; ++i) {
-            std::memcpy(scratchpad_.data() + spAddr0 + 16 * i, &reg_.f[i], 16);
+            std::memcpy(scratchpad_data_ + spAddr0 + 16 * i, &reg_.f[i], 16);
         }
 
         spAddr0 = 0;
@@ -927,7 +941,7 @@ void VirtualMachine::run(const void* seed) {
 void VirtualMachine::hash_and_fill(void* out, void* fill_state) {
     AesState new_fill_state;
     std::memcpy(new_fill_state.data(), fill_state, 64);
-    hash_and_fill_aes_1r_x4(scratchpad_, reinterpret_cast<AesState&>(reg_.a), new_fill_state);
+    hash_and_fill_aes_1r_x4(std::span<std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a), new_fill_state);
     std::memcpy(fill_state, new_fill_state.data(), 64);
 
     std::vector<std::byte> input_bytes(sizeof(reg_));
@@ -937,7 +951,7 @@ void VirtualMachine::hash_and_fill(void* out, void* fill_state) {
 }
 
 void VirtualMachine::get_final_result(void* out) {
-    hash_aes_1r_x4(scratchpad_, reinterpret_cast<AesState&>(reg_.a));
+    hash_aes_1r_x4(std::span<const std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a));
 
     std::vector<std::byte> input_bytes(sizeof(reg_));
     std::memcpy(input_bytes.data(), &reg_, sizeof(reg_));

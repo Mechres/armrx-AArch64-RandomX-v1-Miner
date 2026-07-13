@@ -140,9 +140,9 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | 🔴 **1** | JIT program caching (seed-stable, eliminates 99% of recompilation) | Speed | Medium |
 | 🔴 **2** | Profile JIT compilation overhead per hash | Diagnosis | Low |
 | ~~✅ 🔴 **3**~~ | ~~Verify ASM dataset stubs execute correctly (done)~~ | | |
-| 🟡 **4** | Scratchpad via mmap instead of vector | Speed | Low |
-| 🟡 **5** | Worker loop: lock-free job pointer | Speed | Low |
-| 🟡 **6** | Benchmark each component in isolation | Diagnosis | Medium |
-| 🟢 **7** | Config file | UX | Medium |
-| ⚪ **8** | Stratum V2 | Future-proofing | High |
+| 🟡 **1** | Scratchpad via mmap instead of vector | Speed | Low |
+| 🟡 **2** | Worker loop: lock-free job pointer | Speed | Low |
+| 🟡 **3** | Benchmark each component in isolation | Diagnosis | Medium |
+| 🟢 **4** | Config file | UX | Medium |
+| ⚪ **5** | Stratum V2 | Future-proofing | High |
 

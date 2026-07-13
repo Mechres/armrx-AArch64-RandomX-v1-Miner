@@ -76,7 +76,7 @@ public:
     void get_final_result(void* out);
 
     [[nodiscard]] const RegisterFile& get_register_file() const { return reg_; }
-    [[nodiscard]] const std::byte* get_scratchpad() const { return scratchpad_.data(); }
+    [[nodiscard]] const std::byte* get_scratchpad() const { return scratchpad_data_; }
 
 private:
     void initialize_vm_state();
@@ -110,8 +110,9 @@ private:
     std::array<InstructionByteCode, 256> bytecode_{};
     int register_usage_[8] = {-1};
 
-    // Scratchpad (2 MiB)
-    std::vector<std::byte> scratchpad_;
+    // Scratchpad (2 MiB) — mmap-allocated with huge page hint
+    std::byte* scratchpad_data_ = nullptr;
+    std::size_t scratchpad_size_ = 0;
 
     // Temporary storage for hashing pipeline
     AesState temp_hash_{};

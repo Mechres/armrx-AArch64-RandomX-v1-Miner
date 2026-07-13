@@ -12,6 +12,20 @@
 - **Non-blocking login handshake** (`src/stratum_client.cpp`): Complete the connection handshake promise before running the synchronous job callback, avoiding handshake timeouts on slower CPUs (like Cortex-A53) during Argon2d cache initialization.
 - **JIT compilation in Light Mode** (`src/vm.cpp`, `src/jit_compiler_a64.cpp`, `include/armrx/jit_compiler_a64.hpp`): Enabled JIT compilation in Light mode on AArch64 by compiling Superscalar programs in `set_cache()` and matching const parameter layouts. Corrected the `CacheSize` constant in the JIT compiler from `2 GiB` to the correct cache size of `256 MiB`, fixing the out-of-bounds cache line alignment mask that caused segmentation faults. This speeds up Light mode hashrate from 1.6 H/s to hardware JIT speed (~28 H/s).
 
+## 2026-07-13 (CryptoNote protocol + 21 H/s light-mode milestone)
+
+### Added
+- **Dual-protocol Stratum client** (`stratum_client.hpp/cpp`): Auto-detects pool protocol — tries standard Stratum V1 (`mining.subscribe`) first, falls back to CryptoNote (`login`) on rejection. Handles `keepalive`, nested JSON job parsing, and CryptoNote share submission format.
+- **`StratumProtocol` enum** with `AUTO`, `STRATUM_V1`, `CRYPTONOTE` modes. Handshake lifecycle with fallback tracking prevents race conditions during protocol switch.
+
+### Fixed (performance: 1.2 → 21 H/s)
+- **`CacheSize` constant in JIT compiler** (`jit_compiler_a64.cpp`): Was `2147483648` (2 GiB, dataset size) — corrected to `268435456` (256 MiB, cache size). The 8× too large cache mask caused out-of-bounds reads and segfaults in light mode. **This was the primary 22× performance bottleneck.**
+- **Light-mode JIT enabled**: `set_cache()` now calls `jit_->generateSuperscalarHash()` to compile SuperscalarHash programs. Cache data pointer passed to `mem_regs.memory` for the JIT light-mode dataset derivation path.
+- **Non-blocking handshake**: Moved handshake promise fulfillment before Argon2d cache init in job callback — prevents connection timeouts on slow hardware.
+- **`kRandOMXFlagJit` unconditional**: JIT enabled regardless of `kRandOMXFlagFullMem` so light-mode VMs get JIT compilation.
+- **SIGPIPE ignored**: Prevents OpenSSL `close_notify` writes on closed sockets from crashing the process.
+- **Hashrate flushing per hash**: Worker threads flush local counter after each hash in interpreted/light mode for instant accurate reporting.
+
 ## 2026-07-13 (CPU affinity + per-worker counters + pool failover)
 
 ### Added
