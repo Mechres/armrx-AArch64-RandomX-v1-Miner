@@ -58,6 +58,26 @@ std::string json_get(const std::string& json, const std::string& key) {
         }
         return result;
     }
+    if (json[pos] == '{' || json[pos] == '[') {
+        char open_char = json[pos];
+        char close_char = (open_char == '{') ? '}' : ']';
+        int depth = 1;
+        std::size_t i = pos + 1;
+        bool in_string = false;
+        while (i < json.size() && depth > 0) {
+            char c = json[i];
+            if (c == '"') {
+                if (i > 0 && json[i-1] != '\\') {
+                    in_string = !in_string;
+                }
+            } else if (!in_string) {
+                if (c == open_char) ++depth;
+                else if (c == close_char) --depth;
+            }
+            ++i;
+        }
+        return json.substr(pos, i - pos);
+    }
     if (json[pos] == 'n') return {}; // null
     // Number or boolean – read until delimiter
     auto end = json.find_first_of(",}]\n", pos);
@@ -116,100 +136,173 @@ StratumClient::~StratumClient() {
 // connect / disconnect
 // ─────────────────────────────────────────────────────────────────────────────
 
-void StratumClient::connect() {
-    if (connected_.load()) return;
-    reconnect_enabled_.store(true);
-
-    // Resolve host
-    struct addrinfo hints{};
-    hints.ai_family   = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    struct addrinfo* res = nullptr;
-    const std::string port_str = std::to_string(port_);
-    int rc = ::getaddrinfo(host_.c_str(), port_str.c_str(), &hints, &res);
-    if (rc != 0 || res == nullptr) {
-        throw std::runtime_error(
-            std::string("StratumClient: DNS resolution failed for ") + host_ +
-            ": " + ::gai_strerror(rc));
-    }
-
-    // Try each address
-    int fd = -1;
-    for (auto* p = res; p != nullptr; p = p->ai_next) {
-        fd = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (fd < 0) continue;
-        if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
-        ::close(fd);
-        fd = -1;
-    }
-    ::freeaddrinfo(res);
-
-    if (fd < 0) {
-        throw std::runtime_error(
-            std::string("StratumClient: could not connect to ") +
-            host_ + ":" + port_str);
-    }
-
-    // Enable TCP_NODELAY for lower latency on share submissions
-    int flag = 1;
-    ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
-                 reinterpret_cast<const char*>(&flag), sizeof(flag));
-
-    sockfd_ = fd;
-
-    // Optional TLS wrapping
-#ifdef ARMRX_HAVE_TLS
-    if (tls_enabled_) {
-        tls_ = std::make_unique<TlsClient>();
-        if (!tls_->connect(fd, host_)) {
-            ::close(fd);
-            sockfd_ = -1;
-            throw std::runtime_error(
-                std::string("StratumClient: TLS handshake failed for ") + host_);
-        }
-        std::cout << "[Stratum] TLS enabled\n";
-    }
-#endif
-
-    connected_.store(true);
-
-    // Start reader thread before handshake so we can receive replies
-    reader_thread_ = std::thread(&StratumClient::reader_thread_fn, this);
-
-    // Handshake: subscribe then authorize
-    {
-        std::lock_guard lock(send_mutex_);
-        send_line(build_subscribe_msg());
-    }
-    {
-        std::lock_guard lock(send_mutex_);
-        send_line(build_authorize_msg());
-    }
-}
-
-void StratumClient::disconnect() {
-    reconnect_enabled_.store(false);
+void StratumClient::close_connection() {
     connected_.store(false);
 
-    // Tear down TLS before closing the socket
-#ifdef ARMRX_HAVE_TLS
-    if (tls_) {
-        tls_->disconnect();
-        tls_.reset();
-    }
-#endif
-
-    // Close the socket to unblock any pending read in the reader thread
+    // Close the socket FIRST to unblock the reader thread (avoids TLS race)
     if (sockfd_ >= 0) {
         ::shutdown(sockfd_, SHUT_RDWR);
         ::close(sockfd_);
         sockfd_ = -1;
     }
 
-    if (reader_thread_.joinable()) {
+    // Join reader thread before tearing down TLS
+    if (reader_thread_.joinable() && std::this_thread::get_id() != reader_thread_.get_id()) {
         reader_thread_.join();
     }
-    if (reconnect_thread_.joinable()) {
+    if (keepalive_thread_.joinable() && std::this_thread::get_id() != keepalive_thread_.get_id()) {
+        keepalive_thread_.join();
+    }
+
+    // Now safe to tear down TLS
+#ifdef ARMRX_HAVE_TLS
+    if (tls_) {
+        tls_->disconnect();
+        tls_.reset();
+    }
+#endif
+}
+
+void StratumClient::connect() {
+    if (connected_.load()) return;
+    reconnect_enabled_.store(true);
+
+    // Clean up any stale threads from a previous connection lifecycle
+    if (reader_thread_.joinable() && std::this_thread::get_id() != reader_thread_.get_id()) {
+        reader_thread_.join();
+    }
+    if (keepalive_thread_.joinable() && std::this_thread::get_id() != keepalive_thread_.get_id()) {
+        keepalive_thread_.join();
+    }
+    if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
+        reconnect_thread_.join();
+    }
+
+    while (true) {
+        // Resolve host
+        struct addrinfo hints{};
+        hints.ai_family   = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        struct addrinfo* res = nullptr;
+        const std::string port_str = std::to_string(port_);
+        int rc = ::getaddrinfo(host_.c_str(), port_str.c_str(), &hints, &res);
+        if (rc != 0 || res == nullptr) {
+            throw std::runtime_error(
+                std::string("StratumClient: DNS resolution failed for ") + host_ +
+                ": " + ::gai_strerror(rc));
+        }
+
+        // Try each address
+        int fd = -1;
+        for (auto* p = res; p != nullptr; p = p->ai_next) {
+            fd = ::socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+            if (fd < 0) continue;
+            if (::connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
+            ::close(fd);
+            fd = -1;
+        }
+        ::freeaddrinfo(res);
+
+        if (fd < 0) {
+            throw std::runtime_error(
+                std::string("StratumClient: could not connect to ") +
+                host_ + ":" + port_str);
+        }
+
+        // Enable TCP_NODELAY for lower latency on share submissions
+        int flag = 1;
+        ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
+                     reinterpret_cast<const char*>(&flag), sizeof(flag));
+
+        sockfd_ = fd;
+
+        // Optional TLS wrapping
+#ifdef ARMRX_HAVE_TLS
+        if (tls_enabled_) {
+            tls_ = std::make_unique<TlsClient>();
+            if (!tls_->connect(fd, host_)) {
+                ::close(fd);
+                sockfd_ = -1;
+                throw std::runtime_error(
+                    std::string("StratumClient: TLS handshake failed for ") + host_);
+            }
+            std::cout << "[Stratum] TLS enabled\n";
+        }
+#endif
+
+        connected_.store(true);
+
+        // Reset subscribe handshake state
+        subscribe_done_ = std::promise<bool>();
+        auto subscribe_future = subscribe_done_.get_future();
+
+        // Start reader thread before handshake so we can receive replies
+        reader_thread_ = std::thread(&StratumClient::reader_thread_fn, this);
+
+        const StratumProtocol active_protocol = (protocol_ == StratumProtocol::AUTO) ? StratumProtocol::STRATUM_V1 : protocol_;
+
+        std::string msg;
+        if (active_protocol == StratumProtocol::STRATUM_V1) {
+            msg = build_subscribe_msg();
+        } else {
+            msg = build_login_msg();
+        }
+
+        std::cout << "[Stratum] >> " << msg.substr(0, msg.size() - 1) << '\n';
+        {
+            std::lock_guard lock(send_mutex_);
+            send_line(msg);
+        }
+
+        // Wait for handshake response (up to 10 seconds)
+        auto status = subscribe_future.wait_for(std::chrono::seconds(10));
+        if (status != std::future_status::ready) {
+            close_connection();
+            throw std::runtime_error("StratumClient: handshake timed out");
+        }
+
+        if (!subscribe_ok_) {
+            if (protocol_ == StratumProtocol::AUTO) {
+                std::cerr << "[Stratum] Handshake failed with Stratum V1. Falling back to CryptoNote protocol...\n";
+                protocol_ = StratumProtocol::CRYPTONOTE;
+                fallback_in_progress_.store(true);
+                close_connection();
+                fallback_in_progress_.store(false);
+                connected_.store(false);
+                continue;
+            } else {
+                close_connection();
+                throw std::runtime_error("StratumClient: handshake rejected by pool");
+            }
+        }
+
+        // Handshake succeeded!
+        if (protocol_ == StratumProtocol::AUTO) {
+            protocol_ = active_protocol;
+        }
+
+        // If STRATUM_V1, send authorize
+        if (protocol_ == StratumProtocol::STRATUM_V1) {
+            std::lock_guard lock(send_mutex_);
+            send_line(build_authorize_msg());
+        }
+
+        // Start keepalive thread if CRYPTONOTE
+        if (protocol_ == StratumProtocol::CRYPTONOTE) {
+            if (keepalive_thread_.joinable() && std::this_thread::get_id() != keepalive_thread_.get_id()) {
+                keepalive_thread_.join();
+            }
+            keepalive_thread_ = std::thread(&StratumClient::keepalive_loop, this);
+        }
+
+        break;
+    }
+}
+
+void StratumClient::disconnect() {
+    reconnect_enabled_.store(false);
+    close_connection();
+    if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
         reconnect_thread_.join();
     }
 }
@@ -221,10 +314,9 @@ void StratumClient::disconnect() {
 void StratumClient::submit_share(const Job& job, std::uint64_t nonce,
                                  const std::array<std::byte, 32>& hash) {
     if (!connected_.load()) return;
-    const std::string msg = build_submit_msg(job, nonce);
+    const std::string msg = build_submit_msg(job, nonce, hash);
     std::lock_guard lock(send_mutex_);
     send_line(msg);
-    (void)hash; // logged by caller
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,28 +334,69 @@ void StratumClient::set_reconnect_config(unsigned max_retries, unsigned base_del
 
 std::string StratumClient::build_subscribe_msg() const {
     const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
-    return json_rpc(id, "mining.subscribe", "[\"armrx/1.0\"]");
+    const_cast<StratumClient*>(this)->handshake_req_id_ = id;
+    static const char* formats[] = {
+        "[\"armrx/1.0\"]",
+        "[\"armrx/1.0\",\"monero\"]",
+        "[]",
+        "[\"XMRig/6.21.0\"]",
+    };
+    static const char* methods[] = {
+        "mining.subscribe",
+        "mining.subscribe",
+        "mining.subscribe",
+        "mining.subscribe",
+    };
+    unsigned num_formats = 4;
+    unsigned idx = const_cast<StratumClient*>(this)->subscribe_try_ % num_formats;
+    return json_rpc(id, methods[idx], formats[idx]);
+}
+
+std::string StratumClient::build_login_msg() const {
+    const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
+    const_cast<StratumClient*>(this)->handshake_req_id_ = id;
+    return "{\"id\":" + std::to_string(id) +
+           ",\"jsonrpc\":\"2.0\"" +
+           ",\"method\":\"login\"" +
+           ",\"params\":{" +
+             "\"login\":\"" + wallet_ + "\"," +
+             "\"pass\":\"" + password_ + "\"," +
+             "\"agent\":\"armrx/1.0\"," +
+             "\"rigid\":\"\"," +
+             "\"algo\":[\"rx/0\"]" +
+           "}}\n";
 }
 
 std::string StratumClient::build_authorize_msg() const {
     const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
+    const_cast<StratumClient*>(this)->authorize_req_id_ = id;
     return json_rpc(id, "mining.authorize",
                     "[\"" + wallet_ + "\",\"" + password_ + "\"]");
 }
 
-std::string StratumClient::build_submit_msg(const Job& job,
-                                            std::uint64_t nonce) const {
+std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
+                                            const std::array<std::byte, 32>& hash) const {
     const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
-    // Monero Stratum submit: [worker, job_id, nonce_hex, result_hex]
     const std::string nonce_hex = nonce_to_hex(nonce, 4);
-    return json_rpc(id, "mining.submit",
-                    "[\"" + wallet_ + "\",\"" + job.job_id + "\",\"" +
-                    nonce_hex + "\"]");
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Network I/O
-// ─────────────────────────────────────────────────────────────────────────────
+    if (protocol_ == StratumProtocol::CRYPTONOTE) {
+        std::vector<std::byte> hash_vec(hash.begin(), hash.end());
+        const std::string result_hex = bytes_to_hex(hash_vec);
+        return "{\"id\":" + std::to_string(id) +
+               ",\"jsonrpc\":\"2.0\"" +
+               ",\"method\":\"submit\"" +
+               ",\"params\":{" +
+                 "\"id\":\"" + session_id_ + "\"," +
+                 "\"job_id\":\"" + job.job_id + "\"," +
+                 "\"nonce\":\"" + nonce_hex + "\"," +
+                 "\"result\":\"" + result_hex + "\"" +
+               "}}\n";
+    } else {
+        return json_rpc(id, "mining.submit",
+                        "[\"" + wallet_ + "\",\"" + job.job_id + "\",\"" +
+                        nonce_hex + "\"]");
+    }
+}
 
 void StratumClient::send_line(const std::string& json_line) {
     // Ensure line ends with '\n'
@@ -335,11 +468,16 @@ void StratumClient::reader_thread_fn() {
 
     // Connection lost — try to reconnect
     connected_.store(false);
-    if (reconnect_enabled_.load()) {
-        reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
-    } else {
-        if (error_callback_) {
-            error_callback_("connection closed");
+    if (!fallback_in_progress_.load()) {
+        if (reconnect_enabled_.load()) {
+            if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
+                reconnect_thread_.join();
+            }
+            reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
+        } else {
+            if (error_callback_) {
+                error_callback_("connection closed");
+            }
         }
     }
 }
@@ -349,6 +487,7 @@ void StratumClient::reader_thread_fn() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void StratumClient::handle_line(const std::string& line) {
+    std::cout << "[Stratum] << " << line << '\n';
     // Distinguish notifications (have "method") from replies (have "result")
     const bool has_method = line.find("\"method\"") != std::string::npos;
     if (has_method) {
@@ -360,6 +499,15 @@ void StratumClient::handle_line(const std::string& line) {
         else if (method == "mining.set_extranonce") {
             const auto en1 = json_get_array_first(line, "params");
             if (!en1.empty()) extra_nonce1_ = en1;
+        }
+        else if (method == "job") {
+            // CryptoNote job notification
+            const auto params_obj = json_get(line, "params");
+            const auto job_id = json_get(params_obj, "job_id");
+            const auto blob_hex = json_get(params_obj, "blob");
+            const auto target_hex = json_get(params_obj, "target");
+            const auto seed_hex = json_get(params_obj, "seed_hash");
+            process_cryptonote_job(job_id, blob_hex, target_hex, seed_hex);
         }
     } else {
         handle_reply(line);
@@ -477,68 +625,165 @@ void StratumClient::handle_set_difficulty(const std::string& line) {
 }
 
 void StratumClient::handle_reply(const std::string& line) {
-    // Check for subscribe response: result contains session info
-    // Example: {"id":1,"result":[[...],"extranonce1","extranonce2_size"],"error":null}
     const auto result = json_get(line, "result");
     const auto error  = json_get(line, "error");
-
-    if (!error.empty() && error != "null") {
-        std::cerr << "[Stratum] Server error: " << error << '\n';
-        return;
-    }
-
-    // Pool may send extranonce1 as second element of result array;
-    // skip parse complexity — rely on set_extranonce notification if needed.
-    // Simply log the reply.
     const auto id_str = json_get(line, "id");
-    if (id_str == "1") {
-        // Subscribe reply — extract extranonce1 from nested array
-        auto en1_pos = line.find("\"result\"");
-        if (en1_pos != std::string::npos) {
-            // Find the second element at depth 1 (the extranonce1 string)
-            auto outer_bracket = line.find('[', en1_pos);
-            if (outer_bracket != std::string::npos) {
-                auto inner_bracket = line.find('[', outer_bracket + 1);
-                auto comma_after_inner = line.find(']', inner_bracket != std::string::npos ? inner_bracket : outer_bracket);
-                if (comma_after_inner != std::string::npos) {
-                    auto comma = line.find(',', comma_after_inner);
-                    if (comma != std::string::npos) {
-                        ++comma;
-                        while (comma < line.size() && line[comma] == ' ') ++comma;
-                        if (comma < line.size() && line[comma] == '"') {
+
+    if (id_str == std::to_string(handshake_req_id_)) {
+        if (protocol_ == StratumProtocol::CRYPTONOTE) {
+            if (!error.empty() && error != "null") {
+                std::cerr << "[Stratum] Login failed: " << error << '\n';
+                subscribe_ok_ = false;
+                subscribe_done_.set_value(false);
+                return;
+            }
+            session_id_ = json_get(result, "id");
+            if (session_id_.empty()) {
+                std::cerr << "[Stratum] Warning: session ID is empty in login reply\n";
+            }
+            std::cout << "[Stratum] Login successful, session ID: " << session_id_ << "\n";
+            
+            const auto job_obj = json_get(result, "job");
+            if (!job_obj.empty()) {
+                const auto job_id = json_get(job_obj, "job_id");
+                const auto blob_hex = json_get(job_obj, "blob");
+                const auto target_hex = json_get(job_obj, "target");
+                const auto seed_hex = json_get(job_obj, "seed_hash");
+                process_cryptonote_job(job_id, blob_hex, target_hex, seed_hex);
+            }
+            
+            subscribe_ok_ = true;
+            subscribe_done_.set_value(true);
+            return;
+        } else {
+            // Subscribe reply — check for success or error
+            const auto sub_error  = json_get(line, "error");
+            if (!sub_error.empty() && sub_error != "null") {
+                std::cerr << "[Stratum] Subscribe rejected: " << sub_error << '\n';
+                subscribe_ok_ = false;
+                subscribe_done_.set_value(false);
+                return;
+            }
+            // Successful subscribe — extract extranonce1
+            subscribe_ok_ = true;
+            auto en1_pos = line.find("\"result\"");
+            if (en1_pos != std::string::npos) {
+                // Find the second element at depth 1 (the extranonce1 string)
+                auto outer_bracket = line.find('[', en1_pos);
+                if (outer_bracket != std::string::npos) {
+                    auto inner_bracket = line.find('[', outer_bracket + 1);
+                    auto comma_after_inner = line.find(']', inner_bracket != std::string::npos ? inner_bracket : outer_bracket);
+                    if (comma_after_inner != std::string::npos) {
+                        auto comma = line.find(',', comma_after_inner);
+                        if (comma != std::string::npos) {
                             ++comma;
-                            std::string en1;
-                            while (comma < line.size() && line[comma] != '"') {
-                                en1.push_back(line[comma++]);
-                            }
-                            if (!en1.empty()) {
-                                extra_nonce1_ = en1;
-                                std::cout << "[Stratum] Subscribe OK; extra_nonce1=" << en1 << '\n';
+                            while (comma < line.size() && line[comma] == ' ') ++comma;
+                            if (comma < line.size() && line[comma] == '"') {
+                                ++comma;
+                                std::string en1;
+                                while (comma < line.size() && line[comma] != '"') {
+                                    en1.push_back(line[comma++]);
+                                }
+                                if (!en1.empty()) {
+                                    extra_nonce1_ = en1;
+                                    std::cout << "[Stratum] Subscribe OK; extra_nonce1=" << en1 << '\n';
+                                }
                             }
                         }
                     }
                 }
             }
+            subscribe_done_.set_value(true);
+            return;
+        }
+    }
+
+    if (id_str == std::to_string(authorize_req_id_)) {
+        if (!error.empty() && error != "null") {
+            std::cerr << "[Stratum] Authorize failed: " << error << '\n';
+        } else {
+            std::cout << "[Stratum] Authorize " << (result == "true" ? "OK" : "FAILED") << '\n';
         }
         return;
     }
 
-    if (id_str == "2") {
-        std::cout << "[Stratum] Authorize " << (result == "true" ? "OK" : "FAILED") << '\n';
+    // Keepalive response or duplicate handshake
+    if (line.find("KEEPALIVED") != std::string::npos || result == "{\"status\":\"KEEPALIVED\"}" || result == "KEEPALIVED") {
         return;
     }
 
     // Submit reply
-    if (result == "true") {
+    if (result == "true" || result == "{\"status\":\"OK\"}" || line.find("\"status\":\"OK\"") != std::string::npos) {
         std::cout << "[Stratum] Share accepted!\n";
     } else if (!result.empty() && result != "null") {
         std::cerr << "[Stratum] Share rejected: " << result << '\n';
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Reconnect loop
-// ─────────────────────────────────────────────────────────────────────────────
+void StratumClient::process_cryptonote_job(const std::string& job_id,
+                                           const std::string& blob_hex,
+                                           const std::string& target_hex,
+                                           const std::string& seed_hex) {
+    if (job_id.empty() || blob_hex.empty()) return;
+
+    Job job;
+    job.job_id = job_id;
+    job.block_template = hex_to_bytes(blob_hex);
+    job.nonce_offset = 39; // Monero: nonce at byte 39 of blob
+    job.nonce_size = 4;
+
+    if (!seed_hex.empty()) {
+        job.seed_key = hex_to_bytes(seed_hex);
+    }
+
+    if (target_hex.size() == 8) {
+        const auto compact = hex_to_bytes(target_hex);
+        std::fill(job.target.bytes.begin(), job.target.bytes.end(), std::byte{0xFF});
+        if (compact.size() == 4) {
+            std::copy(compact.begin(), compact.end(),
+                      job.target.bytes.end() - 4);
+        }
+    } else if (target_hex.size() == 64) {
+        const auto bytes = hex_to_bytes(target_hex);
+        if (bytes.size() == 32) {
+            std::copy(bytes.begin(), bytes.end(), job.target.bytes.begin());
+        }
+    } else {
+        std::lock_guard lock(target_mutex_);
+        job.target = current_target_;
+    }
+
+    {
+        std::lock_guard lock(target_mutex_);
+        current_target_ = job.target;
+    }
+
+    std::cout << "[Stratum] New job (CryptoNote): " << job_id
+              << " blob=" << job.block_template.size() << " bytes\n";
+
+    if (job_callback_) job_callback_(job);
+}
+
+void StratumClient::keepalive_loop() {
+    while (connected_.load()) {
+        for (int i = 0; i < 30 && connected_.load(); ++i) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        if (!connected_.load()) break;
+
+        if (protocol_ == StratumProtocol::CRYPTONOTE) {
+            const auto id = request_id_.fetch_add(1);
+            std::string msg = "{\"id\":" + std::to_string(id) +
+                              ",\"jsonrpc\":\"2.0\"" +
+                              ",\"method\":\"keepalived\"" +
+                              ",\"params\":{" +
+                                "\"id\":\"" + session_id_ + "\"" +
+                              "}}\n";
+            std::lock_guard lock(send_mutex_);
+            send_line(msg);
+        }
+    }
+}
 
 void StratumClient::reconnect_loop() {
     unsigned delay = base_delay_ms_;

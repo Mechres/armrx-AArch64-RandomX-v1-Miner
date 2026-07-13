@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-13 (CryptoNote/Herominers Stratum support)
+
+### Added
+- **CryptoNote Stratum Protocol support** (`src/stratum_client.cpp`, `include/armrx/stratum_client.hpp`): Added support for the CryptoNote JSON-RPC stratum protocol (including `login`, `keepalived`, and `submit` methods).
+- **Auto-fallback handshake** (`src/stratum_client.cpp`): Added automatic fallback from Stratum V1 (`mining.subscribe`) to CryptoNote (`login`) when the pool rejects Stratum V1.
+- **Improved JSON parsing** (`src/stratum_client.cpp`): Fixed `json_get` helper to support parsing nested JSON objects and arrays correctly by scanning matching brace/bracket depths.
+- **Stable keepalive handling** (`src/stratum_client.cpp`): Suppressed keepalive responses (`KEEPALIVED`) in the share submission response handler to avoid treating them as rejected shares.
+- **Race-free fallback connection lifecycle** (`src/stratum_client.cpp`, `include/armrx/stratum_client.hpp`): Introduced `fallback_in_progress_` state to prevent redundant reconnect triggers and duplicate client threads during handshake fallback.
+- **SIGPIPE signal ignore** (`src/main.cpp`): Ignore `SIGPIPE` globally to prevent OpenSSL shutdown alert writes to closed socket descriptors from abruptly terminating the program.
+
 ## 2026-07-13 (CPU affinity + per-worker counters + pool failover)
 
 ### Added

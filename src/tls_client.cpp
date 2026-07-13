@@ -61,8 +61,17 @@ bool TlsClient::connect(int fd, const std::string& host) {
 
     const int ret = SSL_connect(ssl_.get());
     if (ret != 1) {
-        std::cerr << "[TLS] Handshake failed: "
-                  << ERR_reason_error_string(ERR_get_error()) << '\n';
+        const int ssl_err = SSL_get_error(ssl_.get(), ret);
+        const unsigned long sys_err = ERR_get_error();
+        std::string reason;
+        if (ssl_err == SSL_ERROR_SYSCALL) {
+            reason = std::strerror(errno);
+        } else if (sys_err != 0) {
+            reason = ERR_reason_error_string(sys_err);
+        } else {
+            reason = "SSL_error=" + std::to_string(ssl_err);
+        }
+        std::cerr << "[TLS] Handshake failed: " << reason << '\n';
         ssl_.reset();
         return false;
     }

@@ -53,6 +53,9 @@ std::string hash_to_hex(const std::array<std::byte, 32>& hash) {
 
 int main(int argc, char** argv) {
     std::signal(SIGINT, signal_handler);
+#ifdef SIGPIPE
+    std::signal(SIGPIPE, SIG_IGN);
+#endif
 
     const auto cpu    = armrx::detect_cpu_features();
     const auto memory = armrx::available_memory();
@@ -149,6 +152,15 @@ int main(int argc, char** argv) {
 
         if (argument.rfind("--password=", 0) == 0) {
             pool_password = std::string{argument.substr(11)};
+            continue;
+        }
+
+        if (argument == "--tls") {
+            pool_tls = true;
+            continue;
+        }
+        if (argument == "--no-tls") {
+            pool_tls = false;
             continue;
         }
 
@@ -365,10 +377,10 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             ++elapsed_sec;
 
-            // Pool failover: if disconnected and retries exhausted, try next
+            // Pool failover: only after the reconnect loop has exhausted its retries
             if (!stratum->is_connected() && failover_cooldown == 0) {
                 const auto retries = stratum->reconnect_attempts();
-                if (retries >= 5 || (retries > 0 && !stratum->is_connected())) {
+                if (retries >= 5) { // max_retries_ = 5, reconnect gives up after 5th attempt
                     current_pool_idx = (current_pool_idx + 1) % pool_list.size();
                     std::cerr << "[Stratum] Failing over to "
                               << get_pool_name(current_pool_idx) << '\n';

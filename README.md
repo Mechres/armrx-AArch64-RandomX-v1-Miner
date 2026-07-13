@@ -49,13 +49,13 @@ Provide an AArch64 CMake toolchain file and leave `ARMRX_ENABLE_NATIVE` off.
 | `--difficulty` | `100` | Target share difficulty |
 | `--seconds` | `10` | Duration (`0` = indefinite) |
 
-### 3. Pool Mining (Stratum V1)
+### 3. Pool Mining (Stratum V1 / CryptoNote)
 ```sh
 ./build/armrx --pool=pool.example.com:3333 --wallet=<YOUR_WALLET> [--password=x] [--mode=auto] [--workers=N]
 ```
 
-Disconnects are **automatically retried** with exponential backoff
-(1s → 2s → … → 30s max).
+Supports standard Stratum V1 and automatically falls back to the **CryptoNote protocol** (such as `herominers.com`) if the pool rejects Stratum V1.
+Disconnects are **automatically retried** with exponential backoff (1s → 2s → … → 30s max).
 
 ---
 
@@ -112,7 +112,7 @@ TCP connection to any Monero-compatible pool with:
 | Interpreted VM (register file, bytecode, scratchpad, final hash) | ✅ |
 | Multi-threaded worker pool + target comparison + mode selection | ✅ |
 | AArch64 JIT backend (ASM + JIT compiler + virtual memory) | ✅ verified on hardware |
-| Stratum V1 client (subscribe, authorize, notify, submit) | ✅ |
+| Stratum V1 / CryptoNote client (subscribe, authorize, notify, submit) | ✅ |
 | **Auto-reconnect with backoff** | ✅ |
 
 All reference test vectors pass:

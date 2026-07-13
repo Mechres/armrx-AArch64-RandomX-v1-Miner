@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -16,6 +17,12 @@
 #endif
 
 namespace armrx {
+
+enum class StratumProtocol {
+    AUTO,
+    STRATUM_V1,
+    CRYPTONOTE
+};
 
 /**
  * Stratum V1 protocol client for Monero (RandomX) pool mining.
@@ -108,8 +115,10 @@ private:
 
     // --- stratum message builders ---
     std::string build_subscribe_msg() const;
+    std::string build_login_msg() const;
     std::string build_authorize_msg() const;
-    std::string build_submit_msg(const Job& job, std::uint64_t nonce) const;
+    std::string build_submit_msg(const Job& job, std::uint64_t nonce,
+                                 const std::array<std::byte, 32>& hash) const;
 
     // --- stratum message handlers ---
     void handle_line(const std::string& line);
@@ -119,6 +128,13 @@ private:
     void handle_reply(const std::string& line);
 
     // --- helpers ---
+    void close_connection();
+    void process_cryptonote_job(const std::string& job_id,
+                                const std::string& blob_hex,
+                                const std::string& target_hex,
+                                const std::string& seed_hex);
+    void keepalive_loop();
+
     static std::vector<std::byte> hex_to_bytes(const std::string& hex);
     static std::string bytes_to_hex(const std::vector<std::byte>& bytes);
     static std::string nonce_to_hex(std::uint64_t nonce, std::size_t bytes = 4);
@@ -155,6 +171,11 @@ private:
     // Read buffer (line accumulator)
     std::string read_buf_;
 
+    // Handshake synchronization
+    std::promise<bool> subscribe_done_;
+    bool subscribe_ok_{false};
+    unsigned subscribe_try_{0};  // which subscribe format to try next
+
     // Reconnect configuration
     unsigned max_retries_{10};
     unsigned base_delay_ms_{1000};
@@ -167,6 +188,13 @@ private:
 #ifdef ARMRX_HAVE_TLS
     std::unique_ptr<TlsClient> tls_;
 #endif
+
+    // CryptoNote and fallback tracking
+    StratumProtocol protocol_{StratumProtocol::AUTO};
+    std::uint64_t handshake_req_id_{0};
+    std::uint64_t authorize_req_id_{0};
+    std::thread keepalive_thread_;
+    std::atomic<bool> fallback_in_progress_{false};
 };
 
 /** Default reconnect config constant. */
