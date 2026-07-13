@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <iostream>
 #include <iomanip>
+#include <sys/mman.h>
 
 namespace armrx {
 namespace {
@@ -155,6 +156,8 @@ static std::uint32_t map_to_randomx_flags(std::uint32_t flags) {
 
 VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
     scratchpad_.resize(2097152U); // 2 MiB Scratchpad
+    // Hint to kernel: promote to transparent huge pages (2 MiB) for TLB efficiency
+    ::madvise(scratchpad_.data(), scratchpad_.size(), MADV_HUGEPAGE);
 #ifdef ARMRX_HAVE_JIT
     if (flags_ & kRandOMXFlagJit) {
         jit_ = std::make_unique<JitCompilerA64>();

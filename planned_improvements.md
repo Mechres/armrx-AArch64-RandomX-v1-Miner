@@ -1,10 +1,10 @@
 ## Performance Optimizations
 
-### 1. Scratchpad — Huge Pages (2 MiB THP)
-Each worker allocates a 2 MiB scratchpad. Using Linux Transparent Huge Pages (`madvise(MADV_HUGEPAGE)`) can reduce TLB pressure significantly on AArch64, especially when running many workers.
+### 1. Scratchpad — Huge Pages (2 MiB THP) ✅
+**Complete.** `madvise(MADV_HUGEPAGE)` applied after each 2 MiB scratchpad allocation in `VirtualMachine` constructor. The kernel promotes the pages to 2 MiB transparent huge pages, reducing TLB pressure on AArch64.
 
-### 2. Parallel Dataset Generation (Fast Mode)
-[`src/dataset.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/dataset.cpp) generates the 2 GiB dataset sequentially. Splitting the 32 M item range across threads (one thread per core) during fast-mode init can cut initialization time from minutes to seconds.
+### 2. Parallel Dataset Generation (Fast Mode) ✅
+**Already implemented.** `MiningEngine::set_job()` in `src/mining_engine.cpp` splits the 32M-item range across `hardware_concurrency()` threads, each calling `initialize_dataset()` on a disjoint sub-range. All cache/program access is read-only, so no synchronization needed.
 
 ### 3. NEON SIMD for SuperscalarHash
 The SuperscalarHash inner loop in [`src/superscalar.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/superscalar.cpp) executes a simulated 4-issue superscalar pipeline. AArch64 NEON can vectorize many of the multiply/add operations across multiple items simultaneously.
@@ -77,13 +77,13 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | Priority | Item | Impact | Effort |
 |---|---|---|---|
 | ~~✅ 🔴 **1**~~ | ~~Verify JIT on real AArch64 hardware (done)~~ | | |
+| ~~🔴 **2**~~ | ~~Auto-reconnect with backoff (done)~~ | | |
+| ~~🟡 **4**~~ | ~~Huge pages for scratchpads (done)~~ | | |
+| ~~🟡 **2**~~ | ~~Parallel dataset generation (already implemented)~~ | | |
 | 🔴 **1** | TLS/SSL pool connections | Production-readiness | Medium |
-| 🔴 **2** | Auto-reconnect with backoff | Production-readiness | Low |
-| 🟡 **3** | Parallel dataset generation | Fast-mode speed | Medium |
-| 🟡 **4** | Huge pages for scratchpads | H/s per thread | Low |
-| 🟡 **5** | CPU affinity pinning | H/s stability | Low |
-| 🟢 **6** | Per-worker H/s + share counters | Observability | Low |
-| 🟢 **7** | Multiple pool failover | Resilience | Low |
-| 🟢 **8** | Config file | UX | Medium |
-| ⚪ **9** | Stratum V2 | Future-proofing | High |
+| 🟡 **2** | CPU affinity pinning | H/s stability | Low |
+| 🟢 **3** | Per-worker H/s + share counters | Observability | Low |
+| 🟢 **4** | Multiple pool failover | Resilience | Low |
+| 🟢 **5** | Config file | UX | Medium |
+| ⚪ **6** | Stratum V2 | Future-proofing | High |
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-13 (README restructure + auto-reconnect + huge pages)
+
+### Added
+- **Auto-reconnect with exponential backoff** (`src/stratum_client.cpp`): When the pool connection drops, the client now automatically retries with 1s → 2s → 4s → … → 30s cap backoff, configurable via `set_reconnect_config(max_retries, base_delay_ms)`. Error callback is only called after all retries are exhausted (default: 10 retries, then give up).
+- **Huge pages for scratchpads** (`src/vm.cpp`): `madvise(MADV_HUGEPAGE)` applied after each 2 MiB scratchpad allocation, prompting the kernel to promote to transparent huge pages for reduced TLB pressure.
+
+### Modified
+- **`README.md`**: Full restructure — badges header, Quick Start / Usage / Architecture / Status sections with tables, tighter prose (~40% shorter). Replaced verbose "Implementation order" with a component checklist.
+- **`include/armrx/stratum_client.hpp`**: Added `set_reconnect_config()`, `reconnect_attempts()` getter, `reconnect_loop()` private method, and backoff state members.
+- **`src/main.cpp`**: Pool loop now runs `while (keep_running)` regardless of connection state. Status line shows yellow "Reconnecting (attempt N)..." when offline. Initial connection failure no longer exits — reconnect loop handles retries.
+- **`planned_improvements.md`**: Marked auto-reconnect and huge pages as complete; renumbered priority table.
+
 ## 2026-07-13 (AArch64 build verification + JIT fixes)
 
 ### Added
