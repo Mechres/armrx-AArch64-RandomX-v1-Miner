@@ -3,8 +3,10 @@
 #include "armrx/memory.hpp"
 #include "armrx/randomx_config.hpp"
 #include "armrx/mining_engine.hpp"
+#include "armrx/stratum_client.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <iostream>
 #include <stdexcept>
@@ -30,7 +32,7 @@ armrx::Target difficulty_to_target(std::uint64_t diff) {
     std::uint64_t remainder = 0;
     for (int i = 31; i >= 0; --i) {
         std::uint64_t val = (remainder << 8) | 0xff;
-        target.bytes[i] = static_cast<std::byte>(val / diff);
+        target.bytes[static_cast<std::size_t>(i)] = static_cast<std::byte>(val / diff);
         remainder = val % diff;
     }
     return target;
@@ -52,9 +54,9 @@ std::string hash_to_hex(const std::array<std::byte, 32>& hash) {
 int main(int argc, char** argv) {
     std::signal(SIGINT, signal_handler);
 
-    const auto cpu = armrx::detect_cpu_features();
+    const auto cpu    = armrx::detect_cpu_features();
     const auto memory = armrx::available_memory();
-    auto workers = std::max(1U, std::thread::hardware_concurrency());
+    auto workers      = std::max(1U, std::thread::hardware_concurrency());
     bool mode_is_auto = true;
     armrx::RandomXMode requested_mode = armrx::RandomXMode::light;
     bool should_init_cache = false;
@@ -63,6 +65,13 @@ int main(int argc, char** argv) {
     bool should_mine = false;
     std::uint64_t difficulty = 100;
     unsigned int runtime_seconds = 10;
+
+    // Pool / stratum options
+    bool should_connect_pool = false;
+    std::string pool_host;
+    std::uint16_t pool_port = 3333;
+    std::string pool_wallet;
+    std::string pool_password = "x";
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument{argv[i]};
@@ -113,16 +122,50 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        // ── Pool / stratum arguments ──────────────────────────────────────
+        if (argument.rfind("--pool=", 0) == 0) {
+            // Format: --pool=host:port  or  --pool=host  (default port 3333)
+            should_connect_pool = true;
+            std::string addr{argument.substr(7)};
+            const auto colon = addr.rfind(':');
+            if (colon != std::string::npos) {
+                pool_host = addr.substr(0, colon);
+                pool_port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
+            } else {
+                pool_host = std::move(addr);
+            }
+            continue;
+        }
+
+        if (argument.rfind("--wallet=", 0) == 0) {
+            pool_wallet = std::string{argument.substr(9)};
+            continue;
+        }
+
+        if (argument.rfind("--password=", 0) == 0) {
+            pool_password = std::string{argument.substr(11)};
+            continue;
+        }
+
         if (argument == "--help" || argument == "-h") {
-            std::cout << "Usage: armrx [options]\n"
-                      << "Options:\n"
-                      << "  --mode=auto|light|fast     Select execution mode (default: auto)\n"
-                      << "  --workers=N                Set thread count (default: all online cores)\n"
-                      << "  --init-cache <key>         Perform Argon2d cache initialization benchmark\n"
-                      << "  --mine                     Start local RandomX miner benchmark\n"
-                      << "  --difficulty=N             Set miner target difficulty (default: 100)\n"
-                      << "  --seconds=S                Duration to run benchmark in seconds, 0 for infinite (default: 10)\n"
-                      << "  -h, --help                 Display this help menu\n";
+            std::cout
+                << "Usage: armrx [options]\n"
+                << "Options:\n"
+                << "  --mode=auto|light|fast     Select execution mode (default: auto)\n"
+                << "  --workers=N                Set thread count (default: all online cores)\n"
+                << "  --init-cache <key>         Perform Argon2d cache initialization benchmark\n"
+                << "\n"
+                << "Local benchmark:\n"
+                << "  --mine                     Start local RandomX miner benchmark\n"
+                << "  --difficulty=N             Set miner target difficulty (default: 100)\n"
+                << "  --seconds=S                Duration to run benchmark in seconds, 0 for infinite (default: 10)\n"
+                << "\n"
+                << "Pool mining (Stratum V1):\n"
+                << "  --pool=host[:port]         Pool address (default port: 3333)\n"
+                << "  --wallet=<address>         Monero wallet address (worker login)\n"
+                << "  --password=<pw>            Worker password (default: x)\n"
+                << "\n"
+                << "  -h, --help                 Display this help menu\n";
             return 0;
         }
 
@@ -130,7 +173,7 @@ int main(int argc, char** argv) {
         return 64;
     }
 
-    const auto automatic = armrx::choose_randomx_mode(memory.available_bytes, workers);
+    const auto automatic     = armrx::choose_randomx_mode(memory.available_bytes, workers);
     const auto effective_mode = mode_is_auto ? automatic.mode : requested_mode;
     const auto required_bytes = mode_is_auto
         ? automatic.required_bytes
@@ -138,8 +181,8 @@ int main(int argc, char** argv) {
               + armrx::kAutoModeSafetyReserve;
 
     std::cout << "armrx " << (cpu.aarch64 ? "AArch64" : "non-AArch64") << '\n'
-              << "AES: " << (cpu.aes ? "available" : "unavailable") << '\n'
-              << "CRC32: " << (cpu.crc32 ? "available" : "unavailable") << '\n'
+              << "AES: "  << (cpu.aes  ? "available" : "unavailable") << '\n'
+              << "CRC32: "<< (cpu.crc32 ? "available" : "unavailable") << '\n'
               << "RandomX light shared memory: "
               << armrx::randomx_shared_memory(armrx::RandomXMode::light) / (1024U * 1024U)
               << " MiB\n"
@@ -151,7 +194,8 @@ int main(int argc, char** argv) {
               << "Selected mode (" << workers << " workers): " << armrx::mode_name(effective_mode)
               << " (requires " << required_bytes / (1024U * 1024U) << " MiB including reserve)\n";
 
-    if (!mode_is_auto && effective_mode == armrx::RandomXMode::fast && memory.available_bytes < required_bytes) {
+    if (!mode_is_auto && effective_mode == armrx::RandomXMode::fast
+        && memory.available_bytes < required_bytes) {
         std::cerr << "Requested fast mode does not fit in available memory.\n";
         return 2;
     }
@@ -170,27 +214,25 @@ int main(int argc, char** argv) {
         std::cout << "Cache initialized in " << elapsed.count() << " seconds.\n";
     }
 
+    // ── Local benchmark ──────────────────────────────────────────────────────
     if (should_mine) {
         std::cout << "\nStarting miner benchmark (Target difficulty: " << difficulty << ")\n";
         armrx::Job job;
         job.job_id = "local_benchmark_job";
-        // 76-byte block template (typical Monero block size)
         job.block_template.resize(76, std::byte{0});
-        // Seed value for "test key 000"
         std::string seed = "test key 000";
         job.seed_key.reserve(seed.size());
-        for (char c : seed) {
-            job.seed_key.push_back(static_cast<std::byte>(c));
-        }
+        for (char c : seed) job.seed_key.push_back(static_cast<std::byte>(c));
         job.nonce_offset = 39;
-        job.nonce_size = 4;
-        job.target = difficulty_to_target(difficulty);
+        job.nonce_size   = 4;
+        job.target       = difficulty_to_target(difficulty);
 
         armrx::MiningEngine engine(effective_mode, workers);
         engine.set_job(job);
 
         std::atomic<std::uint64_t> shares_found{0};
-        auto share_callback = [&shares_found](const armrx::Job& j, std::uint64_t nonce, std::array<std::byte, 32> hash) {
+        auto share_callback = [&shares_found](const armrx::Job& j, std::uint64_t nonce,
+                                               std::array<std::byte, 32> hash) {
             shares_found.fetch_add(1, std::memory_order_relaxed);
             std::cout << "[Mining] Valid share found! Job: " << j.job_id
                       << " | Nonce: " << std::hex << nonce
@@ -200,29 +242,107 @@ int main(int argc, char** argv) {
         engine.start(share_callback);
         std::cout << "Mining started. Press Ctrl+C to stop.\n";
 
-        auto start_time = std::chrono::steady_clock::now();
-        unsigned int elapsed_seconds = 0;
+        auto start_time      = std::chrono::steady_clock::now();
+        unsigned elapsed_sec = 0;
 
-        while (keep_running && (runtime_seconds == 0 || elapsed_seconds < runtime_seconds)) {
+        while (keep_running && (runtime_seconds == 0 || elapsed_sec < runtime_seconds)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            elapsed_seconds = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
+            elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count());
 
-            double speed = engine.hash_rate();
-            std::uint64_t total = engine.total_hashes();
-            std::uint64_t shares = shares_found.load();
+            const double speed       = engine.hash_rate();
+            const std::uint64_t total  = engine.total_hashes();
+            const std::uint64_t shares = shares_found.load();
 
             std::cout << "[Mining] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                       << " | Shares: " << shares
                       << " | Total Hashes: " << total
-                      << " | Time: " << elapsed_seconds << "s\r" << std::flush;
+                      << " | Time: " << elapsed_sec << "s\r" << std::flush;
         }
         std::cout << std::endl;
-
         engine.stop();
         std::cout << "Mining benchmark complete.\n"
                   << "Total Hashes computed: " << engine.total_hashes() << "\n"
-                  << "Final Shares found: " << shares_found.load() << "\n";
+                  << "Final Shares found: "    << shares_found.load()    << "\n";
+    }
+
+    // ── Pool mining ──────────────────────────────────────────────────────────
+    if (should_connect_pool) {
+        if (pool_wallet.empty()) {
+            std::cerr << "Pool mining requires --wallet=<address>\n";
+            return 64;
+        }
+        if (pool_host.empty()) {
+            std::cerr << "Pool mining requires --pool=<host>[:port]\n";
+            return 64;
+        }
+
+        std::cout << "\nStarting pool miner — connecting to "
+                  << pool_host << ':' << pool_port << '\n';
+
+        armrx::MiningEngine engine(effective_mode, workers);
+
+        // Share callback: forward found shares to pool
+        armrx::StratumClient stratum(pool_host, pool_port, pool_wallet, pool_password);
+
+        std::atomic<std::uint64_t> shares_submitted{0};
+        std::atomic<std::uint64_t> total_hashes_snapshot{0};
+
+        auto share_callback = [&](const armrx::Job& job, std::uint64_t nonce,
+                                  std::array<std::byte, 32> hash) {
+            shares_submitted.fetch_add(1, std::memory_order_relaxed);
+            std::cout << "[Pool] Share found! Nonce: " << std::hex << nonce
+                      << " Hash: " << hash_to_hex(hash) << std::dec << '\n';
+            stratum.submit_share(job, nonce, hash);
+        };
+
+        // Job callback: push new jobs from pool into the mining engine
+        stratum.set_job_callback([&](const armrx::Job& job) {
+            engine.set_job(job);
+        });
+
+        // Error callback: print disconnect/error messages
+        stratum.set_error_callback([](const std::string& reason) {
+            std::cerr << "[Stratum] Disconnected: " << reason << '\n';
+        });
+
+        engine.start(share_callback);
+
+        try {
+            stratum.connect();
+        } catch (const std::exception& ex) {
+            std::cerr << "[Stratum] Connection failed: " << ex.what() << '\n';
+            engine.stop();
+            return 1;
+        }
+
+        std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
+
+        auto start_time      = std::chrono::steady_clock::now();
+        unsigned elapsed_sec = 0;
+
+        while (keep_running && stratum.is_connected()) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - start_time).count());
+
+            const double speed  = engine.hash_rate();
+            const auto total    = engine.total_hashes();
+            const auto shares   = shares_submitted.load();
+
+            std::cout << "[Pool] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
+                      << " | Shares submitted: " << shares
+                      << " | Total hashes: "     << total
+                      << " | Uptime: "            << elapsed_sec << "s\r" << std::flush;
+        }
+        std::cout << std::endl;
+
+        stratum.disconnect();
+        engine.stop();
+
+        std::cout << "Pool mining stopped.\n"
+                  << "Total hashes:     " << engine.total_hashes()     << "\n"
+                  << "Shares submitted: " << shares_submitted.load()    << "\n";
     }
 
     return cpu.aarch64 ? 0 : 2;

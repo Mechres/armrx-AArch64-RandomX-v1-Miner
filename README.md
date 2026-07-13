@@ -65,6 +65,19 @@ Options:
 - `--difficulty=D`: Targets a specific share difficulty threshold (default: `100`).
 - `--seconds=S`: Configures benchmark duration in seconds; `0` runs indefinitely until `Ctrl+C` (default: `10`).
 
+### 3. Pool Mining (Stratum V1)
+Connect directly to any Monero-compatible Stratum pool:
+
+```sh
+./build/armrx --pool=pool.example.com:3333 --wallet=<YOUR_WALLET_ADDRESS> [--password=x] [--mode=auto] [--workers=N]
+```
+
+Options:
+- `--pool=host[:port]`: Pool address and optional port (default: `3333`).
+- `--wallet=<address>`: Your Monero wallet address used as the worker login.
+- `--password=<pw>`: Worker password (default: `x`, most pools ignore this).
+- All `--mode` and `--workers` options apply to pool mining as well.
+
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
@@ -72,7 +85,7 @@ Options:
 3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
 4. Multi-threaded worker pool, nonce partitioning, difficulty target comparison, cache/dataset lifecycle, and automatic mode selection (complete).
 5. AArch64 JIT backend (hardware AES + NEON intrinsics, JIT compiler, `virtual_memory` allocator, and `ARMRX_HAVE_JIT` guard) — complete on AArch64 targets; silently falls back to interpreted mode on other architectures.
-6. Stratum client, work scheduling, nonce partitioning, and share submission.
+6. Stratum V1 client (`src/stratum_client.cpp`) — TCP connection to XMR pool, `mining.subscribe`, `mining.authorize`, `mining.notify` job dispatch, `mining.set_target` / `mining.set_difficulty` updates, `mining.submit` share submission — complete.
 
 The implementation must pass the official RandomX test vectors before any pool
 networking is enabled.

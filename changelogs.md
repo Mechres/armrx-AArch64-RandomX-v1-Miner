@@ -39,3 +39,29 @@
 
 ### Fixed
 - Fixed stray `c` prefix character on `aes_encrypt_round` function declaration in `src/aes.cpp`.
+
+## 2026-07-13 (Stratum V1 Client)
+
+### Added
+- **`include/armrx/stratum_client.hpp`**: Declared `StratumClient` class implementing Monero Stratum V1 protocol. Exposes `connect()`, `disconnect()`, `submit_share()`, `set_job_callback()`, and `set_error_callback()`.
+- **`src/stratum_client.cpp`**: Full Stratum V1 implementation:
+  - TCP socket connection via POSIX `getaddrinfo` / `connect`, with `TCP_NODELAY` for low-latency share submission.
+  - Background reader thread that accumulates line-delimited JSON messages from the pool.
+  - `mining.subscribe` — sends agent string, extracts `extranonce1` from pool reply.
+  - `mining.authorize` — authenticates wallet address and password with the pool.
+  - `mining.notify` — parses job ID, block template blob, target, and seed hash; dispatches via `JobCallback`.
+  - `mining.set_target` — updates 32-byte target from 64-char hex string.
+  - `mining.set_difficulty` — converts numeric difficulty to 32-byte target using the same `2^256 / D` algorithm as the local miner.
+  - `mining.submit` — serialises nonce as little-endian hex and sends a JSON-RPC submit message.
+  - Minimal hand-rolled JSON extractor (no external library dependency).
+- **`src/main.cpp`**: Added pool mining mode with three new CLI flags:
+  - `--pool=host[:port]` — pool server address (default port 3333).
+  - `--wallet=<address>` — Monero wallet address used as worker login.
+  - `--password=<pw>` — pool worker password (default `x`).
+  - `--help` updated to document pool mining section.
+  - Pool mode wires `StratumClient::set_job_callback` → `MiningEngine::set_job`, and `MiningEngine::ShareCallback` → `StratumClient::submit_share`, with a live H/s status line.
+
+### Modified
+- **`CMakeLists.txt`**: Added `src/stratum_client.cpp` to `armrx_core` source list.
+- **`README.md`**: Added **§3 Pool Mining (Stratum V1)** usage section; marked step 6 as complete in the implementation order list.
+

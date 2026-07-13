@@ -18,6 +18,7 @@ add_library(armrx_core
     src/vm.cpp
     src/aes_hash.cpp
     src/mining_engine.cpp
+    src/stratum_client.cpp
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|aarch64_be")
