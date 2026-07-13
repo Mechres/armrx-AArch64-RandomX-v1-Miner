@@ -1,6 +1,6 @@
 #pragma once
 
-#include "armrx/instruction.hpp"
+#include "armrx/program.hpp"
 #include "armrx/aes_hash.hpp"
 #include "armrx/argon2.hpp"
 #include <array>
@@ -9,6 +9,10 @@
 #include <memory>
 #include <span>
 #include <vector>
+
+#ifdef ARMRX_HAVE_JIT
+#include "armrx/jit_compiler_a64.hpp"
+#endif
 
 namespace armrx {
 
@@ -49,6 +53,7 @@ struct InstructionByteCode {
 inline constexpr std::uint32_t kRandOMXFlagDefault = 0U;
 inline constexpr std::uint32_t kRandOMXFlagFullMem = 32U;
 inline constexpr std::uint32_t kRandOMXFlagHardAes = 16U;
+inline constexpr std::uint32_t kRandOMXFlagJit     = 4U;
 
 class VirtualMachine {
 public:
@@ -100,7 +105,7 @@ private:
     RegisterFile reg_{};
 
     // Compiled Bytecode & Program
-    std::array<Instruction, 256> program_{};
+    Program program_{};
     std::array<std::uint64_t, 16> entropy_{};
     std::array<InstructionByteCode, 256> bytecode_{};
     int register_usage_[8] = {-1};
@@ -110,6 +115,10 @@ private:
 
     // Temporary storage for hashing pipeline
     AesState temp_hash_{};
+
+#ifdef ARMRX_HAVE_JIT
+    std::unique_ptr<JitCompilerA64> jit_;
+#endif
 };
 
 // Top-level public interface for hash calculations

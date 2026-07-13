@@ -137,10 +137,30 @@ static inline bool isZeroOrPowerOf2(std::uint64_t x) {
     return (x & (x - 1)) == 0;
 }
 
+static std::uint32_t map_to_randomx_flags(std::uint32_t flags) {
+    std::uint32_t rx_flags = 0;
+    if (flags & kRandOMXFlagFullMem) {
+        rx_flags |= 4; // RANDOMX_FLAG_FULL_MEM
+    }
+    if (flags & kRandOMXFlagHardAes) {
+        rx_flags |= 2; // RANDOMX_FLAG_HARD_AES
+    }
+    if (flags & kRandOMXFlagJit) {
+        rx_flags |= 8; // RANDOMX_FLAG_JIT
+    }
+    return rx_flags;
+}
+
 } // namespace
 
 VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
     scratchpad_.resize(2097152U); // 2 MiB Scratchpad
+#ifdef ARMRX_HAVE_JIT
+    if (flags_ & kRandOMXFlagJit) {
+        jit_ = std::make_unique<JitCompilerA64>();
+        jit_->setFlags(map_to_randomx_flags(flags_));
+    }
+#endif
 }
 
 VirtualMachine::~VirtualMachine() = default;
@@ -599,7 +619,7 @@ void VirtualMachine::compile_instruction(const Instruction& instr, int i, Instru
 void VirtualMachine::compile_program() {
     std::fill(std::begin(register_usage_), std::end(register_usage_), -1);
     for (std::size_t i = 0; i < 256; ++i) {
-        compile_instruction(program_[i], static_cast<int>(i), bytecode_[i]);
+        compile_instruction(program_(i), static_cast<int>(i), bytecode_[i]);
     }
 }
 
@@ -764,13 +784,50 @@ void VirtualMachine::run(const void* seed) {
     std::memcpy(program_seed.data(), seed, 64);
     AesGenerator4R gen{program_seed};
 
-    std::array<std::byte, sizeof(entropy_) + sizeof(program_)> prog_bytes{};
+    std::array<std::byte, sizeof(entropy_) + sizeof(program_.program_buffer_)> prog_bytes{};
     gen.fill(prog_bytes);
 
     std::memcpy(entropy_.data(), prog_bytes.data(), sizeof(entropy_));
-    std::memcpy(program_.data(), prog_bytes.data() + sizeof(entropy_), sizeof(program_));
+    std::memcpy(program_.program_buffer_.data(), prog_bytes.data() + sizeof(entropy_), sizeof(program_.program_buffer_));
 
     initialize_vm_state();
+
+#ifdef ARMRX_HAVE_JIT
+    if (jit_) {
+        // Build ProgramConfiguration from the initialized VM state
+        ProgramConfiguration config{};
+        config.eMask[0] = e_mask_[0];
+        config.eMask[1] = e_mask_[1];
+        config.readReg0 = read_reg0_;
+        config.readReg1 = read_reg1_;
+        config.readReg2 = read_reg2_;
+        config.readReg3 = read_reg3_;
+
+        jit_->enableWriting();
+        jit_->generateProgram(program_, config);
+        jit_->enableExecution();
+
+        MemoryRegisters mem_regs{};
+        mem_regs.mx = mx_;
+        mem_regs.ma = ma_;
+        mem_regs.memory = dataset_.empty() ? nullptr :
+            reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
+
+        // Copy eMask into the top of reg_.a as the native ABI expects
+        std::memcpy(&reg_.a[0], config.eMask, sizeof(config.eMask));
+
+        jit_->getProgramFunc()(
+            &reg_, &mem_regs,
+            reinterpret_cast<void*>(scratchpad_.data()),
+            2048ULL);
+
+        // Extract updated mx/ma back from mem_regs after JIT execution
+        mx_ = mem_regs.mx;
+        ma_ = mem_regs.ma;
+        return;
+    }
+#endif
+
     compile_program();
 
     std::uint32_t spAddr0 = mx_;

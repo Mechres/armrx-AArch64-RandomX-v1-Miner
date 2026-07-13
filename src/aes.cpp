@@ -113,7 +113,7 @@ namespace {
 }
 
 } // namespace
-c AesBlock aes_encrypt_round(const AesBlock &state, const AesBlock &round_key) {
+AesBlock aes_encrypt_round(const AesBlock &state, const AesBlock &round_key) {
   auto output = encrypt_transform(state);
   for (unsigned i = 0; i < output.size(); ++i)
     output[i] ^= round_key[i];

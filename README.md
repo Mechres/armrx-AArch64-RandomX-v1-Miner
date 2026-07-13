@@ -30,6 +30,15 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+On AArch64, the build automatically:
+- Enables hardware AES/NEON (`-march=armv8-a+crypto`) for the scratchpad fill and hash pipeline
+- Compiles `jit_compiler_a64.cpp` + `jit_compiler_a64_static.S` to enable the JIT execution path
+- Sets `ARMRX_HAVE_JIT=1` so `VirtualMachine` initialises `JitCompilerA64` when `kRandOMXFlagJit` is passed
+
+On x86_64 (cross-build or development host), the JIT files are excluded; the VM falls back to the interpreted loop without any code changes required.
+
+```sh
+
 For cross compilation, provide an AArch64 CMake toolchain file and leave
 `ARMRX_ENABLE_NATIVE` disabled.
 
@@ -62,7 +71,7 @@ Options:
 2. AES round primitive, AesGenerator1R/AesGenerator4R, Argon2d cache initialization, exact SuperscalarHash generation/execution, and exact on-demand dataset-item generation (complete).
 3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
 4. Multi-threaded worker pool, nonce partitioning, difficulty target comparison, cache/dataset lifecycle, and automatic mode selection (complete).
-5. AArch64 JIT backend, guarded by runtime AES feature detection.
+5. AArch64 JIT backend (hardware AES + NEON intrinsics, JIT compiler, `virtual_memory` allocator, and `ARMRX_HAVE_JIT` guard) — complete on AArch64 targets; silently falls back to interpreted mode on other architectures.
 6. Stratum client, work scheduling, nonce partitioning, and share submission.
 
 The implementation must pass the official RandomX test vectors before any pool
