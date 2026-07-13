@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-13 (TLS/SSL pool connections + documentation sweep)
+
+### Added
+- **TLS/SSL support for pool connections** (`src/tls_client.cpp`, `include/armrx/tls_client.hpp`): Optional OpenSSL-based TLS wrapping. RAII `TlsClient` class with `SSL_connect`, SNI hostname, cipher reporting, and clean shutdown. Disabled at build time when OpenSSL is not found.
+- **`--tls` / `--no-tls` CLI flag** (`src/main.cpp`): Enables encrypted pool connections (default: off).
+- **CMake**: `find_package(OpenSSL QUIET)` — auto-detects OpenSSL; links `OpenSSL::SSL` + `OpenSSL::Crypto` and defines `ARMRX_HAVE_TLS=1` when found.
+
+### Modified
+- **`include/armrx/stratum_client.hpp`**: Added `enable_tls()` setter, optional `TlsClient` member under `#ifdef ARMRX_HAVE_TLS`.
+- **`src/stratum_client.cpp`**: `connect()` wraps TCP socket with TLS when enabled; `write_all()`/`read_line()` route through TLS; `disconnect()` tears down TLS before closing socket.
+- **`planned_improvements.md`**: Marked TLS/SSL as complete; collapsed priority table to 6 remaining items.
+
 ## 2026-07-13 (README restructure + auto-reconnect + huge pages)
 
 ### Added

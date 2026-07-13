@@ -11,6 +11,10 @@
 #include <thread>
 #include <vector>
 
+#ifdef ARMRX_HAVE_TLS
+#include "armrx/tls_client.hpp"
+#endif
+
 namespace armrx {
 
 /**
@@ -67,6 +71,13 @@ public:
 
     /** Register a callback invoked when the connection is lost / errors. */
     void set_error_callback(ErrorCallback cb) { error_callback_ = std::move(cb); }
+
+    /**
+    /**
+     * Enable TLS encryption for the pool connection.
+     * Must be called before connect(). Requires OpenSSL at build time.
+     */
+    void enable_tls(bool enabled) { tls_enabled_ = enabled; }
 
     /**
      * Configure automatic reconnection on disconnect.
@@ -150,6 +161,12 @@ private:
     unsigned reconnect_attempts_{0};
     std::atomic<bool> reconnect_enabled_{true};
     std::thread reconnect_thread_;
+
+    // TLS
+    bool tls_enabled_{false};
+#ifdef ARMRX_HAVE_TLS
+    std::unique_ptr<TlsClient> tls_;
+#endif
 };
 
 /** Default reconnect config constant. */

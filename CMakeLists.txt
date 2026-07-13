@@ -39,6 +39,17 @@ endif()
 
 find_package(Threads REQUIRED)
 
+# Optional OpenSSL for TLS pool connections
+find_package(OpenSSL QUIET)
+if(OpenSSL_FOUND)
+    target_sources(armrx_core PRIVATE src/tls_client.cpp)
+    target_link_libraries(armrx_core PUBLIC OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(armrx_core PUBLIC ARMRX_HAVE_TLS=1)
+    message(STATUS "OpenSSL found — TLS pool connections enabled")
+else()
+    message(STATUS "OpenSSL not found — TLS pool connections disabled")
+endif()
+
 target_include_directories(armrx_core PUBLIC include)
 target_link_libraries(armrx_core PUBLIC Threads::Threads)
 target_compile_features(armrx_core PUBLIC cxx_std_20)

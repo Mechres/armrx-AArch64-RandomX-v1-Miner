@@ -32,8 +32,8 @@ The JIT uses a 32-bit literal pool for `IMUL_RCP` constants. On very long progra
 
 ## 🌐 Stratum & Network
 
-### 9. TLS/SSL Support
-Most modern Monero pools now require encrypted connections (port 443/SSL). Adding OpenSSL or mbedTLS wrapping around the socket in [`src/stratum_client.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/stratum_client.cpp) is essential for production use.
+### 9. TLS/SSL Support ✅
+**Complete.** Optional OpenSSL-based TLS wrapping in `src/tls_client.cpp`. Enabled via `--tls` flag (off by default). `find_package(OpenSSL)` in CMake — silently disabled when OpenSSL is not installed. RAII `TlsClient` wrapper handles `SSL_connect`, SNI, `SSL_read`/`SSL_write`, and clean shutdown.
 
 ### 10. Auto-Reconnect with Backoff
 The current client disconnects permanently on socket error. An exponential backoff reconnect loop (1 s → 2 s → 4 s → 30 s max) with automatic re-subscription and re-authorization makes the miner production-grade.
@@ -80,8 +80,8 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | ~~🔴 **2**~~ | ~~Auto-reconnect with backoff (done)~~ | | |
 | ~~🟡 **4**~~ | ~~Huge pages for scratchpads (done)~~ | | |
 | ~~🟡 **2**~~ | ~~Parallel dataset generation (already implemented)~~ | | |
-| 🔴 **1** | TLS/SSL pool connections | Production-readiness | Medium |
-| 🟡 **2** | CPU affinity pinning | H/s stability | Low |
+| ~~🔴 **1**~~ | ~~TLS/SSL pool connections (done)~~ | | |
+| 🟡 **1** | CPU affinity pinning | H/s stability | Low |
 | 🟢 **3** | Per-worker H/s + share counters | Observability | Low |
 | 🟢 **4** | Multiple pool failover | Resilience | Low |
 | 🟢 **5** | Config file | UX | Medium |

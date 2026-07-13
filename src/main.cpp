@@ -72,6 +72,7 @@ int main(int argc, char** argv) {
     std::uint16_t pool_port = 3333;
     std::string pool_wallet;
     std::string pool_password = "x";
+    bool pool_tls = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument{argv[i]};
@@ -164,6 +165,7 @@ int main(int argc, char** argv) {
                 << "  --pool=host[:port]         Pool address (default port: 3333)\n"
                 << "  --wallet=<address>         Monero wallet address (worker login)\n"
                 << "  --password=<pw>            Worker password (default: x)\n"
+                << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
                 << "\n"
                 << "  -h, --help                 Display this help menu\n";
             return 0;
@@ -295,6 +297,8 @@ int main(int argc, char** argv) {
                       << " Hash: " << hash_to_hex(hash) << std::dec << '\n';
             stratum.submit_share(job, nonce, hash);
         };
+
+        stratum.enable_tls(pool_tls);
 
         // Job callback: push new jobs from pool into the mining engine
         stratum.set_job_callback([&](const armrx::Job& job) {

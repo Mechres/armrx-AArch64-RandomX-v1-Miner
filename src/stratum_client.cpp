@@ -156,6 +156,21 @@ void StratumClient::connect() {
                  reinterpret_cast<const char*>(&flag), sizeof(flag));
 
     sockfd_ = fd;
+
+    // Optional TLS wrapping
+#ifdef ARMRX_HAVE_TLS
+    if (tls_enabled_) {
+        tls_ = std::make_unique<TlsClient>();
+        if (!tls_->connect(fd, host_)) {
+            ::close(fd);
+            sockfd_ = -1;
+            throw std::runtime_error(
+                std::string("StratumClient: TLS handshake failed for ") + host_);
+        }
+        std::cout << "[Stratum] TLS enabled\n";
+    }
+#endif
+
     connected_.store(true);
 
     // Start reader thread before handshake so we can receive replies
@@ -175,6 +190,14 @@ void StratumClient::connect() {
 void StratumClient::disconnect() {
     reconnect_enabled_.store(false);
     connected_.store(false);
+
+    // Tear down TLS before closing the socket
+#ifdef ARMRX_HAVE_TLS
+    if (tls_) {
+        tls_->disconnect();
+        tls_.reset();
+    }
+#endif
 
     // Close the socket to unblock any pending read in the reader thread
     if (sockfd_ >= 0) {
@@ -254,7 +277,16 @@ void StratumClient::send_line(const std::string& json_line) {
 bool StratumClient::write_all(const char* buf, std::size_t len) {
     std::size_t sent = 0;
     while (sent < len) {
-        const ssize_t n = ::send(sockfd_, buf + sent, len - sent, MSG_NOSIGNAL);
+        ssize_t n;
+#ifdef ARMRX_HAVE_TLS
+        if (tls_) {
+            n = tls_->write(buf + sent, len - sent);
+        } else {
+            n = ::send(sockfd_, buf + sent, len - sent, MSG_NOSIGNAL);
+        }
+#else
+        n = ::send(sockfd_, buf + sent, len - sent, MSG_NOSIGNAL);
+#endif
         if (n <= 0) {
             if (errno == EINTR) continue;
             return false;
@@ -273,7 +305,16 @@ bool StratumClient::read_line(std::string& out) {
             return true;
         }
         char tmp[4096];
-        const ssize_t n = ::recv(sockfd_, tmp, sizeof(tmp), 0);
+        ssize_t n;
+#ifdef ARMRX_HAVE_TLS
+        if (tls_) {
+            n = tls_->read(tmp, sizeof(tmp));
+        } else {
+            n = ::recv(sockfd_, tmp, sizeof(tmp), 0);
+        }
+#else
+        n = ::recv(sockfd_, tmp, sizeof(tmp), 0);
+#endif
         if (n <= 0) return false; // Connection closed or error
         read_buf_.append(tmp, static_cast<std::size_t>(n));
     }
