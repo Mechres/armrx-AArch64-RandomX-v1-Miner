@@ -643,6 +643,9 @@ void StratumClient::handle_reply(const std::string& line) {
             }
             std::cout << "[Stratum] Login successful, session ID: " << session_id_ << "\n";
             
+            subscribe_ok_ = true;
+            subscribe_done_.set_value(true);
+
             const auto job_obj = json_get(result, "job");
             if (!job_obj.empty()) {
                 const auto job_id = json_get(job_obj, "job_id");
@@ -651,9 +654,6 @@ void StratumClient::handle_reply(const std::string& line) {
                 const auto seed_hex = json_get(job_obj, "seed_hash");
                 process_cryptonote_job(job_id, blob_hex, target_hex, seed_hex);
             }
-            
-            subscribe_ok_ = true;
-            subscribe_done_.set_value(true);
             return;
         } else {
             // Subscribe reply — check for success or error
