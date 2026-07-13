@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstring>
+#include <iostream>
 #include <stdexcept>
 #include <iomanip>
 #include <sstream>
@@ -74,6 +76,33 @@ int main() {
     assert(seed0[5] == 14584374767940244257ULL);
     assert(seed0[6] == 8609653616329052757ULL);
     assert(seed0[7] == 15912571922823092835ULL);
+
+    constexpr std::array<std::byte, 12> reference_key{
+        std::byte{'t'}, std::byte{'e'}, std::byte{'s'}, std::byte{'t'},
+        std::byte{' '}, std::byte{'k'}, std::byte{'e'}, std::byte{'y'},
+        std::byte{' '}, std::byte{'0'}, std::byte{'0'}, std::byte{'0'}
+    };
+    armrx::Argon2dCache reference_cache;
+    reference_cache.initialize(reference_key);
+
+    int reference_mismatch_count = 0;
+    auto assert_reference_item0 = [&](std::uint64_t item_number, std::uint64_t expected_first_word) {
+        const auto item = armrx::generate_dataset_item(reference_cache, item_number);
+        std::uint64_t first_word = 0;
+        std::memcpy(&first_word, item.data(), sizeof(first_word));
+        if (first_word != expected_first_word) {
+            std::cerr << "dataset item " << item_number << " first word 0x"
+                      << std::hex << first_word << " expected 0x" << expected_first_word
+                      << std::dec << std::endl;
+            ++reference_mismatch_count;
+        }
+    };
+
+    assert_reference_item0(0, 0x680588a85ae222dbULL);
+    assert_reference_item0(10000000ULL, 0x7943a1f6186ffb72ULL);
+    assert_reference_item0(20000000ULL, 0x9035244d718095e1ULL);
+    assert_reference_item0(30000000ULL, 0x145a5091f7853099ULL);
+    assert(reference_mismatch_count == 0);
 
     armrx::Argon2dCache dataset_cache{8, 1};
     constexpr std::array<std::byte, 3> dataset_key{std::byte{'k'}, std::byte{'e'}, std::byte{'y'}};

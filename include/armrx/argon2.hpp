@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <span>
 #include <vector>
+#include "armrx/superscalar.hpp"
 
 namespace armrx {
 
@@ -29,10 +30,14 @@ public:
 
     void initialize(std::span<const std::byte> key);
     [[nodiscard]] std::span<const Argon2Block> blocks() const { return blocks_; }
+    [[nodiscard]] const std::array<SuperscalarProgram, kRandomXCacheAccesses>& programs() const { return programs_; }
+    [[nodiscard]] const std::vector<std::uint64_t>& reciprocal_cache() const { return reciprocal_cache_; }
 
 private:
     std::size_t passes_;
     std::vector<Argon2Block> blocks_;
+    std::array<SuperscalarProgram, kRandomXCacheAccesses> programs_{};
+    std::vector<std::uint64_t> reciprocal_cache_;
 };
 
 } // namespace armrx

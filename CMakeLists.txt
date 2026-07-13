@@ -9,10 +9,12 @@ add_library(armrx_core
     src/aes.cpp
     src/aes_generator.cpp
     src/argon2.cpp
+    src/blake2_generator.cpp
     src/blake2b.cpp
     src/cpu_features.cpp
     src/dataset.cpp
     src/memory.cpp
+    src/superscalar.cpp
 )
 
 target_include_directories(armrx_core PUBLIC include)

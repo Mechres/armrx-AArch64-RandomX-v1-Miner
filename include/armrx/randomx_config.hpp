@@ -12,6 +12,10 @@ inline constexpr std::size_t kRandomXDatasetBytes =
     2ULL * 1024ULL * 1024ULL * 1024ULL + 32ULL * 1024ULL * 1024ULL;
 inline constexpr std::size_t kRandomXScratchpadBytes = 2ULL * 1024ULL * 1024ULL;
 
+inline constexpr std::size_t kRandomXCacheAccesses = 8U;
+inline constexpr std::size_t kSuperscalarLatency = 170U;
+inline constexpr std::size_t kSuperscalarMaxSize = 3U * kSuperscalarLatency + 2U;
+
 enum class RandomXMode {
     fast,
     light,

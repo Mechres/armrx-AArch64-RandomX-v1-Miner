@@ -1,6 +1,8 @@
 #include "armrx/argon2.hpp"
 
 #include "armrx/blake2b.hpp"
+#include "armrx/blake2_generator.hpp"
+#include "armrx/superscalar.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -173,6 +175,20 @@ void Argon2dCache::initialize(std::span<const std::byte> key) {
                 const std::size_t reference = (start_position + relative) % blocks_.size();
                 blocks_[current] = argon2_compress(blocks_[previous], blocks_[reference],
                                                    pass == 0U ? nullptr : &blocks_[current]);
+            }
+        }
+    }
+
+    reciprocal_cache_.clear();
+    Blake2Generator gen(key.data(), key.size());
+    for (std::size_t i = 0; i < kRandomXCacheAccesses; ++i) {
+        generate_superscalar(programs_[i], gen);
+        for (std::uint32_t j = 0; j < programs_[i].size(); ++j) {
+            auto& instr = programs_[i](j);
+            if (static_cast<SuperscalarInstructionType>(instr.opcode) == SuperscalarInstructionType::IMUL_RCP) {
+                auto rcp = randomx_reciprocal(instr.getImm32());
+                instr.setImm32(static_cast<std::uint32_t>(reciprocal_cache_.size()));
+                reciprocal_cache_.push_back(rcp);
             }
         }
     }
