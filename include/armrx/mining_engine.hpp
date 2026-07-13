@@ -1,0 +1,56 @@
+#pragma once
+
+#include "armrx/mining_common.hpp"
+#include "armrx/vm.hpp"
+#include "armrx/argon2.hpp"
+#include <atomic>
+#include <thread>
+#include <vector>
+#include <mutex>
+#include <functional>
+#include <memory>
+#include <chrono>
+
+namespace armrx {
+
+class MiningEngine {
+public:
+    using ShareCallback = std::function<void(const Job& job, std::uint64_t nonce, std::array<std::byte, 32> hash)>;
+
+    MiningEngine(RandomXMode mode, unsigned int num_threads);
+    ~MiningEngine();
+
+    void start(ShareCallback callback);
+    void stop();
+
+    void set_job(const Job& job);
+
+    [[nodiscard]] std::uint64_t total_hashes() const { return total_hashes_.load(); }
+    [[nodiscard]] double hash_rate() const;
+
+private:
+    void worker_loop(unsigned int thread_id);
+    void update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size);
+
+    RandomXMode mode_;
+    unsigned int num_threads_;
+    ShareCallback share_callback_;
+
+    std::atomic<bool> running_{false};
+    std::atomic<std::uint64_t> total_hashes_{0};
+    std::chrono::steady_clock::time_point start_time_;
+
+    std::mutex job_mutex_;
+    Job current_job_;
+    std::atomic<std::uint64_t> nonce_counter_{0};
+    bool has_job_{false};
+
+    // Shared Cache and Dataset
+    std::shared_ptr<Argon2dCache> shared_cache_;
+    std::shared_ptr<std::vector<std::byte>> shared_dataset_; // Shared pointer to dataset for safe concurrent access during transition
+    std::vector<std::byte> current_seed_key_;
+
+    std::vector<std::thread> workers_;
+};
+
+} // namespace armrx

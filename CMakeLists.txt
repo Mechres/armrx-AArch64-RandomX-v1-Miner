@@ -17,9 +17,13 @@ add_library(armrx_core
     src/superscalar.cpp
     src/vm.cpp
     src/aes_hash.cpp
+    src/mining_engine.cpp
 )
 
+find_package(Threads REQUIRED)
+
 target_include_directories(armrx_core PUBLIC include)
+target_link_libraries(armrx_core PUBLIC Threads::Threads)
 target_compile_features(armrx_core PUBLIC cxx_std_20)
 target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -frounding-math)
 
@@ -35,4 +39,8 @@ if(ARMRX_BUILD_TESTS)
     add_executable(armrx_tests tests/test_blake2b.cpp)
     target_link_libraries(armrx_tests PRIVATE armrx_core)
     add_test(NAME armrx_tests COMMAND armrx_tests)
+
+    add_executable(test_mining tests/test_mining.cpp)
+    target_link_libraries(test_mining PRIVATE armrx_core)
+    add_test(NAME test_mining COMMAND test_mining)
 endif()

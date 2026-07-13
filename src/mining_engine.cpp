@@ -1,0 +1,161 @@
+#include "armrx/mining_engine.hpp"
+#include "armrx/dataset.hpp"
+#include "armrx/randomx_config.hpp"
+#include <iostream>
+#include <cstring>
+
+namespace armrx {
+
+MiningEngine::MiningEngine(RandomXMode mode, unsigned int num_threads)
+    : mode_(mode), num_threads_(num_threads) {}
+
+MiningEngine::~MiningEngine() {
+    stop();
+}
+
+void MiningEngine::start(ShareCallback callback) {
+    if (running_.load()) {
+        return;
+    }
+    share_callback_ = std::move(callback);
+    running_.store(true);
+    total_hashes_.store(0);
+    start_time_ = std::chrono::steady_clock::now();
+
+    workers_.clear();
+    workers_.reserve(num_threads_);
+    for (unsigned int i = 0; i < num_threads_; ++i) {
+        workers_.emplace_back(&MiningEngine::worker_loop, this, i);
+    }
+}
+
+void MiningEngine::stop() {
+    if (!running_.load()) {
+        return;
+    }
+    running_.store(false);
+    for (auto& t : workers_) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+    workers_.clear();
+}
+
+void MiningEngine::set_job(const Job& job) {
+    std::lock_guard<std::mutex> lock(job_mutex_);
+
+    bool key_changed = current_seed_key_ != job.seed_key;
+    if (key_changed || !shared_cache_) {
+        std::cout << "[MiningEngine] New seed key detected. Initializing cache...\n";
+        auto new_cache = std::make_shared<Argon2dCache>();
+        new_cache->initialize(job.seed_key);
+        shared_cache_ = new_cache;
+
+        if (mode_ == RandomXMode::fast) {
+            std::cout << "[MiningEngine] Initializing " << (randomx_dataset_item_count() * 64) / (1024U * 1024U) << " MiB dataset...\n";
+            auto new_dataset = std::make_shared<std::vector<std::byte>>(randomx_dataset_item_count() * 64);
+
+            // Parallelize dataset initialization
+            unsigned int init_threads_count = std::max(1U, std::thread::hardware_concurrency());
+            std::vector<std::thread> init_threads;
+            std::uint64_t items_per_thread = randomx_dataset_item_count() / init_threads_count;
+            for (unsigned int i = 0; i < init_threads_count; ++i) {
+                std::uint64_t start_item = i * items_per_thread;
+                std::uint64_t count = (i == init_threads_count - 1)
+                    ? (randomx_dataset_item_count() - start_item)
+                    : items_per_thread;
+                init_threads.emplace_back([this, new_dataset, start_item, count]() {
+                    initialize_dataset(std::span<std::byte>(new_dataset->data(), new_dataset->size()), *shared_cache_, start_item, count);
+                });
+            }
+            for (auto& t : init_threads) {
+                t.join();
+            }
+            shared_dataset_ = new_dataset;
+            std::cout << "[MiningEngine] Dataset initialization complete.\n";
+        }
+        current_seed_key_ = job.seed_key;
+    }
+
+    current_job_ = job;
+    nonce_counter_.store(0);
+    has_job_ = true;
+}
+
+double MiningEngine::hash_rate() const {
+    if (!running_.load()) {
+        return 0.0;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration<double>(now - start_time_).count();
+    if (elapsed <= 0.001) {
+        return 0.0;
+    }
+    return static_cast<double>(total_hashes_.load()) / elapsed;
+}
+
+void MiningEngine::worker_loop(unsigned int thread_id) {
+    (void)thread_id; // Unused for now
+    std::uint32_t flags = (mode_ == RandomXMode::fast) ? kRandOMXFlagFullMem : kRandOMXFlagDefault;
+    VirtualMachine vm(flags);
+
+    std::shared_ptr<Argon2dCache> active_cache;
+    std::shared_ptr<std::vector<std::byte>> active_dataset;
+    Job local_job;
+    bool active = false;
+
+    while (running_.load(std::memory_order_relaxed)) {
+        // Read job state with lock
+        {
+            std::lock_guard<std::mutex> lock(job_mutex_);
+            if (!has_job_) {
+                active = false;
+            } else {
+                if (!active || current_job_.job_id != local_job.job_id) {
+                    local_job = current_job_;
+                    active_cache = shared_cache_;
+                    active_dataset = shared_dataset_;
+                    active = true;
+
+                    vm.set_cache(active_cache.get());
+                    if (mode_ == RandomXMode::fast && active_dataset) {
+                        vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()));
+                    }
+                }
+            }
+        }
+
+        if (!active) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            continue;
+        }
+
+        // Grab next nonce
+        std::uint64_t nonce = nonce_counter_.fetch_add(1, std::memory_order_relaxed);
+
+        std::vector<std::byte> block_input = local_job.block_template;
+        update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size);
+
+        alignas(16) std::array<std::byte, 32> hash{};
+        randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
+        total_hashes_.fetch_add(1, std::memory_order_relaxed);
+
+        if (meets_target(hash, local_job.target)) {
+            if (share_callback_) {
+                share_callback_(local_job, nonce, hash);
+            }
+        }
+    }
+}
+
+void MiningEngine::update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size) {
+    if (offset + size > block.size()) {
+        return;
+    }
+    for (std::size_t i = 0; i < size; ++i) {
+        block[offset + i] = static_cast<std::byte>((nonce >> (8 * i)) & 0xff);
+    }
+}
+
+} // namespace armrx

@@ -7,13 +7,9 @@ mainnet consensus, so it is deliberately not the initial target.
 
 ## Status
 
-The interpreted RandomX Virtual Machine and hash pipeline is fully implemented and passes the official end-to-end RandomX validation test suite. This includes:
-- Blake2b-512 program seeding and final hashing.
-- Exact Argon2d cache initialization.
-- Exact on-demand dataset-item generation (light-mode).
-- Exact interpreted Virtual Machine execution (integer registers, floating-point math registers, scratchpad reads/writes, compiler thresholds).
+The interpreted RandomX Virtual Machine and hash pipeline is fully implemented and passes the official end-to-end RandomX validation test suite. Multi-threaded worker orchestration, target difficulty comparison, nonce partitioning, and automatic memory mode (light vs fast) selection are fully complete.
 
-All reference test vectors (`Input1` and `Input2`) pass successfully.
+All reference test vectors (`Input1` and `Input2`) and worker engine lifecycles pass successfully.
 
 ## Interpreted Virtual Machine Implementation Details
 
@@ -37,30 +33,37 @@ ctest --test-dir build --output-on-failure
 For cross compilation, provide an AArch64 CMake toolchain file and leave
 `ARMRX_ENABLE_NATIVE` disabled.
 
-To exercise the full shared light-mode cache initialization without mining or
-network access:
+## Usage
+
+### 1. Argon2d Cache Initialization Benchmark
+To exercise the full shared light-mode cache initialization without mining or network access:
 
 ```sh
 ./build/armrx --init-cache 'test key 000'
 ```
 
-This allocates 256 MiB and runs the three Argon2d passes. It is a validation
-tool only; a successful run does not yet make the program a miner.
+### 2. Local Mining Benchmark
+To run a local multi-threaded mining benchmark with real-time speed statistics and share submission output:
 
-The probe also accepts `--mode=auto|light|fast` and `--workers=N` to report the
-selected memory mode for a specific worker count.
+```sh
+./build/armrx --mine --mode=auto|light|fast --workers=N --difficulty=D --seconds=S
+```
 
-The current code can also initialize contiguous dataset output with the
-light-mode cache scaffold, which is useful for validating the next dataset
-construction step.
+Options:
+- `--mine`: Triggers local benchmark mining.
+- `--mode=auto|light|fast`: Selects memory allocation strategy (default: `auto`).
+- `--workers=N`: Number of worker threads (default: all online CPU cores).
+- `--difficulty=D`: Targets a specific share difficulty threshold (default: `100`).
+- `--seconds=S`: Configures benchmark duration in seconds; `0` runs indefinitely until `Ctrl+C` (default: `10`).
 
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
 2. AES round primitive, AesGenerator1R/AesGenerator4R, Argon2d cache initialization, exact SuperscalarHash generation/execution, and exact on-demand dataset-item generation (complete).
 3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
-4. AArch64 JIT backend, guarded by runtime AES feature detection.
-5. Stratum client, work scheduling, nonce partitioning, and share submission.
+4. Multi-threaded worker pool, nonce partitioning, difficulty target comparison, cache/dataset lifecycle, and automatic mode selection (complete).
+5. AArch64 JIT backend, guarded by runtime AES feature detection.
+6. Stratum client, work scheduling, nonce partitioning, and share submission.
 
 The implementation must pass the official RandomX test vectors before any pool
 networking is enabled.
