@@ -1,28 +1,16 @@
-# armrx
+# armrx — AArch64 RandomX v1 Miner
 
-`armrx` is a clean-room, CPU-only Monero RandomX v1 miner for AArch64 Linux. It
-is being implemented against the public specification; it does not incorporate
-miner source code. RandomX v2 is a planned Monero network upgrade, not current
-mainnet consensus, so it is deliberately not the initial target.
+[![AArch64](https://img.shields.io/badge/arch-AArch64_ARMv8--A-blue)]()
+[![C++20](https://img.shields.io/badge/c%2B%2B-20-00599C)]()
+[![test vectors](https://img.shields.io/badge/test%20vectors-passing-brightgreen)]()
 
-## Status
+Clean-room, CPU-only Monero RandomX v1 miner for AArch64 Linux, implemented
+against the [public RandomX specification](https://github.com/tevador/RandomX).
+Zero borrowed miner source code.
 
-The interpreted RandomX Virtual Machine and hash pipeline is fully implemented and passes the official end-to-end RandomX validation test suite. Multi-threaded worker orchestration, target difficulty comparison, nonce partitioning, and automatic memory mode (light vs fast) selection are fully complete.
+---
 
-The **AArch64 JIT backend** compiles and links cleanly on real hardware (postmarketOS, GCC 15.2.0, ARMv8-A with crypto extensions). All reference test vectors (`Input1` and `Input2`) and worker engine lifecycles pass successfully — see [2026-07-13 build verification](#).
-
-## Interpreted Virtual Machine Implementation Details
-
-Our clean-room AArch64 interpreted VM matches the reference RandomX implementation by resolving several subtle design decisions:
-1. **AES Inverse Round Equivalence**: Hardware instruction round math (`aesd`) matches equivalent AES decryption inverse round execution sequence (`InvShiftRows -> InvSubBytes -> InvMixColumns -> AddRoundKey`). In software execution, the round key XOR must happen *after* the inverse transformations rather than before.
-2. **Word Mapping in AES Block Builder**: Elements in `build_aes_block` follow a strict little-endian layout matching the reference `rx_set_int_vec_i128` macro (the lowest address maps to the lowest byte of the last parameter).
-3. **In-place Scratchpad Seeding**: The scratchpad initialization pipeline (`init_scratchpad`) modifies the hashing pipeline's seed (`tempHash`) in-place. The VM's first program runs with this state-modified seed.
-4. **Cumulative Frequency Thresholds**: Cumulative opcode frequencies for floating-point operations (`FSUB_R`, `FSUB_M`, `FSCAL_R`, `FMUL_R`, `FDIV_M`, `FSQRT_R`, `CBRANCH`, `CFROUND`, `ISTORE`) match the standard configuration frequencies exactly.
-5. **Zero-Initialization**: Integer registers `reg_.r` are zero-initialized on VM state setup to prevent garbage residues from leaking across program runs.
-
-## Build
-
-On an AArch64 Linux host:
+## Quick Start
 
 ```sh
 cmake -S . -B build -DARMRX_ENABLE_NATIVE=ON
@@ -30,83 +18,116 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
-On AArch64, the build automatically:
-- Enables C, C++20, and ASM languages for the full toolchain
-- Enables hardware AES/NEON (`-march=armv8-a+crypto`) for the scratchpad fill and hash pipeline
-- Compiles `jit_compiler_a64.cpp` + `jit_compiler_a64_static.S` to enable the JIT execution path
-- Compiles `virtual_memory.c` for JIT page allocation (`mmap`/`mprotect`)
-- Compiles `soft_aes.cpp` for AES lookup tables used by the JIT soft-AES fallback
-- Sets `ARMRX_HAVE_JIT=1` so `VirtualMachine` initialises `JitCompilerA64` when `kRandOMXFlagJit` is passed
+On AArch64 the build automatically enables hardware AES/NEON
+(`-march=armv8-a+crypto`), compiles the JIT backend, and sets
+`ARMRX_HAVE_JIT=1`. On x86_64 the JIT is excluded and the VM falls back to
+the interpreted loop — no code changes needed.
 
-On x86_64 (cross-build or development host), the JIT files are excluded; the VM falls back to the interpreted loop without any code changes required.
+### Cross-compilation
 
-```sh
+Provide an AArch64 CMake toolchain file and leave `ARMRX_ENABLE_NATIVE` off.
 
-For cross compilation, provide an AArch64 CMake toolchain file and leave
-`ARMRX_ENABLE_NATIVE` disabled.
+---
 
 ## Usage
 
-### 1. Argon2d Cache Initialization Benchmark
-To exercise the full shared light-mode cache initialization without mining or network access:
-
+### 1. Cache Benchmark
 ```sh
 ./build/armrx --init-cache 'test key 000'
 ```
 
 ### 2. Local Mining Benchmark
-To run a local multi-threaded mining benchmark with real-time speed statistics and share submission output:
-
 ```sh
 ./build/armrx --mine --mode=auto|light|fast --workers=N --difficulty=D --seconds=S
 ```
 
-Options:
-- `--mine`: Triggers local benchmark mining.
-- `--mode=auto|light|fast`: Selects memory allocation strategy (default: `auto`).
-- `--workers=N`: Number of worker threads (default: all online CPU cores).
-- `--difficulty=D`: Targets a specific share difficulty threshold (default: `100`).
-- `--seconds=S`: Configures benchmark duration in seconds; `0` runs indefinitely until `Ctrl+C` (default: `10`).
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mine` | — | Run local benchmark |
+| `--mode` | `auto` | Memory strategy: `auto`, `light`, or `fast` |
+| `--workers` | all cores | Thread count |
+| `--difficulty` | `100` | Target share difficulty |
+| `--seconds` | `10` | Duration (`0` = indefinite) |
 
 ### 3. Pool Mining (Stratum V1)
-Connect directly to any Monero-compatible Stratum pool:
-
 ```sh
-./build/armrx --pool=pool.example.com:3333 --wallet=<YOUR_WALLET_ADDRESS> [--password=x] [--mode=auto] [--workers=N]
+./build/armrx --pool=pool.example.com:3333 --wallet=<YOUR_WALLET> [--password=x] [--mode=auto] [--workers=N]
 ```
 
-Options:
-- `--pool=host[:port]`: Pool address and optional port (default: `3333`).
-- `--wallet=<address>`: Your Monero wallet address used as the worker login.
-- `--password=<pw>`: Worker password (default: `x`, most pools ignore this).
-- All `--mode` and `--workers` options apply to pool mining as well.
+Disconnects are **automatically retried** with exponential backoff
+(1s → 2s → … → 30s max).
 
-## Implementation order
+---
 
-1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
-2. AES round primitive, AesGenerator1R/AesGenerator4R, Argon2d cache initialization, exact SuperscalarHash generation/execution, and exact on-demand dataset-item generation (complete).
-3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
-4. Multi-threaded worker pool, nonce partitioning, difficulty target comparison, cache/dataset lifecycle, and automatic mode selection (complete).
-5. AArch64 JIT backend (hardware AES + NEON intrinsics, JIT compiler, `virtual_memory` allocator, and `ARMRX_HAVE_JIT` guard) — complete and **verified on real AArch64 hardware** (Lenovo/MSM8916, postmarketOS, GCC 15.2.0). Full build + test pass. Silently falls back to interpreted mode on other architectures.
-6. Stratum V1 client (`src/stratum_client.cpp`) — TCP connection to XMR pool, `mining.subscribe`, `mining.authorize`, `mining.notify` job dispatch, `mining.set_target` / `mining.set_difficulty` updates, `mining.submit` share submission — complete.
+## Architecture
 
-The implementation must pass the official RandomX test vectors before any pool
-networking is enabled.
+### Interpreted VM
 
-## 2 GB devices
+The clean-room AArch64 interpreted VM matches the reference implementation
+by resolving five subtle design decisions:
 
-Fast mode needs a 2080 MiB shared dataset, before the operating system or the
-per-worker 2 MiB scratchpad are considered. It cannot fit on a 2 GB device.
+| # | Decision | Detail |
+|---|----------|--------|
+| 1 | **AES inverse round** | `aesd` matches `InvShiftRows → InvSubBytes → InvMixColumns → AddRoundKey`; round-key XOR must happen *after* the inverse transforms |
+| 2 | **Word mapping** | `build_aes_block` follows strict little-endian layout matching `rx_set_int_vec_i128` |
+| 3 | **Scratchpad seeding** | `init_scratchpad` modifies `tempHash` in-place; first program runs with the modified seed |
+| 4 | **Frequency thresholds** | Cumulative opcode ceilings match standard RandomX v1 frequencies exactly |
+| 5 | **Zero-init registers** | Integer registers zeroed on VM setup to prevent cross-run residue |
 
-Use RandomX **light mode** instead. It keeps a 256 MiB shared cache and derives
-dataset items on demand, producing exactly the same hashes but at a much lower
-hash rate. Reserve at least 256 MiB plus 2 MiB per worker and normal OS memory;
-start with one worker on a 2 GB device. The miner will expose this as an
-explicit `--mode=light` setting once the hash engine is added, and will refuse
-fast mode when available memory is insufficient.
+### JIT Backend (AArch64 only)
 
-The startup probe already reports an automatic recommendation. It uses Linux
-`MemAvailable` rather than installed RAM, takes the lower value when a cgroup
-memory limit applies, and reserves 256 MiB for the operating system. Fast mode
-is selected only if the 2080 MiB dataset, 2 MiB per worker, and that reserve
-all fit. `auto` will therefore select light mode on a 2 GB device.
+Hardware AES/NEON intrinsics + a runtime code generator that emits AArch64
+machine code directly. Verified on real hardware (postmarketOS, GCC 15.2.0,
+ARMv8-A + crypto). Falls back to the interpreted loop on other architectures.
+
+### Memory Modes
+
+| Mode | Shared Memory | Per Worker | Use Case |
+|------|--------------|------------|----------|
+| **Light** | 256 MiB cache | 2 MiB scratchpad | Fits on 2 GiB devices; derives dataset on-demand |
+| **Fast** | 2080 MiB dataset | 2 MiB scratchpad | Full speed; needs ≥3 GiB available RAM |
+
+The startup probe uses Linux `MemAvailable` (cgroup-aware), reserves 256 MiB
+for the OS, and selects fast mode only when everything fits.
+
+### Stratum V1 Client
+
+TCP connection to any Monero-compatible pool with:
+- `mining.subscribe` / `mining.authorize` handshake
+- `mining.notify` job dispatch (blob parsing, target extraction)
+- `mining.set_target` / `mining.set_difficulty` updates
+- `mining.submit` share submission
+- **Auto-reconnect** with exponential backoff on disconnect
+
+---
+
+## Status
+
+| Component | Status |
+|-----------|--------|
+| BLAKE2b + Argon2-compatible H' | ✅ |
+| AES primitives, AesGenerator1R/4R | ✅ |
+| Argon2d cache init + dataset generation | ✅ |
+| SuperscalarHash generation/execution | ✅ |
+| Interpreted VM (register file, bytecode, scratchpad, final hash) | ✅ |
+| Multi-threaded worker pool + target comparison + mode selection | ✅ |
+| AArch64 JIT backend (ASM + JIT compiler + virtual memory) | ✅ verified on hardware |
+| Stratum V1 client (subscribe, authorize, notify, submit) | ✅ |
+| **Auto-reconnect with backoff** | ✅ |
+
+All reference test vectors pass:
+```
+Input1: 639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f
+Input2: 300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969
+```
+
+---
+
+## 2 GiB Devices
+
+Fast mode needs a 2080 MiB shared dataset plus per-worker scratchpads plus OS
+overhead — it cannot fit on 2 GiB. Use **light mode** (`--mode=light` or let
+`--mode=auto` choose automatically). The auto-probe checks `MemAvailable`,
+respects cgroup limits, and selects light mode when the 2080 MiB dataset + 2 MiB
+per worker + 256 MiB OS reserve doesn't fit.
+

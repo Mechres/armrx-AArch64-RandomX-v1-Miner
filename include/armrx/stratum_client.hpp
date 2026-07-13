@@ -68,7 +68,19 @@ public:
     /** Register a callback invoked when the connection is lost / errors. */
     void set_error_callback(ErrorCallback cb) { error_callback_ = std::move(cb); }
 
+    /**
+     * Configure automatic reconnection on disconnect.
+     * @param max_retries  Maximum reconnection attempts before giving up
+     *                     (0 = retry forever, default 10).
+     * @param base_delay_ms  Initial backoff delay in milliseconds (default 1000).
+     *                       Each retry doubles up to 30 s cap.
+     */
+    void set_reconnect_config(unsigned max_retries = 10, unsigned base_delay_ms = 1000);
+
     [[nodiscard]] bool is_connected() const { return connected_.load(); }
+
+    /** Returns the number of consecutive reconnect attempts since last clean connect. */
+    [[nodiscard]] unsigned reconnect_attempts() const { return reconnect_attempts_; }
 
 private:
     // --- networking helpers ---
@@ -101,6 +113,9 @@ private:
     static std::string nonce_to_hex(std::uint64_t nonce, std::size_t bytes = 4);
     static Target difficulty_to_target(double diff);
 
+    // --- reconnect logic ---
+    void reconnect_loop();
+
     // --- members ---
     std::string host_;
     std::uint16_t port_;
@@ -128,6 +143,18 @@ private:
 
     // Read buffer (line accumulator)
     std::string read_buf_;
+
+    // Reconnect configuration
+    unsigned max_retries_{10};
+    unsigned base_delay_ms_{1000};
+    unsigned reconnect_attempts_{0};
+    std::atomic<bool> reconnect_enabled_{true};
+    std::thread reconnect_thread_;
 };
+
+/** Default reconnect config constant. */
+inline constexpr unsigned kDefaultMaxRetries = 10;
+inline constexpr unsigned kDefaultBaseDelayMs = 1000;
+inline constexpr unsigned kMaxBackoffMs = 30000;
 
 } // namespace armrx

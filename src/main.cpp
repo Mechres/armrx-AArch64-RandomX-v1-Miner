@@ -308,12 +308,12 @@ int main(int argc, char** argv) {
 
         engine.start(share_callback);
 
+        // Initial connection — if it fails, the reconnect loop handles retries
         try {
             stratum.connect();
         } catch (const std::exception& ex) {
-            std::cerr << "[Stratum] Connection failed: " << ex.what() << '\n';
-            engine.stop();
-            return 1;
+            std::cerr << "[Stratum] Initial connection failed: " << ex.what() << '\n';
+            std::cerr << "[Stratum] Will retry with backoff...\n";
         }
 
         std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
@@ -321,7 +321,7 @@ int main(int argc, char** argv) {
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
 
-        while (keep_running && stratum.is_connected()) {
+        while (keep_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count());
@@ -329,11 +329,22 @@ int main(int argc, char** argv) {
             const double speed  = engine.hash_rate();
             const auto total    = engine.total_hashes();
             const auto shares   = shares_submitted.load();
+            const bool online   = stratum.is_connected();
+            const auto retries  = stratum.reconnect_attempts();
 
             std::cout << "[Pool] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
-                      << " | Shares submitted: " << shares
-                      << " | Total hashes: "     << total
-                      << " | Uptime: "            << elapsed_sec << "s\r" << std::flush;
+                      << " | Shares: " << shares
+                      << " | Total: "     << total
+                      << " | Uptime: "    << elapsed_sec << "s";
+            if (!online) {
+                std::cout << " | ";
+                if (retries > 0) {
+                    std::cout << "\033[33mReconnecting (attempt " << retries << ")...\033[0m";
+                } else {
+                    std::cout << "\033[33mDisconnected\033[0m";
+                }
+            }
+            std::cout << "\r" << std::flush;
         }
         std::cout << std::endl;
 

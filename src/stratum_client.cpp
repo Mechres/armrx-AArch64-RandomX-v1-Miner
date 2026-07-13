@@ -27,6 +27,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
+#include <thread>
 #include <unistd.h>
 
 namespace armrx {
@@ -117,6 +118,7 @@ StratumClient::~StratumClient() {
 
 void StratumClient::connect() {
     if (connected_.load()) return;
+    reconnect_enabled_.store(true);
 
     // Resolve host
     struct addrinfo hints{};
@@ -171,7 +173,8 @@ void StratumClient::connect() {
 }
 
 void StratumClient::disconnect() {
-    if (!connected_.exchange(false)) return;
+    reconnect_enabled_.store(false);
+    connected_.store(false);
 
     // Close the socket to unblock any pending read in the reader thread
     if (sockfd_ >= 0) {
@@ -182,6 +185,9 @@ void StratumClient::disconnect() {
 
     if (reader_thread_.joinable()) {
         reader_thread_.join();
+    }
+    if (reconnect_thread_.joinable()) {
+        reconnect_thread_.join();
     }
 }
 
@@ -196,6 +202,15 @@ void StratumClient::submit_share(const Job& job, std::uint64_t nonce,
     std::lock_guard lock(send_mutex_);
     send_line(msg);
     (void)hash; // logged by caller
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reconnect configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+void StratumClient::set_reconnect_config(unsigned max_retries, unsigned base_delay_ms) {
+    max_retries_   = max_retries;
+    base_delay_ms_ = base_delay_ms;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,9 +291,15 @@ void StratumClient::reader_thread_fn() {
             handle_line(line);
         }
     }
+
+    // Connection lost — try to reconnect
     connected_.store(false);
-    if (error_callback_) {
-        error_callback_("connection closed");
+    if (reconnect_enabled_.load()) {
+        reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
+    } else {
+        if (error_callback_) {
+            error_callback_("connection closed");
+        }
     }
 }
 
@@ -471,6 +492,48 @@ void StratumClient::handle_reply(const std::string& line) {
         std::cout << "[Stratum] Share accepted!\n";
     } else if (!result.empty() && result != "null") {
         std::cerr << "[Stratum] Share rejected: " << result << '\n';
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reconnect loop
+// ─────────────────────────────────────────────────────────────────────────────
+
+void StratumClient::reconnect_loop() {
+    unsigned delay = base_delay_ms_;
+    while (reconnect_enabled_.load()) {
+        // Cap delay at max backoff
+        if (delay > kMaxBackoffMs) delay = kMaxBackoffMs;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+
+        if (!reconnect_enabled_.load()) break;
+
+        ++reconnect_attempts_;
+
+        // Check if we've exhausted max retries (0 = forever)
+        if (max_retries_ > 0 && reconnect_attempts_ > max_retries_) {
+            if (error_callback_) {
+                error_callback_("reconnect: max retries exhausted");
+            }
+            break;
+        }
+
+        std::cerr << "[Stratum] Reconnecting (attempt " << reconnect_attempts_
+                  << ", delay " << delay << " ms)...\n";
+
+        try {
+            connect();
+            // Success — reset state and exit
+            reconnect_attempts_ = 0;
+            std::cerr << "[Stratum] Reconnected successfully\n";
+            return;
+        } catch (const std::exception& ex) {
+            std::cerr << "[Stratum] Reconnect failed: " << ex.what() << '\n';
+        }
+
+        // Exponential backoff (doubles each attempt)
+        delay *= 2;
     }
 }
 
