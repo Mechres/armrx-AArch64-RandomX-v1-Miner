@@ -15,11 +15,13 @@ add_library(armrx_core
     src/dataset.cpp
     src/memory.cpp
     src/superscalar.cpp
+    src/vm.cpp
+    src/aes_hash.cpp
 )
 
 target_include_directories(armrx_core PUBLIC include)
 target_compile_features(armrx_core PUBLIC cxx_std_20)
-target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow)
+target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -frounding-math)
 
 if(ARMRX_ENABLE_NATIVE)
     target_compile_options(armrx_core PRIVATE -mcpu=native)

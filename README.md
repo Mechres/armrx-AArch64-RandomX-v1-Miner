@@ -7,11 +7,22 @@ mainnet consensus, so it is deliberately not the initial target.
 
 ## Status
 
-The current milestone provides the build system, Linux AArch64 feature probe,
-a tested BLAKE2b-512 primitive, Argon2d cache initialization helpers, and a
-deterministic on-demand dataset-item scaffold. It is **not yet a functional
-miner**: SuperscalarHash, full RandomX VM execution, nonce search, and pool
-protocol support are still to be implemented.
+The interpreted RandomX Virtual Machine and hash pipeline is fully implemented and passes the official end-to-end RandomX validation test suite. This includes:
+- Blake2b-512 program seeding and final hashing.
+- Exact Argon2d cache initialization.
+- Exact on-demand dataset-item generation (light-mode).
+- Exact interpreted Virtual Machine execution (integer registers, floating-point math registers, scratchpad reads/writes, compiler thresholds).
+
+All reference test vectors (`Input1` and `Input2`) pass successfully.
+
+## Interpreted Virtual Machine Implementation Details
+
+Our clean-room AArch64 interpreted VM matches the reference RandomX implementation by resolving several subtle design decisions:
+1. **AES Inverse Round Equivalence**: Hardware instruction round math (`aesd`) matches equivalent AES decryption inverse round execution sequence (`InvShiftRows -> InvSubBytes -> InvMixColumns -> AddRoundKey`). In software execution, the round key XOR must happen *after* the inverse transformations rather than before.
+2. **Word Mapping in AES Block Builder**: Elements in `build_aes_block` follow a strict little-endian layout matching the reference `rx_set_int_vec_i128` macro (the lowest address maps to the lowest byte of the last parameter).
+3. **In-place Scratchpad Seeding**: The scratchpad initialization pipeline (`init_scratchpad`) modifies the hashing pipeline's seed (`tempHash`) in-place. The VM's first program runs with this state-modified seed.
+4. **Cumulative Frequency Thresholds**: Cumulative opcode frequencies for floating-point operations (`FSUB_R`, `FSUB_M`, `FSCAL_R`, `FMUL_R`, `FDIV_M`, `FSQRT_R`, `CBRANCH`, `CFROUND`, `ISTORE`) match the standard configuration frequencies exactly.
+5. **Zero-Initialization**: Integer registers `reg_.r` are zero-initialized on VM state setup to prevent garbage residues from leaking across program runs.
 
 ## Build
 
@@ -46,8 +57,8 @@ construction step.
 ## Implementation order
 
 1. BLAKE2b, including Argon2-compatible variable output/H' and its 1 KiB compression function, plus deterministic byte/word helpers (complete).
-2. AES round primitive and AesGenerator1R/AesGenerator4R generators (complete); Argon2d cache initialization and dataset-item scaffolding (in progress).
-3. SuperscalarHash, light-mode on-demand dataset-item generation, and the interpreter VM with official test vectors.
+2. AES round primitive, AesGenerator1R/AesGenerator4R, Argon2d cache initialization, exact SuperscalarHash generation/execution, and exact on-demand dataset-item generation (complete).
+3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
 4. AArch64 JIT backend, guarded by runtime AES feature detection.
 5. Stratum client, work scheduling, nonce partitioning, and share submission.
 

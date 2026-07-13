@@ -1,0 +1,259 @@
+[ 1] Cache initialization                         ... PASSED
+[ 2] SuperscalarHash generator                    ... PASSED
+[ 3] randomx_reciprocal                           ... PASSED
+[ 4] randomx_reciprocal_fast                      ... PASSED
+[ 5] Dataset initialization (interpreter)         ... PASSED
+[ 6] Dataset initialization (compiler)            ... PASSED
+[ 7] AesGenerator1R                               ... PASSED
+[ 8] IADD_RS (decode)                             ... PASSED
+[ 9] IADD_RS (execute)                            ... PASSED
+[10] IADD_RS with immediate (decode)              ... PASSED
+[11] IADD_RS with immediate (decode)              ... PASSED
+[12] IADD_M (decode)                              ... PASSED
+[13] ISUB_R (decode)                              ... PASSED
+[14] ISUB_R (execute)                             ... PASSED
+[15] ISUB_R with immediate (decode)               ... PASSED
+[16] ISUB_R with immediate (decode)               ... PASSED
+[17] ISUB_M (decode)                              ... PASSED
+[18] IMUL_R (decode)                              ... PASSED
+[19] IMUL_R (execute)                             ... PASSED
+[20] IMUL_R with immediate (decode)               ... PASSED
+[21] IMUL_R with immediate (execute)              ... PASSED
+[22] IMUL_M (decode)                              ... PASSED
+[23] IMULH_R (decode)                             ... PASSED
+[24] IMULH_R (execute)                            ... PASSED
+[25] IMULH_R squared (decode)                     ... PASSED
+[26] IMULH_M (decode)                             ... PASSED
+[27] ISMULH_R (decode)                            ... PASSED
+[28] ISMULH_R (execute)                           ... PASSED
+[29] ISMULH_R squared (decode)                    ... PASSED
+[30] ISMULH_M (decode)                            ... PASSED
+[31] IMUL_RCP (decode)                            ... PASSED
+[32] IMUL_RCP zero imm32 (decode)                 ... PASSED
+[33] INEG_R (decode)                              ... PASSED
+[34] INEG_R (execute)                             ... PASSED
+[35] IXOR_R (decode)                              ... PASSED
+[36] IXOR_R (execute)                             ... PASSED
+[37] IXOR_R with immediate (decode)               ... PASSED
+[38] IXOR_R with immediate (execute)              ... PASSED
+[39] IXOR_M (decode)                              ... PASSED
+[40] IROR_R (decode)                              ... PASSED
+[41] IROR_R (execute)                             ... PASSED
+[42] IROL_R (decode)                              ... PASSED
+[43] IROL_R (execute)                             ... PASSED
+[44] ISWAP_R (decode)                             ... PASSED
+[45] ISWAP_R (execute)                            ... PASSED
+[46] FSWAP_R (decode)                             ... PASSED
+[47] FSWAP_R (execute)                            ... PASSED
+[48] FADD_R (decode)                              ... PASSED
+[49] FADD_R RoundToNearest (execute)              ... PASSED
+[50] FADD_R RoundDown (execute)                   ... PASSED
+[51] FADD_R RoundUp (execute)                     ... PASSED
+[52] FADD_R RoundToZero (execute)                 ... PASSED
+[53] FADD_M (decode)                              ... PASSED
+[54] FADD_M (execute)                             ... PASSED
+[55] FSUB_R (decode)                              ... PASSED
+[56] FSUB_M (decode)                              ... PASSED
+[57] FSCAL_R (decode)                             ... PASSED
+[58] FSCAL_R (execute)                            ... PASSED
+[59] FMUL_R (decode)                              ... PASSED
+[60] FMUL_R RoundToNearest (execute)              ... PASSED
+[61] FMUL_R RoundDown/RoundToZero (execute)       ... PASSED
+[62] FMUL_R RoundUp (execute)                     ... PASSED
+[63] FDIV_M (decode)                              ... PASSED
+[64] FDIV_M RoundToNearest (execute)              ... PASSED
+[65] FDIV_M RoundDown/RoundToZero (execute)       ... PASSED
+[66] FDIV_M RoundUp (execute)                     ... PASSED
+[67] FSQRT_R (decode)                             ... PASSED
+[68] FSQRT_R RoundToNearest (execute)             ... PASSED
+[69] FSQRT_R RoundDown/RoundToZero (execute)      ... PASSED
+[70] FSQRT_R RoundUp (execute)                    ... PASSED
+[71] CBRANCH (decode) 100                         ... PASSED
+[72] CBRANCH (decode) 200                         ... PASSED
+[73] CBRANCH not taken (execute)                  ... PASSED
+[74] CBRANCH taken (execute)                      ... PASSED
+[75] CFROUND (decode)                             ... PASSED
+[76] ISTORE L1 (decode)                           ... PASSED
+[77] ISTORE L2 (decode)                           ... PASSED
+[78] ISTORE L3 (decode)                           ... PASSED
+[79] Hash test 1a (interpreter)                   ... [RefTrace] count=0 mx_=8a8a6230 ma_=738ddb40 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=a35540
+[RefTrace] Before executeBytecode ic=0 reg_r=612a24ccdb6d1c59 c45d4ce560500c25 b82f52b71e458bd1 49a02939f2f42afd dfedf516f1b712f2 5f2381e46cd4a70b 701f044edda4525b eee3cf8bdd06dd30
+[RefTrace] After executeBytecode ic=0 reg_r=503b80da470888aa fd5903036b387f5d c86ef08076b78721 c8f80f59013fbc5b fdfa0a447e3c11d 84bf26b3574f6ab3 39f8c69963b40167 64bfa087ebf6321c
+[RefTrace] count=1 mx_=3c74ecb8 ma_=139ff3c0 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=6 dataset_offset_=dec80
+[RefTrace] Before executeBytecode ic=0 reg_r=49adcd718553f004 628b23a1b179b0ed 667fa2d73f37b6ec 2292e83c74d0b9c9 d05191023825bc6f fd7285a83681fd2e 4654d61b967a4ec9 75bf08b6536657be
+[RefTrace] After executeBytecode ic=0 reg_r=1f069d7323c2f818 150343214ad0ea7d 4b54e3ef3a9f2736 236dccf6f54ce818 cea507ca345e512b 7151883e91ef4143 fde30868b85bdcb1 c15443490827a087
+[RefTrace] count=2 mx_=54884d66 ma_=66c31e40 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=16b56c0
+[RefTrace] Before executeBytecode ic=0 reg_r=bf1983bcec7d7db3 84eeec2013e33158 4807859cea7d4d85 25c64f08f52c148b a5b9f3532b7162dc bca7ed37a58fe815 66255af8c7fcb122 21ff4d73d9fc89aa
+[RefTrace] After executeBytecode ic=0 reg_r=413e91bb6a302c26 4b87025470cb55e1 2be04b07ad9d8a97 3863035bc69acd45 f92e68536e3ee72 3c1894a89e858abd 3f83be9875da0a20 b4ecf489ec4cc17b
+[RefTrace] count=3 mx_=c4b76c44 ma_=649a7080 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=1532080
+[RefTrace] Before executeBytecode ic=0 reg_r=2df0d21a08e906b3 761f83c8e8dd5a37 1f099fd3e7004e4e ddd576857687533b ba2642dbb511068c 625d218bcc838558 e0689dceb2e2911b c2e768857530fa7a
+[RefTrace] After executeBytecode ic=0 reg_r=714fbe5a1220160c 6871d2d4df3ec140 16ef99cecdf4af20 ee0fbe9a9e326ad8 f5cf0f48d319ce55 93748af7580aa38c b8ae7d9262d0f0 2ffd9c49937233fa
+[RefTrace] count=4 mx_=d3fd2b70 ma_=32641780 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=1675280
+[RefTrace] Before executeBytecode ic=0 reg_r=65f11677044361ac bf6d234e4c4b1480 ea4147cf054a8d35 272e4aaf78ec76cc dbb32e7139555933 9ca2effee6c1ab38 3408d5afe3c98c2d 98ed3ecebbb179b1
+[RefTrace] After executeBytecode ic=0 reg_r=7eac0f215cc8abd8 37bbce4f14e7d1af 39768693d8d4f150 33b752e0e80f770b b7eaef5a697136bc 4dd862a9f95aa61c 9194a8edbea3b9ba d1a5c96bbb97fae1
+[RefTrace] count=5 mx_=1ec78e80 ma_=196fa9c0 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=1943340
+[RefTrace] Before executeBytecode ic=0 reg_r=fe618b798ac0a80b f795236784545400 fddf01ee3a226d8a 39f4e703bde9aca0 c8f2807893ad3a1f fc65bf2196616897 7b1733b54fb5d01f d3eaab98686d3a10
+[RefTrace] After executeBytecode ic=0 reg_r=823be6df9d554444 5989f24571558f37 5e2d4691ec53cb6f 843733480d701f40 1ac482c9bc900bc6 5ba7107b16bab183 bf92ac656871fbe0 7fd6b62e6de76cc6
+[RefTrace] count=6 mx_=5b8b066f ma_=1ed5f0c0 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=cad680
+[RefTrace] Before executeBytecode ic=0 reg_r=2da9dd35e9adc21d ee3095a7bf2e5c16 7a93a00f5e47d9fb 8fb21e302d9dd248 38c844041c4ced47 acb08e0a42dc4c67 81e9fc98942e09e8 57e1bbd8646208f0
+[RefTrace] After executeBytecode ic=0 reg_r=1f917479dd542aea fe078a2f7af5f308 a03a7ebdd28c800d 4503c88e4c6ef3bd efd72246aa6157a8 997de530319d1700 e3ffa69db3c92622 d72678943ab26480
+[RefTrace] count=7 mx_=28377907 ma_=2b172fc0 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=1735a00
+[RefTrace] Before executeBytecode ic=0 reg_r=18773e9f7cb64a9a a3d13178fdc0b449 7ebff0e7fbeea1c8 3b450d07e2e41c7 d728bec4430624a 12fe59bdf525f828 4005119064bce04 6eab4e3ec534131
+[RefTrace] After executeBytecode ic=0 reg_r=7db6c24f8043586c 11caf4698caa26f2 e5bc719f190eb658 e2786d34b9683a80 50bf95efd4e18668 83f7e22515549177 e1b4f113c4448a68 f801e9fa07219fea
+PASSED
+[80] Hash test 1b (interpreter)                   ... [RefTrace] count=8 mx_=fa78ebcb ma_=53c5b600 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1881c40
+[RefTrace] Before executeBytecode ic=0 reg_r=acccea1a4506d89b 9553c0127b9d86e5 b54b9f5a4df778e7 5a7bc3f257c8ffeb df42885314caa186 538eb885e2c1bb95 6452754188ca2a20 90aa2c4ae1d8f3e9
+[RefTrace] After executeBytecode ic=0 reg_r=effac1a54549ce00 a8e165f886397691 b4a0cf675915a10c c2d906fe93dca707 badc892bc565b600 1f562fff6688b806 3acd676097b2ddce bd03c560d68b27f8
+[RefTrace] count=9 mx_=f340d756 ma_=4feba5c0 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=188d040
+[RefTrace] Before executeBytecode ic=0 reg_r=f525197a20128eeb 561e42fdf56b8cf2 b18c187e56bbb09a d85463db8422cf18 bf47adc9b3deb8ec 1e425743eedb299e 69e9cb6c2d23c6f2 5c33c262e4b7f64c
+[RefTrace] After executeBytecode ic=0 reg_r=b6e3533767773742 d038198a24f868d8 50bf474c303e6f78 2b5ac8bbf393a30d 254702e72820fe14 594d4eba67f2e723 9e766f6e0262b566 b2bc724e14352a41
+[RefTrace] count=10 mx_=e9e9cba5 ma_=696ed400 read_reg0_=0 read_reg1_=3 read_reg2_=4 read_reg3_=6 dataset_offset_=147f80
+[RefTrace] Before executeBytecode ic=0 reg_r=abbfbac239b1ecf1 db4e15308286e87a 27a7697e6f7f148e d27a0dbe7a90858d acfb9f6dbca81f7e bf4b6564e20960f1 b22482ef7edd4652 4d2ddb8bdb45ccd4
+[RefTrace] After executeBytecode ic=0 reg_r=1778bdb1d06faa3d 28caa89462141568 de8411a15d1613a0 b8f029bf1e2c2c21 3d94eee74edc75f8 d6496bf6146048ac dad1ebbc6d7834f2 f0488baa12f4cb8c
+[RefTrace] count=11 mx_=2366afd1 ma_=76e36b80 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=14a2d80
+[RefTrace] Before executeBytecode ic=0 reg_r=3b7a506eb5eeefae 55e5fa4d1c25e56 486b3b03f49e8d3e 4efebf8088e928ec 3446c3d478b62838 4f58ba90023dbdbe 533e72e21510c8c9 d93f78f2bab9236f
+[RefTrace] After executeBytecode ic=0 reg_r=78bd02c1f1206d0a 6194e15907977d3d 17d4ecb0cc61119 3b93e8c1eba3ccde 3f7ef33367de43e 84632bb2011fe71b 208ff06547b30058 bf3f4c128806d4ce
+[RefTrace] count=12 mx_=b709d8e6 ma_=6e657380 read_reg0_=0 read_reg1_=3 read_reg2_=4 read_reg3_=6 dataset_offset_=1b6f940
+[RefTrace] Before executeBytecode ic=0 reg_r=8f496289e09886cc 451ea9a030004ea5 127279f6ab65d7e4 74da3eedba117d2e 77edb257ee39db16 e03836234b84934d 6f959a9a0bce5b6d 68b2bf8b849c87f7
+[RefTrace] After executeBytecode ic=0 reg_r=f1638e9c6fb7916d 70e49be673f65c6d 694947af931d84fc 17b2ca22026b9389 1abbcb94d3f09e40 a56691f3381db01 463fc8a1ce918808 d22015df5e1540e0
+[RefTrace] count=13 mx_=711e98f3 ma_=dd5d1c0 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=1fe6540
+[RefTrace] Before executeBytecode ic=0 reg_r=94b0accfc30239cc b8682c58a0e91da4 b56d078955b37f9 b50ba82e63e130c8 9d2625efa0e9987 630809c5bce87ea2 e8bf32e274ed45e1 1faa3e0ccaa7eafd
+[RefTrace] After executeBytecode ic=0 reg_r=4c5a13f128810b0e 357082b3f63b031c cfebaa824a9f2be8 205949b29589286c 5e68184103f4b8a8 5c420768348cf09b f7a689545e873432 b8dfb326fdf6c9a1
+[RefTrace] count=14 mx_=526969a4 ma_=a80d040 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=139e0c0
+[RefTrace] Before executeBytecode ic=0 reg_r=6fbde53dfd010fe1 e7472bea76867c8e f3634c5bcb9f1ee3 aa0d1a62284f44aa 2fd4e67ad0cd5383 6bbc4cd1c99636ba ae620a80a05aeb9 b0fe5a444c1f0cbc
+[RefTrace] After executeBytecode ic=0 reg_r=d39f17e3ba2cfb9b b4536eeda5cbe194 d87b2aceb388b48 18f5e527a415f906 375914e159a68407 20c84d7248213168 26aef2e22e93feb8 19803548ba24aaa9
+[RefTrace] count=15 mx_=b8778cfe ma_=49af3080 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=1135440
+[RefTrace] Before executeBytecode ic=0 reg_r=852e43d75ebd8ed5 c49c3b59885171e1 6cde0c9c58e3287 9d7378eb31bff882 66864ec64a566276 4e9028dc2dd1093a f010b71b402c68f3 5da73e39faa1abdb
+[RefTrace] After executeBytecode ic=0 reg_r=28d93fcbb69ffab8 74687d575dec23e1 63ef8303e18de62d 51d8a98784f9a4fd ce1b2ecb13ee8258 1e91becd657980d3 4e8130a56f7d1c37 34d7a6f118356109
+PASSED
+[81] Hash test 1c (interpreter)                   ... [RefTrace] count=16 mx_=6fca48d9 ma_=63e6a440 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1e06f80
+[RefTrace] Before executeBytecode ic=0 reg_r=76c52d09ffaa5318 8452537d6d9a172f a096329565c97fff d61778febc752bb5 5b187b9b924d8f39 8642acb6546d4703 2f145991cd911795 233c035305f4fbc8
+[RefTrace] After executeBytecode ic=0 reg_r=1d691e495c387d19 4a249c21ae04c8af 97f365e58c50e4c0 fe4de5ebfa2192a 65e4f3f1fc09548 644fe50bbcafa1a8 6412cbfef3e14c9 d82a9d5fa59610f
+[RefTrace] count=17 mx_=c23ea59d ma_=682e5880 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=c1be80
+[RefTrace] Before executeBytecode ic=0 reg_r=a89936ec6ff35c01 da75bdd3ef2a7dea f6518f2db2e37a3f 884f2bbdcd9869a8 e5c5eba3e1ab0b55 aa626e9861c3419a 5c9c09ead43f34d5 c66b342a3423cb1e
+[RefTrace] After executeBytecode ic=0 reg_r=29b9182667e9d8d1 6a0968d48261484 40ea56c9684ea8bb 55e01924e6961a15 fff017fec89ce831 54e2629fc27de004 9180a9a58576a3fe 5210c2c82f505984
+[RefTrace] count=18 mx_=1785924b ma_=6bfaf1c0 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=166ee80
+[RefTrace] Before executeBytecode ic=0 reg_r=44cdf6d0499c2b29 36b70f3f61c68be9 e298fa04b58440f2 d1db26a8d392332e 8ed2b8ac5a3ef833 ea82117401c642e7 ea964a988612f6d7 6f485b4236489e56
+[RefTrace] After executeBytecode ic=0 reg_r=90769987f1f94305 b694833077bd3080 4b00082135a96a7b 80a3a1a7110beb21 e560b812568dd7a5 8fe82f75874251d2 e6ce58ef64e2ae4a 101007641939b52a
+[RefTrace] count=19 mx_=45baa1e1 ma_=10fb1fc0 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=deb240
+[RefTrace] Before executeBytecode ic=0 reg_r=85ccff2782fe3398 6f4f16f6e83330e 84b848c7f66dba74 8760f066c7ea69a1 82d1e771bca5aa8f 8292d78b70b0d533 7fed0b64b78894a4 fe5f43580660d579
+[RefTrace] After executeBytecode ic=0 reg_r=c241c9315c3e074e 35384f5243ab0c82 d87df1efb7f145da 1c705c31831e77 bb14916038fb7142 22dd2c5122afe850 fc04c4d1b8339f48 39def14053378b91
+[RefTrace] count=20 mx_=4f13a78 ma_=5797a340 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=723680
+[RefTrace] Before executeBytecode ic=0 reg_r=426baf4fa5e09e61 6cab69e5a8523f6e 1326cca321796f06 18674b991fee1262 7744d6497b30d584 2c9b0d24eacc350e 8fb35e18ae6a5080 534d00cfafa1a51f
+[RefTrace] After executeBytecode ic=0 reg_r=7d52b3cc7b130889 d81da9a43a1d4617 9146356ce2c39f1c 635b33acc682c1d9 51326ada730fce03 7a8c7d0f56ce1525 375a65200298585 89091b489f8a2b20
+[RefTrace] count=21 mx_=d24c0fe5 ma_=5f0dbe80 read_reg0_=1 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=1422540
+[RefTrace] Before executeBytecode ic=0 reg_r=867ea82a491d0381 a55167d7cc20e368 ab3f5c87ea4055aa 6d90a10f23f715e 9aa239a3c53299f5 c1a314f7c0002ca8 c9e9954774fe5b25 b49fe824e19e617c
+[RefTrace] After executeBytecode ic=0 reg_r=db87138747e41204 1c513792343b4db9 73ca45c5287c48c6 292ab5d141aaac0b f8b1442b2670c0be a1d8bcad4339aadf f9eeaac338704555 bb7b6b42d0fe745e
+[RefTrace] count=22 mx_=267dbe54 ma_=3ad1cd40 read_reg0_=0 read_reg1_=3 read_reg2_=4 read_reg3_=6 dataset_offset_=1bf5680
+[RefTrace] Before executeBytecode ic=0 reg_r=3541e3f280d46ac7 1aa2313edf33319b 161cd76ab87f82a4 f607e57a04256f61 12d1f3270c971358 b2261e33a55bed2d bf56226c3abaad01 600ed920dc6a4bef
+[RefTrace] After executeBytecode ic=0 reg_r=1b5d8120faa6cb8f c341facde833a8d9 d1659e662814a8e4 4e8c797295be85d8 db39f1616f2307c0 8bc07c5b3fb57b06 116fa0393a23d7b2 42ae2eeee57032af
+[RefTrace] count=23 mx_=2b745c32 ma_=7004cd00 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=107a4c0
+[RefTrace] Before executeBytecode ic=0 reg_r=f344f3ac0b1f21cc 1cd1392e960f39e8 d663e57a1146fb3e b4a2bd9e514e5877 752d26fb7043c961 c6bd404c8ba78871 71d04d1981b3bc47 1d44092246c9df1c
+[RefTrace] After executeBytecode ic=0 reg_r=a37e139e4a76f583 f7b75dac4e747591 2c121dd9d0b2a1d0 70b4bb612c5745df 4a1ed0229f3a514c d0bbf812c83b196e 82fa9109a97a70ec 4675060d8eb46893
+PASSED
+[82] Hash test 1d (interpreter)                   ... [RefTrace] count=24 mx_=6fca48d9 ma_=63e6a440 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1e06f80
+[RefTrace] Before executeBytecode ic=0 reg_r=76c52d09ffaa5318 8452537d6d9a172f a096329565c97fff d61778febc752bb5 5b187b9b924d8f39 8642acb6546d4703 2f145991cd911795 233c035305f4fbc8
+[RefTrace] After executeBytecode ic=0 reg_r=1d691e495c387d19 4a249c21ae04c8af 97f365e58c50e4c0 fe4de5ebfa2192a 65e4f3f1fc09548 644fe50bbcafa1a8 6412cbfef3e14c9 d82a9d5fa59610f
+[RefTrace] count=25 mx_=60071cb1 ma_=6b19b340 read_reg0_=1 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=1a69280
+[RefTrace] Before executeBytecode ic=0 reg_r=be7407910fe2bf01 6fa15d442eb9a781 d12b5fc4925945d7 5c857f7eefefa866 74947c7b93a9e376 e1307daf2d7b7a25 804797eacf667a06 8b86d98cd222e8e7
+[RefTrace] After executeBytecode ic=0 reg_r=4a22b9276b1c7e33 2a139294369f9037 aed1973c17bfd50b 24f0831cf3078486 461813421159770d 1bd631c1ad86bbb8 df78064760aecc0 f0680863a3388c90
+[RefTrace] count=26 mx_=a6e6d1f9 ma_=713762c0 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=6 dataset_offset_=ba66c0
+[RefTrace] Before executeBytecode ic=0 reg_r=fb570823e7bc54a8 e29fd77a964827a8 5ffe41da84fe8675 f86129cad5cf95ca ee86a53517e98516 6f0a36ee6abf96e2 369ee907158896ec f8a387f675c0e064
+[RefTrace] After executeBytecode ic=0 reg_r=cbb33cdb18e368e9 3420289c326a9bf6 37d01a8326a5fc96 e07fd25228f8cf7b 1441b237b14557c0 e99f3af278f6276c 9741a1fe7f00ab68 6263e7d40f3d91d7
+[RefTrace] count=27 mx_=e75a2006 ma_=20f83e00 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=6 dataset_offset_=1097200
+[RefTrace] Before executeBytecode ic=0 reg_r=8c0c4157f971c72f c8ce553960611dbe c39a6e76b181fcef d7bbd6722486dc07 7121759950900a91 c0e190bf63c88f0b bad4094844b4a629 1cf8fbc000baae9c
+[RefTrace] After executeBytecode ic=0 reg_r=b212850863c72354 3ac8a301bc2d022d f0578245a6abfdb8 c3ab87eec2b19d19 866a45ab7e59c415 b3c541a903cb1b96 3a0dbc1b5e30ac1 d2cd0c76a8b5f4e3
+[RefTrace] count=28 mx_=751fcb5a ma_=7ca06000 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=19ec4c0
+[RefTrace] Before executeBytecode ic=0 reg_r=45e659ebc2aa9aa9 762feb2fa089612a 482b4f5b4d374896 4fa36d2eaab9e03 e2b71ff352157754 78a75b66b6e4c039 55ebc86e154fd271 3248876a1f3b9d8a
+[RefTrace] After executeBytecode ic=0 reg_r=292da2f2d2829f9d 1d364fd4d3b59efd 4a486ecf9d95fc25 52da7d07bf4a7bb5 f700eb9dd0271592 c592965f50c4696 82792d0e07e47d3c 5d16c724ece7b3b8
+[RefTrace] count=29 mx_=541d869e ma_=66c77580 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=c5f180
+[RefTrace] Before executeBytecode ic=0 reg_r=6372464c594e585 77fddf54fcbb7cf b5f60b3b12f99cdc 9c9956b699000a1 3a83d8ca7d0b738 2de41b9948e2f75 8529bb203e7b7f05 4c0883c9018d274
+[RefTrace] After executeBytecode ic=0 reg_r=fd81fbc4c60651b0 d0f0314a628982e4 5bcaf2b7ba918eb3 ad4c5da2706baae7 f1124ce2e381001f 13a495977c835d26 38863ed0a327d500 70ac69f5d2b0553a
+[RefTrace] count=30 mx_=436df863 ma_=28541d80 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=c49b00
+[RefTrace] Before executeBytecode ic=0 reg_r=3add9b38119d8dbc f0d94b47882abfe3 276227e4e5ab7cf da26afddd20a867f 9e24627162573471 b65cd9f1fc6fdfa2 cd2191ad77f692ad 5ac183d85b30f2ca
+[RefTrace] After executeBytecode ic=0 reg_r=9201b784d85a26a1 23e5e2df4bb96b92 1a4c1af7fe0d517c 41ca07e8f9f64fb8 6b238ef13db4ea05 85c9e31a2e369d52 d3daa58b63140972 bf5c676e5a128c38
+[RefTrace] count=31 mx_=a76ef17a ma_=6bdf2680 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=474d00
+[RefTrace] Before executeBytecode ic=0 reg_r=4621d3a3f283582a 3c0f6d5fbbf915b0 52fd3ef9d38958bc 44d9d44a8b7d0c1d 7a7007e1e3a06b3e ba9060432af30ab3 20a9c9ce7e7a6fc2 3d8fd211e53f7a16
+[RefTrace] After executeBytecode ic=0 reg_r=43a43a7fa643dba1 3c095bb767ac308b 52f301686b397ae3 5257eb118b0ac7fc acdacd327a372950 ed0d90c60c5232c9 676871e49494f05c fa686e0e45f4683f
+PASSED
+[83] Hash test 1e (interpreter)                   ... [RefTrace] count=32 mx_=6de77098 ma_=26673ec0 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1970480
+[RefTrace] Before executeBytecode ic=0 reg_r=1781d26668071a17 2952ebc34bc50f1a 90b7f61539c8d6b4 192335dd43a4cd 8d57f46a99dedc9b 263ed50a7316ba82 9a09ef80c4ec224c b3fe1194030db364
+[RefTrace] After executeBytecode ic=0 reg_r=3c5e60918771b6 d0904659a1be2618 e89d269722ed5e50 1a4f5ec6baed26c8 6c118eac0a9fffad 6af8fbbd6b330060 e8fb0b40cf998a24 1a854638b292b5af
+[RefTrace] count=33 mx_=7e0d4076 ma_=3c692380 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1fe2e40
+[RefTrace] Before executeBytecode ic=0 reg_r=184e2ec5f149b0cf 77e7fc26df543033 8619de271457b61f f961aa3bab79b380 4e7820baa812c87a 3eb6c61972c71f2 83d888f49613ed92 90e46b21b19435b5
+[RefTrace] After executeBytecode ic=0 reg_r=8422208a7d8ac051 167ec36531e9bad3 fed9d2e4216f1132 bf8d4e722ba4f16d cc85e379a7ecdce7 2e9935b3bb23994a 9037f160a77da67a cdad707d69b086ea
+[RefTrace] count=34 mx_=c4a57dbb ma_=6600cb40 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=1e65d80
+[RefTrace] Before executeBytecode ic=0 reg_r=31367334b3dff0f2 a29c71b0a984e8de 52aea1e86bdbd599 d0673262db92132 f88a445bbd79e8d0 99294812984e1cda 4fc99b41f322454d dfdaf2672f0a85ed
+[RefTrace] After executeBytecode ic=0 reg_r=417366487f5e659d 2844c0bbc02ef794 46e8f384fd8445dd 65183be198355cba 5f21e1b27292a1a3 1d533f38d1a1a293 e30bea05e7033f26 15b7065dbc1afe64
+[RefTrace] count=35 mx_=5776bb9f ma_=510fc5c0 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1cf6bc0
+[RefTrace] Before executeBytecode ic=0 reg_r=ee8d4c5cbde29d0e cfedbf1273196162 11ff42c88c10e768 85380483e665c71f ff1f09330b79949b 1c45a2bd5bec3edd 10c759e66a39c49a 177e23bc1434c6db
+[RefTrace] After executeBytecode ic=0 reg_r=8023b338184d453d 227c989ad1ec26fd 47bc540bc9504b17 8a1296415187fc58 980f4678b9027c83 1b9d587334644199 c4f02f22b4efc7c8 10b3626ff1743972
+[RefTrace] count=36 mx_=bca69acf ma_=540361c0 read_reg0_=1 read_reg1_=3 read_reg2_=4 read_reg3_=6 dataset_offset_=35e380
+[RefTrace] Before executeBytecode ic=0 reg_r=80af7c79e33810b5 8949a2a15f57e1cc 8f492719a0872a74 51e6b36bd23e6134 7cb004a4f4cdbd5 8aeabeb68eadb7c6 8349e4d3715af3b1 802570e9de35c107
+[RefTrace] After executeBytecode ic=0 reg_r=75f1c41d16fb414c 4356e9d9e268b4e7 8a261c77f81081e8 a4939f097037d050 a48f6b17368502f8 248554acde902546 d660e6026b713fec 1fad535ee19d61e4
+[RefTrace] count=37 mx_=54c54783 ma_=1456ee40 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=833600
+[RefTrace] Before executeBytecode ic=0 reg_r=6d3bf8d9c4773a3b 1d990f3b9a42a278 46a76ee035f16e94 66dbb4ac154aa18f 2c1dbba394a090f5 11ee5f4ecb57794f 70fe893bcec56743 86052cc7aa1a96e6
+[RefTrace] After executeBytecode ic=0 reg_r=f29100122b10b4e0 87699c1d330ad8b6 10f32bca10608ac0 609282fa8fb38c42 e7dfd8d2bb0a37ac 81a51e0b48d76530 c28f07315f78ae20 cabadc20a9c042fb
+[RefTrace] count=38 mx_=4f6a41c2 ma_=3272f5c0 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=1edce40
+[RefTrace] Before executeBytecode ic=0 reg_r=b3ec2dce44e607af d3f0432cce77fee0 b2dafbfb68b12269 3e84be996ec5ad63 c9f472e2a1b9a8d3 bfe4ae527ce35ffa 726ea08ea3321b57 c302716cccfa8351
+[RefTrace] After executeBytecode ic=0 reg_r=b33fe33313885c31 38afe2cdf94bf9e5 45d5978f6d17d9e9 952975011754ea47 2a381243eda085 790acbac96b5977e 9aa00fff7626ef43 1839ea2c4fcb3e98
+[RefTrace] count=39 mx_=fee0a405 ma_=38e5b180 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=6 dataset_offset_=deac00
+[RefTrace] Before executeBytecode ic=0 reg_r=e778ebcb069a8c07 c441fc3638d2be90 2b544719cedeb360 8e485c3e366a1b20 256b007511d2f64 26ec1bf41df656cd 852bee886fc3651f ac403e8ee5b078c6
+[RefTrace] After executeBytecode ic=0 reg_r=a86dc21591a030c8 24616b3b022bb927 774be6accd03ae8b 3d100d3990020c78 da8b51694be017ee 2f22999e2766dc9d df9b605c6dff2598 1011d03b8309e0af
+PASSED
+[84] Hash test 1f (ISUB_R edge case, interpreter) ... [RefTrace] count=40 mx_=e97aa755 ma_=30f7d300 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=1f035c0
+[RefTrace] Before executeBytecode ic=0 reg_r=42f17bdded757d2c ff8450f45bbbee25 ebd921325424070a 696c8a7b5fe80c13 1e2114ea87234189 d31a1d6377450487 6b34e89157798bb1 fe3d88162bdb3570
+[RefTrace] After executeBytecode ic=0 reg_r=c55a5969cbd0c3c 354773508e50bdc7 412befeaf6bfa6b d943967beee3876e fa9249911090e390 1430ddcf37958bc1 728fac74b2abd34c 3702dfbc188a37e8
+[RefTrace] count=41 mx_=50ddfae8 ma_=71ec5300 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=ee9d40
+[RefTrace] Before executeBytecode ic=0 reg_r=e3228de0d657749b c8f11d313be4f0c2 fcc35bdff2900efc 5880326a1b3216ef d0b9ae2aa0a0b166 438e9f61a35bccc3 7aff5f2c751ceeb8 14b09aa8cb89cf99
+[RefTrace] After executeBytecode ic=0 reg_r=2cb3222fc53bddfa b6717247d25d52f3 2e392ecead94671 d2db74bb030ceb4a eb5c576c6faf09b af4cad21ef304ca5 97c60c259f44f21 b623153ec4a5aab6
+[RefTrace] count=42 mx_=fe925f2e ma_=44f9b4c0 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=1e8c1c0
+[RefTrace] Before executeBytecode ic=0 reg_r=5e6b92e525829ca5 f7f41b5152e7a14b c54e1d1eb46cea0f 3d1bafa211753e20 3211165106a45e28 20b1367afacad0c7 dec1d04b0c9424fd ada489ecd3be3150
+[RefTrace] After executeBytecode ic=0 reg_r=ee0db0daa8bc6e98 8e0f090fe48af63 c31df76b14f90091 82b95b50f3b6009 26d158ccecb4d1da 78e4a013ad0840be aad79db23c1a958d 6f16fbe01fa1d6ac
+[RefTrace] count=43 mx_=72844bc8 ma_=5a4b0700 read_reg0_=0 read_reg1_=2 read_reg2_=5 read_reg3_=6 dataset_offset_=965d40
+[RefTrace] Before executeBytecode ic=0 reg_r=739e66dc9057e8d6 76a7da3dc48d0c94 49ed4f030d7d6f7e fb28579fea3f636e e7b725ccba386e80 15d2eb3193777737 b7bc3c69bc85241 3721650ff56514fe
+[RefTrace] After executeBytecode ic=0 reg_r=ebbad575d28f7efb 8a384df1da7fbeb9 8f44a94c4c94a808 990b04fb94133662 107dd50fafeec008 f5b83472440ae97e f42916293eb1170e ee4bbc067331adc0
+[RefTrace] count=44 mx_=8372f630 ma_=5c15f780 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=7 dataset_offset_=1b94f40
+[RefTrace] Before executeBytecode ic=0 reg_r=f766b56ab20ca09b 2f437ed5501c876c f2f88658303421f2 1b9a442b0eb8507b f548f1389dbcfdfd fa031a9734e42edb 935410f0c48c5ae5 a21de9861e4d784
+[RefTrace] After executeBytecode ic=0 reg_r=a38a16e7460076b7 783fc2507febb0cc 3e25a1c859b2cb1d f2d066769766eaef 365874895d19eb73 73e2f3eeb3ba4f22 99bfadbea013f314 fe1bcf0d6186ec0b
+[RefTrace] count=45 mx_=a8bf8998 ma_=8e27c0 read_reg0_=1 read_reg1_=3 read_reg2_=5 read_reg3_=6 dataset_offset_=8f5d40
+[RefTrace] Before executeBytecode ic=0 reg_r=6522a9ebcdd870ec 961eb7cc242b44a2 aa1ff5ab7f8956fa 57a8be9a2f88708 830077384a77de14 565405e9f4a9307a 8b7faec1122972a6 437d400e2e4bbeab
+[RefTrace] After executeBytecode ic=0 reg_r=5597d867cf4b3b31 346874fb21183884 15e7b1f064c0dfdd 271908a47c41bd62 cc93f586003b4b65 673a953700fb8902 414529b45a658813 270d151678981860
+[RefTrace] count=46 mx_=36f52f8c ma_=47cec2c0 read_reg0_=1 read_reg1_=3 read_reg2_=4 read_reg3_=7 dataset_offset_=ade340
+[RefTrace] Before executeBytecode ic=0 reg_r=b83de7eea9e867d0 eb0ff33b92ee6226 86c6ec44a3b580fb 10139fbed83d036d 102825e3a56a0b75 de0474444791c559 a111db2c20d13f70 bf04dc4217f98554
+[RefTrace] After executeBytecode ic=0 reg_r=858503e70b142ce5 3e1065a6db8f231c 914069f5136a0f41 2b7dedbb70a8b6e2 f6a67a067e8e3ee4 6a3fbe89d44efe 9878b8de8c06c800 f2702b9435542765
+[RefTrace] count=47 mx_=16ac1445 ma_=2d581340 read_reg0_=0 read_reg1_=2 read_reg2_=4 read_reg3_=6 dataset_offset_=b0b600
+[RefTrace] Before executeBytecode ic=0 reg_r=5c282f01583f2c34 345832b4313c7b95 bcf036051af94ab2 2b220da50407b2f4 5d4178fda0684d6d 78ac152064dec981 8c2f1dc41d1097d 2033c11959162523
+[RefTrace] After executeBytecode ic=0 reg_r=8575eb70905421e0 e7af22fb14e267dc a3521d05d9f2bdf0 cc2b1296be7fb5f8 e30037ba8d27bc06 9b3e9160b4aaa173 7044c546bec70800 e4a6389ad3c6bf80
+PASSED
+[85] Hash test 1a (interpreter v2)                ... [RefTrace] count=48 mx_=8a8a6230 ma_=738ddb40 read_reg0_=0 read_reg1_=3 read_reg2_=5 read_reg3_=7 dataset_offset_=a35540
+[RefTrace] Before executeBytecode ic=0 reg_r=612a24ccdb6d1c59 c45d4ce560500c25 b82f52b71e458bd1 49a02939f2f42afd dfedf516f1b712f2 5f2381e46cd4a70b 701f044edda4525b eee3cf8bdd06dd30
+[RefTrace] After executeBytecode ic=0 reg_r=e063858da433d51b 27d44f5666f67bad f838075cf2164707 5144bc06418e5638 729ee951dcdc2393 4465a9cc274165dc d53000ee75651ed6 26e8a567c2bda48c
+[RefTrace] count=49 mx_=11f95064 ma_=146944c0 read_reg0_=1 read_reg1_=2 read_reg2_=5 read_reg3_=7 dataset_offset_=1629b80
+[RefTrace] Before executeBytecode ic=0 reg_r=cc24cba9582c4a7c 2a73cf444d08261e 2e25935c38a972bf f5375c17dc74cf7c b8de16ebc1732f70 ff93787e9d76e6df 8d0e6892a9218717 d823cc418bf6d746
+[RefTrace] After executeBytecode ic=0 reg_r=23108e0baeacb52f 68e663f6ff31f784 49119848f559293b 90ae9991e58a1984 abc222e97f8ae8b0 aca259ea8fd765ce e93ee72628330f28 ff6baf571084df9f
+PASSED
+[86] Hash test 1b (interpreter v2)                ... PASSED
+[87] Hash test 1c (interpreter v2)                ... PASSED
+[88] Hash test 1d (interpreter v2)                ... PASSED
+[89] Hash test 1e (interpreter v2)                ... PASSED
+[90] Hash test 2a (compiler)                      ... PASSED
+[91] Hash test 2b (compiler)                      ... PASSED
+[92] Hash test 2c (compiler)                      ... PASSED
+[93] Hash test 2d (compiler)                      ... PASSED
+[94] Hash test 2e (compiler)                      ... PASSED
+[95] Hash test 2f (ISUB_R edge case, compiler)    ... PASSED
+[96] Hash test 2a (compiler v2)                   ... PASSED
+[97] Hash test 2b (compiler v2)                   ... PASSED
+[98] Hash test 2c (compiler v2)                   ... PASSED
+[99] Hash test 2d (compiler v2)                   ... PASSED
+[100] Hash test 2e (compiler v2)                   ... PASSED
+[101] Cache initialization: SSSE3                  ... PASSED
+[102] Cache initialization: AVX2                   ... PASSED
+[103] Hash batch test                              ... PASSED
+[104] Preserve rounding mode                       ... PASSED
+[105] Commitment test                              ... PASSED
+[106] Hash test (interpreter switch v1 <-> v2)     ... PASSED
+[107] Hash test (compiler switch v1 <-> v2)        ... PASSED
+
+All tests PASSED

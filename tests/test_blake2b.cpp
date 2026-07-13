@@ -4,6 +4,7 @@
 #include "armrx/dataset.hpp"
 #include "armrx/blake2b.hpp"
 #include "armrx/memory.hpp"
+#include "armrx/vm.hpp"
 
 #include <array>
 #include <algorithm>
@@ -160,7 +161,7 @@ int main() {
         std::byte{0xcb}, std::byte{0x12}, std::byte{0x8f}, std::byte{0xe4}};
     const auto encrypted = armrx::aes_encrypt_round(initial, round_key);
     assert(encrypted == expected);
-    assert(armrx::aes_decrypt_round(encrypted, round_key) == initial);
+    // Note: aes_decrypt_round implements equivalent inverse round (aesdec), which is not the direct mathematical inverse of a single aes_encrypt_round.
 
     armrx::AesState seed{};
     armrx::AesGenerator1R single_step{seed};
@@ -179,5 +180,24 @@ int main() {
     assert(secure_generated == output);
     assert(secure_buffered.state() == output);
     assert(secure_generated != seed);
+
+    // End-to-end VM hash tests using reference_cache ("test key 000")
+    armrx::VirtualMachine test_vm{armrx::kRandOMXFlagDefault};
+    test_vm.set_cache(&reference_cache);
+
+    alignas(16) std::array<std::byte, 32> output_hash{};
+
+    // Test input 1: "This is a test"
+    const char input1[] = "This is a test";
+    armrx::randomx_calculate_hash(&test_vm, input1, sizeof(input1) - 1, output_hash.data());
+    std::cout << "Input1 actual hash: " << hex(output_hash) << std::endl;
+    assert(hex(output_hash) == "639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f");
+
+    // Test input 2: "Lorem ipsum dolor sit amet"
+    const char input2[] = "Lorem ipsum dolor sit amet";
+    armrx::randomx_calculate_hash(&test_vm, input2, sizeof(input2) - 1, output_hash.data());
+    std::cout << "Input2 actual hash: " << hex(output_hash) << std::endl;
+    assert(hex(output_hash) == "300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969");
+
     return 0;
 }
