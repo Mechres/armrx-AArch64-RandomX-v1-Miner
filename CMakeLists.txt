@@ -76,4 +76,7 @@ if(ARMRX_BUILD_TESTS)
     add_executable(test_mining tests/test_mining.cpp)
     target_link_libraries(test_mining PRIVATE armrx_core)
     add_test(NAME test_mining COMMAND test_mining)
+
+    add_executable(bench_armrx tests/bench_armrx.cpp)
+    target_link_libraries(bench_armrx PRIVATE armrx_core)
 endif()
