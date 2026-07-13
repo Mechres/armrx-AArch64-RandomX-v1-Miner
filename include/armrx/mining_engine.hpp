@@ -44,8 +44,10 @@ private:
     unsigned int num_workers_{0};
     std::chrono::steady_clock::time_point start_time_;
 
+    // Lock-free job distribution: workers compare generation counter to avoid mutex
     std::mutex job_mutex_;
     Job current_job_;
+    std::atomic<std::uint64_t> job_generation_{0};
     std::atomic<std::uint64_t> nonce_counter_{0};
     bool has_job_{false};
 

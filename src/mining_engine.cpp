@@ -82,6 +82,7 @@ void MiningEngine::set_job(const Job& job) {
     }
 
     current_job_ = job;
+    job_generation_.fetch_add(1, std::memory_order_release);
     nonce_counter_.store(0);
     has_job_ = true;
 }
@@ -133,24 +134,25 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     bool active = false;
 
     std::uint64_t local_hashes = 0;
+    std::uint64_t local_gen = 0;
 
     while (running_.load(std::memory_order_relaxed)) {
-        // Read job state with lock
-        {
+        // Lock-free job check: only acquire mutex when generation counter changes
+        std::uint64_t current_gen = job_generation_.load(std::memory_order_acquire);
+        if (current_gen != local_gen) {
             std::lock_guard<std::mutex> lock(job_mutex_);
+            local_gen = current_gen;
             if (!has_job_) {
                 active = false;
             } else {
-                if (!active || current_job_.job_id != local_job.job_id) {
-                    local_job = current_job_;
-                    active_cache = shared_cache_;
-                    active_dataset = shared_dataset_;
-                    active = true;
+                local_job = current_job_;
+                active_cache = shared_cache_;
+                active_dataset = shared_dataset_;
+                active = true;
 
-                    vm.set_cache(active_cache.get());
-                    if (mode_ == RandomXMode::fast && active_dataset) {
-                        vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()));
-                    }
+                vm.set_cache(active_cache.get());
+                if (mode_ == RandomXMode::fast && active_dataset) {
+                    vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()));
                 }
             }
         }
