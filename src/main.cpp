@@ -68,11 +68,11 @@ int main(int argc, char** argv) {
 
     // Pool / stratum options
     bool should_connect_pool = false;
-    std::string pool_host;
-    std::uint16_t pool_port = 3333;
+    std::vector<std::pair<std::string, std::uint16_t>> pool_list;
     std::string pool_wallet;
     std::string pool_password = "x";
     bool pool_tls = false;
+    unsigned int current_pool_idx = 0;
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument{argv[i]};
@@ -126,15 +126,19 @@ int main(int argc, char** argv) {
         // ── Pool / stratum arguments ──────────────────────────────────────
         if (argument.rfind("--pool=", 0) == 0) {
             // Format: --pool=host:port  or  --pool=host  (default port 3333)
+            // Multiple --pool flags are accepted for failover
             should_connect_pool = true;
             std::string addr{argument.substr(7)};
             const auto colon = addr.rfind(':');
+            std::string host;
+            std::uint16_t port = 3333;
             if (colon != std::string::npos) {
-                pool_host = addr.substr(0, colon);
-                pool_port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
+                host = addr.substr(0, colon);
+                port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
             } else {
-                pool_host = std::move(addr);
+                host = std::move(addr);
             }
+            pool_list.emplace_back(std::move(host), port);
             continue;
         }
 
@@ -162,7 +166,7 @@ int main(int argc, char** argv) {
                 << "  --seconds=S                Duration to run benchmark in seconds, 0 for infinite (default: 10)\n"
                 << "\n"
                 << "Pool mining (Stratum V1):\n"
-                << "  --pool=host[:port]         Pool address (default port: 3333)\n"
+                << "  --pool=host[:port]         Pool address (default port: 3333); multiple allowed for failover\n"
                 << "  --wallet=<address>         Monero wallet address (worker login)\n"
                 << "  --password=<pw>            Worker password (default: x)\n"
                 << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
@@ -274,18 +278,27 @@ int main(int argc, char** argv) {
             std::cerr << "Pool mining requires --wallet=<address>\n";
             return 64;
         }
-        if (pool_host.empty()) {
+        if (pool_list.empty()) {
             std::cerr << "Pool mining requires --pool=<host>[:port]\n";
             return 64;
         }
 
-        std::cout << "\nStarting pool miner — connecting to "
-                  << pool_host << ':' << pool_port << '\n';
+        // Pool failover: cycle through the pool list on permanent disconnects
+        current_pool_idx = 0;
+
+        auto get_pool_name = [&](unsigned idx) -> std::string {
+            if (idx >= pool_list.size()) return "(none)";
+            return pool_list[idx].first + ":" + std::to_string(pool_list[idx].second);
+        };
+
+        std::cout << "\nStarting pool miner — " << pool_list.size()
+                  << " pool(s) configured\n";
 
         armrx::MiningEngine engine(effective_mode, workers);
 
         // Share callback: forward found shares to pool
-        armrx::StratumClient stratum(pool_host, pool_port, pool_wallet, pool_password);
+        auto stratum = std::make_unique<armrx::StratumClient>(
+            pool_list[0].first, pool_list[0].second, pool_wallet, pool_password);
 
         std::atomic<std::uint64_t> shares_submitted{0};
         std::atomic<std::uint64_t> total_hashes_snapshot{0};
@@ -295,48 +308,89 @@ int main(int argc, char** argv) {
             shares_submitted.fetch_add(1, std::memory_order_relaxed);
             std::cout << "[Pool] Share found! Nonce: " << std::hex << nonce
                       << " Hash: " << hash_to_hex(hash) << std::dec << '\n';
-            stratum.submit_share(job, nonce, hash);
+            stratum->submit_share(job, nonce, hash);
         };
 
-        stratum.enable_tls(pool_tls);
+        stratum->enable_tls(pool_tls);
 
         // Job callback: push new jobs from pool into the mining engine
-        stratum.set_job_callback([&](const armrx::Job& job) {
+        stratum->set_job_callback([&](const armrx::Job& job) {
             engine.set_job(job);
         });
 
         // Error callback: print disconnect/error messages
-        stratum.set_error_callback([](const std::string& reason) {
-            std::cerr << "[Stratum] Disconnected: " << reason << '\n';
+        stratum->set_error_callback([&](const std::string& reason) {
+            std::cerr << "[Stratum] " << get_pool_name(current_pool_idx)
+                      << ": " << reason << '\n';
         });
 
-        engine.start(share_callback);
+        // Setup reconnect: try next pool after max retries on current one
+        stratum->set_reconnect_config(5, 1000); // 5 retries per pool, 1s base
 
-        // Initial connection — if it fails, the reconnect loop handles retries
-        try {
-            stratum.connect();
-        } catch (const std::exception& ex) {
-            std::cerr << "[Stratum] Initial connection failed: " << ex.what() << '\n';
-            std::cerr << "[Stratum] Will retry with backoff...\n";
-        }
+        auto connect_to_pool = [&](unsigned idx) -> bool {
+            if (idx >= pool_list.size()) return false;
+            // Cleanly stop the old client before replacing it (prevents thread races)
+            if (stratum) stratum->disconnect();
+            stratum = std::make_unique<armrx::StratumClient>(
+                pool_list[idx].first, pool_list[idx].second, pool_wallet, pool_password);
+            stratum->enable_tls(pool_tls);
+            stratum->set_job_callback([&](const armrx::Job& job) {
+                engine.set_job(job);
+            });
+            stratum->set_error_callback([&](const std::string& reason) {
+                std::cerr << "[Stratum] " << get_pool_name(current_pool_idx)
+                          << ": " << reason << '\n';
+            });
+            stratum->set_reconnect_config(5, 1000);
+            try {
+                stratum->connect();
+                return true;
+            } catch (const std::exception& ex) {
+                std::cerr << "[Stratum] " << get_pool_name(idx)
+                          << ": " << ex.what() << '\n';
+                return false;
+            }
+        };
+
+        engine.start(share_callback);
+        connect_to_pool(0);
 
         std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
 
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
+        unsigned failover_cooldown = 0;
 
         while (keep_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
-            elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
-                std::chrono::steady_clock::now() - start_time).count());
+            ++elapsed_sec;
+
+            // Pool failover: if disconnected and retries exhausted, try next
+            if (!stratum->is_connected() && failover_cooldown == 0) {
+                const auto retries = stratum->reconnect_attempts();
+                if (retries >= 5 || (retries > 0 && !stratum->is_connected())) {
+                    current_pool_idx = (current_pool_idx + 1) % pool_list.size();
+                    std::cerr << "[Stratum] Failing over to "
+                              << get_pool_name(current_pool_idx) << '\n';
+                    failover_cooldown = 2; // wait 2s before attempting
+                }
+            }
+
+            if (failover_cooldown > 0) {
+                --failover_cooldown;
+                if (failover_cooldown == 0) {
+                    connect_to_pool(current_pool_idx);
+                }
+            }
 
             const double speed  = engine.hash_rate();
             const auto total    = engine.total_hashes();
             const auto shares   = shares_submitted.load();
-            const bool online   = stratum.is_connected();
-            const auto retries  = stratum.reconnect_attempts();
+            const bool online   = stratum->is_connected();
+            const auto retries  = stratum->reconnect_attempts();
 
-            std::cout << "[Pool] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
+            std::cout << "[Pool] " << get_pool_name(current_pool_idx)
+                      << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                       << " | Shares: " << shares
                       << " | Total: "     << total
                       << " | Uptime: "    << elapsed_sec << "s";
@@ -352,7 +406,7 @@ int main(int argc, char** argv) {
         }
         std::cout << std::endl;
 
-        stratum.disconnect();
+        stratum->disconnect();
         engine.stop();
 
         std::cout << "Pool mining stopped.\n"

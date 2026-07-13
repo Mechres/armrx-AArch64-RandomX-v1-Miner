@@ -9,8 +9,8 @@
 ### 3. NEON SIMD for SuperscalarHash
 The SuperscalarHash inner loop in [`src/superscalar.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/superscalar.cpp) executes a simulated 4-issue superscalar pipeline. AArch64 NEON can vectorize many of the multiply/add operations across multiple items simultaneously.
 
-### 4. CPU Affinity Pinning
-Worker threads in [`src/mining_engine.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/mining_engine.cpp) currently get scheduled by the OS. Pinning each thread to a specific core with `pthread_setaffinity_np` eliminates migration overhead and improves L1/L2 cache locality.
+### 4. CPU Affinity Pinning ✅
+**Complete.** Each worker thread is pinned to `thread_id % hardware_concurrency()` via `pthread_setaffinity_np` in `MiningEngine::worker_loop()`. Eliminates core migration overhead.
 
 ### 5. NUMA-Aware Allocation
 On multi-socket AArch64 servers, allocating the cache and dataset from NUMA-local memory (via `mbind`/`numa_alloc_onnode`) avoids cross-socket memory latency.
@@ -38,8 +38,8 @@ The JIT uses a 32-bit literal pool for `IMUL_RCP` constants. On very long progra
 ### 10. Auto-Reconnect with Backoff
 The current client disconnects permanently on socket error. An exponential backoff reconnect loop (1 s → 2 s → 4 s → 30 s max) with automatic re-subscription and re-authorization makes the miner production-grade.
 
-### 11. Multiple Pool Failover
-Accepting a list of `--pool` arguments and cycling through them on connection failure is standard practice for resilient mining.
+### 11. Multiple Pool Failover ✅
+**Complete.** Multiple `--pool=host:port` flags accepted. On permanent disconnect (5 retries exhausted), main.cpp cycles to the next pool in the list with a 2s cooldown.
 
 ### 12. Stratum V2 (Binary Protocol)
 The Stratum V2 protocol (used by p2pool and newer pools) provides encrypted channels, individual job assignment per worker, and reduced bandwidth. It's a larger undertaking but gives miners more privacy and pool operators better load balancing.
@@ -48,8 +48,8 @@ The Stratum V2 protocol (used by p2pool and newer pools) provides encrypted chan
 
 ## 📊 Observability & Operations
 
-### 13. Per-Worker Hash Rate
-Currently only aggregate H/s is tracked. Adding a `std::atomic<uint64_t>` per thread gives you per-core performance visibility — useful for diagnosing throttling or affinity issues.
+### 13. Per-Worker Hash Rate ✅
+**Complete.** Per-worker `std::atomic<uint64_t>` counters with periodic flush from local accumulators. Exposed via `MiningEngine::worker_hash_rate(thread_id)`.
 
 ### 14. Accepted / Rejected Share Counters
 Tracking pool-accepted vs rejected shares with timestamps allows computing your real effective difficulty and catching share submission bugs.
@@ -81,9 +81,9 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | ~~🟡 **4**~~ | ~~Huge pages for scratchpads (done)~~ | | |
 | ~~🟡 **2**~~ | ~~Parallel dataset generation (already implemented)~~ | | |
 | ~~🔴 **1**~~ | ~~TLS/SSL pool connections (done)~~ | | |
-| 🟡 **1** | CPU affinity pinning | H/s stability | Low |
-| 🟢 **3** | Per-worker H/s + share counters | Observability | Low |
-| 🟢 **4** | Multiple pool failover | Resilience | Low |
-| 🟢 **5** | Config file | UX | Medium |
-| ⚪ **6** | Stratum V2 | Future-proofing | High |
+| ~~🟡 **2**~~ | ~~CPU affinity pinning (done)~~ | | |
+| ~~🟢 **3**~~ | ~~Per-worker H/s counters (done)~~ | | |
+| ~~🟢 **4**~~ | ~~Multiple pool failover (done)~~ | | |
+| 🟢 **1** | Config file | UX | Medium |
+| ⚪ **2** | Stratum V2 | Future-proofing | High |
 

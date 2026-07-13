@@ -3,6 +3,7 @@
 #include "armrx/randomx_config.hpp"
 #include <iostream>
 #include <cstring>
+#include <pthread.h>
 
 namespace armrx {
 
@@ -20,6 +21,8 @@ void MiningEngine::start(ShareCallback callback) {
     share_callback_ = std::move(callback);
     running_.store(true);
     total_hashes_.store(0);
+    worker_hashes_ = std::make_unique<std::atomic<std::uint64_t>[]>(num_threads_);
+    num_workers_ = num_threads_;
     start_time_ = std::chrono::steady_clock::now();
 
     workers_.clear();
@@ -83,6 +86,20 @@ void MiningEngine::set_job(const Job& job) {
     has_job_ = true;
 }
 
+std::uint64_t MiningEngine::total_hashes() const {
+    return total_hashes_.load(std::memory_order_relaxed);
+}
+
+double MiningEngine::worker_hash_rate(unsigned int thread_id) const {
+    if (!running_.load() || !worker_hashes_ || thread_id >= num_workers_) {
+        return 0.0;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration<double>(now - start_time_).count();
+    if (elapsed <= 0.001) return 0.0;
+    return static_cast<double>(worker_hashes_[thread_id].load(std::memory_order_relaxed)) / elapsed;
+}
+
 double MiningEngine::hash_rate() const {
     if (!running_.load()) {
         return 0.0;
@@ -96,7 +113,12 @@ double MiningEngine::hash_rate() const {
 }
 
 void MiningEngine::worker_loop(unsigned int thread_id) {
-    (void)thread_id; // Unused for now
+    // Pin this worker to a specific CPU core
+    cpu_set_t cpus{};
+    CPU_ZERO(&cpus);
+    CPU_SET(static_cast<int>(thread_id % std::thread::hardware_concurrency()), &cpus);
+    pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+
     std::uint32_t flags = (mode_ == RandomXMode::fast) ? kRandOMXFlagFullMem : kRandOMXFlagDefault;
     VirtualMachine vm(flags);
 
@@ -104,6 +126,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     std::shared_ptr<std::vector<std::byte>> active_dataset;
     Job local_job;
     bool active = false;
+
+    std::uint64_t local_hashes = 0;
 
     while (running_.load(std::memory_order_relaxed)) {
         // Read job state with lock
@@ -139,13 +163,24 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
         alignas(16) std::array<std::byte, 32> hash{};
         randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
-        total_hashes_.fetch_add(1, std::memory_order_relaxed);
+        ++local_hashes;
 
         if (meets_target(hash, local_job.target)) {
             if (share_callback_) {
                 share_callback_(local_job, nonce, hash);
             }
         }
+
+        // Flush local counter to shared atomic periodically
+        if (local_hashes >= 64) {
+            total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
+            local_hashes = 0;
+        }
+    }
+
+    // Flush remaining
+    if (local_hashes > 0) {
+        total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
     }
 }
 

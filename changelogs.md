@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-13 (CPU affinity + per-worker counters + pool failover)
+
+### Added
+- **CPU affinity pinning** (`src/mining_engine.cpp`): Each worker thread pinned to `thread_id % hardware_concurrency()` via `pthread_setaffinity_np` — eliminates core migration overhead.
+- **Per-worker hash counters** (`include/armrx/mining_engine.hpp`, `src/mining_engine.cpp`): Per-thread `std::atomic<uint64_t>` array with local accumulator batching (flush every 64 hashes). Exposed via `worker_hash_rate(thread_id)`.
+- **Multiple pool failover** (`src/main.cpp`): Accept multiple `--pool=host:port` arguments. After 5 retries on the current pool, automatically cycles to the next with a 2s cooldown.
+- **`--help` updated**: Documents `--tls`, multi-pool, and all CLI flags.
+
+### Remaining
+- Only two items left in the priority list: config file (medium) and Stratum V2 (high).
+
 ## 2026-07-13 (TLS/SSL pool connections + documentation sweep)
 
 ### Added

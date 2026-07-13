@@ -25,8 +25,9 @@ public:
 
     void set_job(const Job& job);
 
-    [[nodiscard]] std::uint64_t total_hashes() const { return total_hashes_.load(); }
+    [[nodiscard]] std::uint64_t total_hashes() const;
     [[nodiscard]] double hash_rate() const;
+    [[nodiscard]] double worker_hash_rate(unsigned int thread_id) const;
 
 private:
     void worker_loop(unsigned int thread_id);
@@ -38,6 +39,9 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> total_hashes_{0};
+    // Per-worker hash counters (C-style array to avoid std::atomic move issues)
+    std::unique_ptr<std::atomic<std::uint64_t>[]> worker_hashes_;
+    unsigned int num_workers_{0};
     std::chrono::steady_clock::time_point start_time_;
 
     std::mutex job_mutex_;
