@@ -159,7 +159,7 @@ VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
     // Hint to kernel: promote to transparent huge pages (2 MiB) for TLB efficiency
     ::madvise(scratchpad_.data(), scratchpad_.size(), MADV_HUGEPAGE);
 #ifdef ARMRX_HAVE_JIT
-    if (flags_ & kRandOMXFlagJit) {
+    if ((flags_ & kRandOMXFlagJit) && (flags_ & kRandOMXFlagFullMem)) {
         jit_ = std::make_unique<JitCompilerA64>();
         jit_->setFlags(map_to_randomx_flags(flags_));
     }

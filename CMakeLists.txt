@@ -5,6 +5,11 @@ project(armrx VERSION 0.1.0 LANGUAGES C CXX ASM)
 option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "Setting build type to 'Release' as none was specified.")
+    set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
+endif()
+
 add_library(armrx_core
     src/aes.cpp
     src/aes_generator.cpp

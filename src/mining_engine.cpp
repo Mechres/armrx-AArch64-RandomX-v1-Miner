@@ -120,6 +120,9 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
 
     std::uint32_t flags = (mode_ == RandomXMode::fast) ? kRandOMXFlagFullMem : kRandOMXFlagDefault;
+#ifdef ARMRX_HAVE_JIT
+    flags |= kRandOMXFlagJit;
+#endif
     VirtualMachine vm(flags);
 
     std::shared_ptr<Argon2dCache> active_cache;
@@ -172,7 +175,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         }
 
         // Flush local counter to shared atomic periodically
-        if (local_hashes >= 64) {
+        const std::uint64_t flush_interval = (mode_ == RandomXMode::fast) ? 64U : 1U;
+        if (local_hashes >= flush_interval) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
             local_hashes = 0;
         }
