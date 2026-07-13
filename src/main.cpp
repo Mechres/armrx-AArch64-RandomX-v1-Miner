@@ -4,6 +4,8 @@
 #include "armrx/randomx_config.hpp"
 #include "armrx/mining_engine.hpp"
 #include "armrx/stratum_client.hpp"
+#include "armrx/config.hpp"
+#include "armrx/tui.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -16,6 +18,7 @@
 #include <vector>
 #include <csignal>
 #include <iomanip>
+#include <memory>
 
 namespace {
 
@@ -75,10 +78,38 @@ int main(int argc, char** argv) {
     std::string pool_wallet;
     std::string pool_password = "x";
     bool pool_tls = false;
+    bool use_tui = false;
     unsigned int current_pool_idx = 0;
+
+    // Load config from file (CLI overrides below)
+    std::string config_path;
+    for (int i = 1; i < argc; ++i) {
+        std::string_view a{argv[i]};
+        if (a.rfind("--config=", 0) == 0) {
+            config_path = std::string{a.substr(9)};
+            break;
+        }
+    }
+    {
+        auto cfg = armrx::load_config_with_fallback(config_path);
+        for (auto& p : cfg.pools) pool_list.push_back({p.host, p.port});
+        if (!cfg.wallet.empty()) pool_wallet = cfg.wallet;
+        if (cfg.password != "x") pool_password = cfg.password;
+        pool_tls = cfg.pool_tls;
+        if (cfg.workers > 0) workers = cfg.workers;
+        if (cfg.mode != "auto") {
+            mode_is_auto = false;
+            if (cfg.mode == "light") requested_mode = armrx::RandomXMode::light;
+            else if (cfg.mode == "fast") requested_mode = armrx::RandomXMode::fast;
+        }
+        difficulty = cfg.difficulty;
+        runtime_seconds = cfg.seconds;
+    }
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument{argv[i]};
+        // Debug: uncomment to see parsed args
+        // std::cerr << "[DEBUG] arg[" << i << "] = \"" << argument << "\"\n";
         if (argument.rfind("--mode=", 0) == 0) {
             const auto mode_text = argument.substr(7);
             if (mode_text == "auto") {
@@ -163,6 +194,14 @@ int main(int argc, char** argv) {
             pool_tls = false;
             continue;
         }
+        if (argument == "--tui") {
+            use_tui = true;
+            continue;
+        }
+        if (argument == "--no-tui") {
+            use_tui = false;
+            continue;
+        }
 
         if (argument == "--help" || argument == "-h") {
             std::cout
@@ -182,6 +221,8 @@ int main(int argc, char** argv) {
                 << "  --wallet=<address>         Monero wallet address (worker login)\n"
                 << "  --password=<pw>            Worker password (default: x)\n"
                 << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
+                << "  --config=<path>           Config file path (default: ~/.config/armrx/config.json)\n"
+                << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "\n"
                 << "  -h, --help                 Display this help menu\n";
             return 0;
@@ -272,6 +313,7 @@ int main(int argc, char** argv) {
             const std::uint64_t total  = engine.total_hashes();
             const std::uint64_t shares = shares_found.load();
 
+            // TUI not supported in benchmark mode
             std::cout << "[Mining] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                       << " | Shares: " << shares
                       << " | Total Hashes: " << total
@@ -294,6 +336,8 @@ int main(int argc, char** argv) {
             std::cerr << "Pool mining requires --pool=<host>[:port]\n";
             return 64;
         }
+        std::cerr << "[DEBUG] Connecting to pool: " << pool_list[0].first << ":" << pool_list[0].second
+                  << " wallet=" << pool_wallet.substr(0, 10) << "... tls=" << pool_tls << "\n";
 
         // Pool failover: cycle through the pool list on permanent disconnects
         current_pool_idx = 0;
@@ -367,7 +411,13 @@ int main(int argc, char** argv) {
         engine.start(share_callback);
         connect_to_pool(0);
 
-        std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
+        // Optional TUI dashboard
+        std::unique_ptr<armrx::Tui> tui;
+        if (use_tui) tui = std::make_unique<armrx::Tui>();
+
+        if (!use_tui) {
+            std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
+        }
 
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
@@ -401,20 +451,32 @@ int main(int argc, char** argv) {
             const bool online   = stratum->is_connected();
             const auto retries  = stratum->reconnect_attempts();
 
-            std::cout << "[Pool] " << get_pool_name(current_pool_idx)
-                      << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
-                      << " | Shares: " << shares
-                      << " | Total: "     << total
-                      << " | Uptime: "    << elapsed_sec << "s";
-            if (!online) {
-                std::cout << " | ";
-                if (retries > 0) {
-                    std::cout << "\033[33mReconnecting (attempt " << retries << ")...\033[0m";
-                } else {
-                    std::cout << "\033[33mDisconnected\033[0m";
+            if (tui) {
+                std::string status = online ? "\033[32mmining\033[0m"
+                    : (retries > 0 ? "\033[33mreconnecting\033[0m" : "\033[31mdisconnected\033[0m");
+                std::vector<double> worker_rates;
+                for (unsigned w = 0; w < workers; ++w) {
+                    worker_rates.push_back(engine.worker_hash_rate(w));
                 }
+                tui->render(get_pool_name(current_pool_idx), status,
+                            elapsed_sec, speed, total, shares,
+                            worker_rates, workers, armrx::mode_name(effective_mode));
+            } else {
+                std::cout << "[Pool] " << get_pool_name(current_pool_idx)
+                          << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
+                          << " | Shares: " << shares
+                          << " | Total: "     << total
+                          << " | Uptime: "    << elapsed_sec << "s";
+                if (!online) {
+                    std::cout << " | ";
+                    if (retries > 0) {
+                        std::cout << "\033[33mReconnecting (attempt " << retries << ")...\033[0m";
+                    } else {
+                        std::cout << "\033[33mDisconnected\033[0m";
+                    }
+                }
+                std::cout << "\r" << std::flush;
             }
-            std::cout << "\r" << std::flush;
         }
         std::cout << std::endl;
 

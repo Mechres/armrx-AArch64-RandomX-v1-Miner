@@ -182,6 +182,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         const std::uint64_t flush_interval = (mode_ == RandomXMode::fast) ? 64U : 1U;
         if (local_hashes >= flush_interval) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
+            worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
             local_hashes = 0;
         }
     }
@@ -189,6 +190,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     // Flush remaining
     if (local_hashes > 0) {
         total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
+        worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
     }
 }
 
