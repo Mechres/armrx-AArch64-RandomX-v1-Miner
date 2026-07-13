@@ -184,6 +184,11 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
             worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
             local_hashes = 0;
+
+            total_jit_compile_time_ns_.fetch_add(vm.get_jit_compile_time_ns(), std::memory_order_relaxed);
+            total_jit_execute_time_ns_.fetch_add(vm.get_jit_execute_time_ns(), std::memory_order_relaxed);
+            total_jit_runs_.fetch_add(vm.get_jit_total_runs(), std::memory_order_relaxed);
+            vm.reset_jit_timers();
         }
     }
 
@@ -192,6 +197,9 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
         worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
     }
+    total_jit_compile_time_ns_.fetch_add(vm.get_jit_compile_time_ns(), std::memory_order_relaxed);
+    total_jit_execute_time_ns_.fetch_add(vm.get_jit_execute_time_ns(), std::memory_order_relaxed);
+    total_jit_runs_.fetch_add(vm.get_jit_total_runs(), std::memory_order_relaxed);
 }
 
 void MiningEngine::update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size) {

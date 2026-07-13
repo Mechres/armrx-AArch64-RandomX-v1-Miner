@@ -78,6 +78,15 @@ public:
     [[nodiscard]] const RegisterFile& get_register_file() const { return reg_; }
     [[nodiscard]] const std::byte* get_scratchpad() const { return scratchpad_data_; }
 
+    [[nodiscard]] std::uint64_t get_jit_compile_time_ns() const { return jit_compile_time_ns_; }
+    [[nodiscard]] std::uint64_t get_jit_execute_time_ns() const { return jit_execute_time_ns_; }
+    [[nodiscard]] std::uint64_t get_jit_total_runs() const { return jit_total_runs_; }
+    void reset_jit_timers() {
+        jit_compile_time_ns_ = 0;
+        jit_execute_time_ns_ = 0;
+        jit_total_runs_ = 0;
+    }
+
 private:
     void initialize_vm_state();
     void compile_program();
@@ -120,6 +129,10 @@ private:
 #ifdef ARMRX_HAVE_JIT
     std::unique_ptr<JitCompilerA64> jit_;
 #endif
+
+    std::uint64_t jit_compile_time_ns_ = 0;
+    std::uint64_t jit_execute_time_ns_ = 0;
+    std::uint64_t jit_total_runs_ = 0;
 };
 
 // Top-level public interface for hash calculations

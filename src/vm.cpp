@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <chrono>
 
 namespace armrx {
 namespace {
@@ -827,6 +828,7 @@ void VirtualMachine::run(const void* seed) {
         config.readReg2 = read_reg2_;
         config.readReg3 = read_reg3_;
 
+        auto t0 = std::chrono::high_resolution_clock::now();
         jit_->enableWriting();
         if (dataset_.empty()) {
             // Light mode: JIT compiler generates inline dataset item derivation
@@ -836,6 +838,7 @@ void VirtualMachine::run(const void* seed) {
             jit_->generateProgram(program_, config);
         }
         jit_->enableExecution();
+        auto t1 = std::chrono::high_resolution_clock::now();
 
         MemoryRegisters mem_regs{};
         mem_regs.mx = mx_;
@@ -855,6 +858,11 @@ void VirtualMachine::run(const void* seed) {
             &reg_, &mem_regs,
             reinterpret_cast<void*>(scratchpad_data_),
             2048ULL);
+        auto t2 = std::chrono::high_resolution_clock::now();
+
+        jit_compile_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+        jit_execute_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+        jit_total_runs_++;
 
         // Extract updated mx/ma back from mem_regs after JIT execution
         mx_ = mem_regs.mx;

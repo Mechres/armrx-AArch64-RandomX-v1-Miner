@@ -6,6 +6,7 @@
 #include <iostream>
 #include <sstream>
 #include <vector>
+#include <iomanip>
 
 namespace armrx {
 
@@ -28,7 +29,8 @@ void Tui::render(const std::string& pool_name, const std::string& status,
                  unsigned uptime_sec, double total_hash_rate,
                  std::uint64_t total_hashes, std::uint64_t shares,
                  const std::vector<double>& worker_rates,
-                 unsigned workers, const std::string& mode) {
+                 unsigned workers, const std::string& mode,
+                 double jit_compile_pct, double jit_execute_pct) {
     if (!enabled_) return;
 
     char tmp[128];
@@ -70,6 +72,12 @@ void Tui::render(const std::string& pool_name, const std::string& status,
           << "  Hashes: " << total_hashes << "\n";
 
     int new_lines = 1 + std::min(workers, 8u) + 1;
+
+    if (jit_compile_pct >= 0.0 && jit_execute_pct >= 0.0) {
+        frame << "  JIT Profile: Compile " << std::fixed << std::setprecision(1) << jit_compile_pct << "%"
+              << " | Execute " << std::fixed << std::setprecision(1) << jit_execute_pct << "%\n";
+        new_lines += 1;
+    }
 
     // Move cursor up, clear, print new frame
     for (int i = 0; i < prev_lines_; ++i)

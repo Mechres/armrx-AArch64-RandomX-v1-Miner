@@ -22,7 +22,8 @@ public:
                 unsigned uptime_sec, double total_hash_rate,
                 std::uint64_t total_hashes, std::uint64_t shares,
                 const std::vector<double>& worker_rates,
-                unsigned workers, const std::string& mode);
+                unsigned workers, const std::string& mode,
+                double jit_compile_pct = -1.0, double jit_execute_pct = -1.0);
 
     /** Hide cursor and clear on exit. */
     void shutdown();

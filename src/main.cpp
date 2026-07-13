@@ -451,6 +451,16 @@ int main(int argc, char** argv) {
             const bool online   = stratum->is_connected();
             const auto retries  = stratum->reconnect_attempts();
 
+            double compile_pct = -1.0;
+            double execute_pct = -1.0;
+            std::uint64_t total_compile = engine.total_jit_compile_time_ns();
+            std::uint64_t total_execute = engine.total_jit_execute_time_ns();
+            if (total_compile + total_execute > 0) {
+                double total_time = static_cast<double>(total_compile + total_execute);
+                compile_pct = (static_cast<double>(total_compile) / total_time) * 100.0;
+                execute_pct = (static_cast<double>(total_execute) / total_time) * 100.0;
+            }
+
             if (tui) {
                 std::string status = online ? "\033[32mmining\033[0m"
                     : (retries > 0 ? "\033[33mreconnecting\033[0m" : "\033[31mdisconnected\033[0m");
@@ -460,13 +470,18 @@ int main(int argc, char** argv) {
                 }
                 tui->render(get_pool_name(current_pool_idx), status,
                             elapsed_sec, speed, total, shares,
-                            worker_rates, workers, armrx::mode_name(effective_mode));
+                            worker_rates, workers, armrx::mode_name(effective_mode),
+                            compile_pct, execute_pct);
             } else {
                 std::cout << "[Pool] " << get_pool_name(current_pool_idx)
                           << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                           << " | Shares: " << shares
                           << " | Total: "     << total
                           << " | Uptime: "    << elapsed_sec << "s";
+                if (compile_pct >= 0.0 && execute_pct >= 0.0) {
+                    std::cout << " | JIT Compile: " << std::fixed << std::setprecision(1) << compile_pct << "%"
+                              << " Exec: " << execute_pct << "%";
+                }
                 if (!online) {
                     std::cout << " | ";
                     if (retries > 0) {

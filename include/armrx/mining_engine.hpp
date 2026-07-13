@@ -29,6 +29,10 @@ public:
     [[nodiscard]] double hash_rate() const;
     [[nodiscard]] double worker_hash_rate(unsigned int thread_id) const;
 
+    [[nodiscard]] std::uint64_t total_jit_compile_time_ns() const { return total_jit_compile_time_ns_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t total_jit_execute_time_ns() const { return total_jit_execute_time_ns_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t total_jit_runs() const { return total_jit_runs_.load(std::memory_order_relaxed); }
+
 private:
     void worker_loop(unsigned int thread_id);
     void update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size);
@@ -43,6 +47,10 @@ private:
     std::unique_ptr<std::atomic<std::uint64_t>[]> worker_hashes_;
     unsigned int num_workers_{0};
     std::chrono::steady_clock::time_point start_time_;
+
+    std::atomic<std::uint64_t> total_jit_compile_time_ns_{0};
+    std::atomic<std::uint64_t> total_jit_execute_time_ns_{0};
+    std::atomic<std::uint64_t> total_jit_runs_{0};
 
     // Lock-free job distribution: workers compare generation counter to avoid mutex
     std::mutex job_mutex_;
