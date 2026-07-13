@@ -119,7 +119,9 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     CPU_SET(static_cast<int>(thread_id % std::thread::hardware_concurrency()), &cpus);
     pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
 
-    std::uint32_t flags = (mode_ == RandomXMode::fast) ? kRandOMXFlagFullMem : kRandOMXFlagDefault;
+    // On AArch64 with crypto extensions, hardware AES is always available
+    std::uint32_t flags = kRandOMXFlagHardAes;
+    if (mode_ == RandomXMode::fast) flags |= kRandOMXFlagFullMem;
 #ifdef ARMRX_HAVE_JIT
     flags |= kRandOMXFlagJit;
 #endif

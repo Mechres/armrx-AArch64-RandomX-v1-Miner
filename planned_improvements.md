@@ -1,5 +1,18 @@
 ## Performance Optimizations
 
+### Profile: Current bottleneck analysis
+
+XMRig on same hardware (8× Cortex-A53, light/slow mode) achieves **27 H/s**.
+Our miner achieves **~1.2-1.9 H/s** — a **14-22× gap**. Root causes identified:
+
+| Factor | Est. contribution | Evidence |
+|--------|-------------------|----------|
+| `generateProgramLight()` never called (fixed) | ~2× | 0.83 → 1.9 H/s |
+| Cache pointer null in light-mode JIT (fixed) | TBD | memory was nullptr |
+| JIT recompilation per hash | TBD | Needs profiling |
+| ASM dataset stubs not resolving | TBD | Needs verification |
+| Remaining after fixes | TBD | Test on device |
+
 ### 1. Scratchpad — Huge Pages (2 MiB THP) ✅
 **Complete.** `madvise(MADV_HUGEPAGE)` applied after each 2 MiB scratchpad allocation in `VirtualMachine` constructor. The kernel promotes the pages to 2 MiB transparent huge pages, reducing TLB pressure on AArch64.
 
@@ -14,6 +27,46 @@ The SuperscalarHash inner loop in [`src/superscalar.cpp`](file:///home/mechres/P
 
 ### 5. NUMA-Aware Allocation
 On multi-socket AArch64 servers, allocating the cache and dataset from NUMA-local memory (via `mbind`/`numa_alloc_onnode`) avoids cross-socket memory latency.
+
+---
+
+## 🚀 Light-Mode Speed (22× gap to XMRig)
+
+### 6. Profile: JIT Compilation Overhead per Hash
+The JIT generates 8 new programs per hash (one per VM chain), each compiling ~256 RandomX instructions to AArch64 machine code *plus* the `calc_dataset_item` inline assembly stubs. **Hypothesis:** this compilation takes significant CPU time. **Fix:** add micro-timing around `jit_->generateProgramLight()` in `run()` to measure overhead per hash. If ≥10ms, caching programs across hashes (when seed is stable, ~2 min on pool) would help.
+
+### 7. Profile: Dataset Item Derivation Rate
+In light mode, each hash needs 16,384 dataset items (8 programs × 2048 iterations). Measure how many items/sec the JIT's ASM stubs actually produce vs the C++ `generate_dataset_item()` path. If the JIT path is slower, the ASM stubs may have a bug or misaligned code layout.
+
+### 8. Verify ASM Stub Execution
+The `randomx_calc_dataset_item_aarch64` ASM routines in `jit_compiler_a64_static.S` are called from JIT-generated code. Verify they execute and produce correct items. Add a counter in `run()` or compare hash output between JIT light mode and interpreted light mode on a known input.
+
+### 9. JIT Program Caching
+Currently, each hash generates 8 new programs. If the RandomX seed key hasn't changed (typically stable for ~120s on pool), the SuperscalarHash programs are identical across hashes. **Caching** them in an LRU map keyed by (seed_height, block_template_hash) would eliminate 99% of JIT recompilation. This is the highest-impact single optimization.
+
+### 10. Scratchpad: `mmap` instead of `std::vector`
+`std::vector<std::byte>` allocates via `new` → `malloc`. Using `mmap(MAP_ANONYMOUS | MAP_PRIVATE)` with `MAP_HUGETLB` or `MADV_HUGEPAGE` gives direct control over page size and alignment. XMRig uses this approach. May reduce TLB misses beyond `MADV_HUGEPAGE` alone.
+
+### 11. Worker Loop: Reduce Lock Contention
+Each hash acquires `job_mutex_` to check for job updates and copy the active job. For a pool with stable jobs, this lock is almost never contended. Switching to a `std::atomic<uint64_t>` job generation counter + lock-free job pointer swap would eliminate the mutex entirely.
+
+### 12. Multi-Issue Superscalar Execution
+`execute_superscalar()` in `src/superscalar.cpp` simulates a 4-issue pipeline in software. AArch64 NEON can vectorize these operations for parallel item derivation.
+
+### 13. `CalcDatasetItemSize` Code Layout Optimization
+The `randomx_calc_dataset_item_aarch64` assembly blocks are embedded in the JIT executable code region. Their size (`CalcDatasetItemSize`) may be misaligned or larger than optimal, wasting I-cache. Profile with `perf stat` to check I-cache miss rate.
+
+### 14. Argon2 Cache Init Parallelism
+Cache initialization uses a single-threaded Argon2d hash. Splitting across threads (Argon2 supports up to 4 lanes) could reduce startup time.
+
+### 15. Benchmark Each Component in Isolation
+Create micro-benchmarks for:
+- Cache line read bandwidth (MiB/s)
+- SuperscalarHash item derivation (items/s)
+- Scratchpad fill/hash (MiB/s)
+- JIT compilation time (μs/program)
+- Interpreted loop throughput (instructions/s)
+Compare against XMRig's perf numbers to identify remaining gaps.
 
 ---
 
@@ -84,6 +137,12 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | ~~🟡 **2**~~ | ~~CPU affinity pinning (done)~~ | | |
 | ~~🟢 **3**~~ | ~~Per-worker H/s counters (done)~~ | | |
 | ~~🟢 **4**~~ | ~~Multiple pool failover (done)~~ | | |
-| 🟢 **1** | Config file | UX | Medium |
-| ⚪ **2** | Stratum V2 | Future-proofing | High |
+| 🔴 **1** | JIT program caching (seed-stable, eliminates 99% of recompilation) | Speed | Medium |
+| 🔴 **2** | Profile JIT compilation overhead per hash | Diagnosis | Low |
+| 🔴 **3** | Verify ASM dataset stubs execute correctly | Correctness | Low |
+| 🟡 **4** | Scratchpad via mmap instead of vector | Speed | Low |
+| 🟡 **5** | Worker loop: lock-free job pointer | Speed | Low |
+| 🟡 **6** | Benchmark each component in isolation | Diagnosis | Medium |
+| 🟢 **7** | Config file | UX | Medium |
+| ⚪ **8** | Stratum V2 | Future-proofing | High |
 

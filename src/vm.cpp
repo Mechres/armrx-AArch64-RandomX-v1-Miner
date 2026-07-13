@@ -807,14 +807,25 @@ void VirtualMachine::run(const void* seed) {
         config.readReg3 = read_reg3_;
 
         jit_->enableWriting();
-        jit_->generateProgram(program_, config);
+        if (dataset_.empty()) {
+            // Light mode: JIT compiler generates inline dataset item derivation
+            jit_->generateProgramLight(program_, config, dataset_offset_);
+        } else {
+            // Fast mode: JIT compiler reads directly from pre-computed dataset
+            jit_->generateProgram(program_, config);
+        }
         jit_->enableExecution();
 
         MemoryRegisters mem_regs{};
         mem_regs.mx = mx_;
         mem_regs.ma = ma_;
-        mem_regs.memory = dataset_.empty() ? nullptr :
-            reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
+        if (dataset_.empty()) {
+            // Light mode: JIT needs cache pointer to derive dataset items on the fly
+            mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
+        } else {
+            // Fast mode: JIT reads from pre-computed dataset
+            mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
+        }
 
         // Copy eMask into the top of reg_.a as the native ABI expects
         std::memcpy(&reg_.a[0], config.eMask, sizeof(config.eMask));
