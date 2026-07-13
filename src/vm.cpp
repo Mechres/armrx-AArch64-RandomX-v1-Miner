@@ -159,7 +159,7 @@ VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
     // Hint to kernel: promote to transparent huge pages (2 MiB) for TLB efficiency
     ::madvise(scratchpad_.data(), scratchpad_.size(), MADV_HUGEPAGE);
 #ifdef ARMRX_HAVE_JIT
-    if ((flags_ & kRandOMXFlagJit) && (flags_ & kRandOMXFlagFullMem)) {
+    if (flags_ & kRandOMXFlagJit) {
         jit_ = std::make_unique<JitCompilerA64>();
         jit_->setFlags(map_to_randomx_flags(flags_));
     }
@@ -170,6 +170,13 @@ VirtualMachine::~VirtualMachine() = default;
 
 void VirtualMachine::set_cache(const Argon2dCache* cache) {
     cache_ = cache;
+#ifdef ARMRX_HAVE_JIT
+    if (jit_ && cache) {
+        jit_->enableWriting();
+        jit_->generateSuperscalarHash(cache->programs(), cache->reciprocal_cache());
+        jit_->enableExecution();
+    }
+#endif
 }
 
 void VirtualMachine::set_dataset(std::span<const std::byte> dataset) {

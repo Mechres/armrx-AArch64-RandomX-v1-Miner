@@ -139,7 +139,7 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 | ~~🟢 **4**~~ | ~~Multiple pool failover (done)~~ | | |
 | 🔴 **1** | JIT program caching (seed-stable, eliminates 99% of recompilation) | Speed | Medium |
 | 🔴 **2** | Profile JIT compilation overhead per hash | Diagnosis | Low |
-| 🔴 **3** | Verify ASM dataset stubs execute correctly | Correctness | Low |
+| ~~✅ 🔴 **3**~~ | ~~Verify ASM dataset stubs execute correctly (done)~~ | | |
 | 🟡 **4** | Scratchpad via mmap instead of vector | Speed | Low |
 | 🟡 **5** | Worker loop: lock-free job pointer | Speed | Low |
 | 🟡 **6** | Benchmark each component in isolation | Diagnosis | Medium |

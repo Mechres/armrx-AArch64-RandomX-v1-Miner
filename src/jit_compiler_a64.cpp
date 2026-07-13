@@ -49,7 +49,7 @@ static constexpr uint32_t RANDOMX_SCRATCHPAD_L3      = 2097152U;    // 2 MiB
 static constexpr uint32_t RANDOMX_SCRATCHPAD_L2      = 262144U;     // 256 KiB
 static constexpr uint32_t RANDOMX_SCRATCHPAD_L1      = 16384U;      // 16 KiB
 static constexpr uint32_t CacheLineSize              = 64U;         // RANDOMX_DATASET_ITEM_SIZE
-static constexpr uint32_t CacheSize                  = 2147483648U; // RANDOMX_DATASET_BASE_SIZE
+static constexpr uint32_t CacheSize                  = 268435456U;  // 256 MiB (RANDOMX_ARGON_MEMORY * 1024)
 static constexpr uint32_t ScratchpadL3Mask           = 2097144U;    // (RANDOMX_SCRATCHPAD_L3 / 8 - 1) * 8
 static constexpr uint32_t RegisterNeedsDisplacement   = 5U;
 static constexpr uint32_t ConditionMask               = 0xFFU;       // (1 << RANDOMX_JUMP_BITS) - 1
@@ -340,7 +340,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 #endif
 }
 
-void JitCompilerA64::generateSuperscalarHash(SuperscalarProgramList &programs, std::vector<uint64_t> &reciprocalCache)
+void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& programs, const std::vector<uint64_t>& reciprocalCache)
 {
 	uint32_t codePos = CodeSize;
 
@@ -362,7 +362,7 @@ void JitCompilerA64::generateSuperscalarHash(SuperscalarProgramList &programs, s
 		memcpy(code + codePos, p1, p2 - p1);
 		codePos += p2 - p1;
 
-		SuperscalarProgram& prog = programs[i];
+		const SuperscalarProgram& prog = programs[i];
 		const size_t progSize = prog.size();
 
 		uint32_t jmp_pos = codePos;

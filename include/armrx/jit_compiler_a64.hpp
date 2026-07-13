@@ -55,7 +55,7 @@ namespace armrx {
 		void generateProgram(Program&, ProgramConfiguration&);
 		void generateProgramLight(Program&, ProgramConfiguration&, uint32_t);
 
-		void generateSuperscalarHash(SuperscalarProgramList &programs, std::vector<uint64_t> &);
+		void generateSuperscalarHash(const SuperscalarProgramList& programs, const std::vector<uint64_t>&);
 
 		void generateDatasetInitCode() {}
 
