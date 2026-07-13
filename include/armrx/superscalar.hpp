@@ -77,4 +77,10 @@ void generate_superscalar(SuperscalarProgram& prog, Blake2Generator& gen);
 void execute_superscalar(std::array<std::uint64_t, 8>& r, const SuperscalarProgram& prog,
                          const std::vector<std::uint64_t>* reciprocals = nullptr);
 
+#ifdef __aarch64__
+#include <arm_neon.h>
+void execute_superscalar_neon(uint64x2_t vr[8], const SuperscalarProgram& prog,
+                              const std::vector<std::uint64_t>* reciprocals = nullptr);
+#endif
+
 } // namespace armrx

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-14 (NEON SIMD Superscalar execution vectorization)
+
+### Added
+- **NEON SIMD Vectorized Superscalar execution** (`include/armrx/superscalar.hpp`, `src/superscalar.cpp`): Added `execute_superscalar_neon` using AArch64 NEON intrinsics (`vaddq_u64`, `vsubq_u64`, `veorq_u64`, etc.) to process two items in parallel using `uint64x2_t` registers.
+- **Vectorized Dataset initialization** (`src/dataset.cpp`): Updated `initialize_dataset` under `__aarch64__` to process dataset items in pairs of 2, calling `execute_superscalar_neon` and parallelizing cache line XOR lookups.
+- **Dataset generation benchmark** (`tests/bench_armrx.cpp`): Added micro-benchmark for `initialize_dataset` generating 5,000 items in a batch.
+
 ## 2026-07-13 (CryptoNote/Herominers Stratum support)
 
 ### Added

@@ -767,4 +767,80 @@ void execute_superscalar(std::array<std::uint64_t, 8>& r, const SuperscalarProgr
     }
 }
 
+#ifdef __aarch64__
+void execute_superscalar_neon(uint64x2_t vr[8], const SuperscalarProgram& prog,
+                              const std::vector<std::uint64_t>* reciprocals) {
+    for (std::uint32_t j = 0; j < prog.size(); ++j) {
+        const Instruction& instr = prog(j);
+        switch (static_cast<SuperscalarInstructionType>(instr.opcode))
+        {
+        case SuperscalarInstructionType::ISUB_R:
+            vr[instr.dst] = vsubq_u64(vr[instr.dst], vr[instr.src]);
+            break;
+        case SuperscalarInstructionType::IXOR_R:
+            vr[instr.dst] = veorq_u64(vr[instr.dst], vr[instr.src]);
+            break;
+        case SuperscalarInstructionType::IADD_RS: {
+            uint64x2_t shifted;
+            switch (instr.getModShift()) {
+                case 0: shifted = vr[instr.src]; break;
+                case 1: shifted = vshlq_n_u64(vr[instr.src], 1); break;
+                case 2: shifted = vshlq_n_u64(vr[instr.src], 2); break;
+                case 3: shifted = vshlq_n_u64(vr[instr.src], 3); break;
+            }
+            vr[instr.dst] = vaddq_u64(vr[instr.dst], shifted);
+            break;
+        }
+        case SuperscalarInstructionType::IMUL_R: {
+            std::uint64_t dst0 = vgetq_lane_u64(vr[instr.dst], 0) * vgetq_lane_u64(vr[instr.src], 0);
+            std::uint64_t dst1 = vgetq_lane_u64(vr[instr.dst], 1) * vgetq_lane_u64(vr[instr.src], 1);
+            vr[instr.dst] = vcombine_u64(vcreate_u64(dst0), vcreate_u64(dst1));
+            break;
+        }
+        case SuperscalarInstructionType::IROR_C: {
+            std::uint64_t dst0 = std::rotr(vgetq_lane_u64(vr[instr.dst], 0), static_cast<int>(instr.getImm32()));
+            std::uint64_t dst1 = std::rotr(vgetq_lane_u64(vr[instr.dst], 1), static_cast<int>(instr.getImm32()));
+            vr[instr.dst] = vcombine_u64(vcreate_u64(dst0), vcreate_u64(dst1));
+            break;
+        }
+        case SuperscalarInstructionType::IADD_C7:
+        case SuperscalarInstructionType::IADD_C8:
+        case SuperscalarInstructionType::IADD_C9: {
+            std::uint64_t imm = signExtend2sCompl(instr.getImm32());
+            vr[instr.dst] = vaddq_u64(vr[instr.dst], vmovq_n_u64(imm));
+            break;
+        }
+        case SuperscalarInstructionType::IXOR_C7:
+        case SuperscalarInstructionType::IXOR_C8:
+        case SuperscalarInstructionType::IXOR_C9: {
+            std::uint64_t imm = signExtend2sCompl(instr.getImm32());
+            vr[instr.dst] = veorq_u64(vr[instr.dst], vmovq_n_u64(imm));
+            break;
+        }
+        case SuperscalarInstructionType::IMULH_R: {
+            std::uint64_t dst0 = mulh(vgetq_lane_u64(vr[instr.dst], 0), vgetq_lane_u64(vr[instr.src], 0));
+            std::uint64_t dst1 = mulh(vgetq_lane_u64(vr[instr.dst], 1), vgetq_lane_u64(vr[instr.src], 1));
+            vr[instr.dst] = vcombine_u64(vcreate_u64(dst0), vcreate_u64(dst1));
+            break;
+        }
+        case SuperscalarInstructionType::ISMULH_R: {
+            std::uint64_t dst0 = smulh(vgetq_lane_u64(vr[instr.dst], 0), vgetq_lane_u64(vr[instr.src], 0));
+            std::uint64_t dst1 = smulh(vgetq_lane_u64(vr[instr.dst], 1), vgetq_lane_u64(vr[instr.src], 1));
+            vr[instr.dst] = vcombine_u64(vcreate_u64(dst0), vcreate_u64(dst1));
+            break;
+        }
+        case SuperscalarInstructionType::IMUL_RCP: {
+            std::uint64_t rcp = reciprocals != nullptr ? (*reciprocals)[instr.getImm32()] : randomx_reciprocal(instr.getImm32());
+            std::uint64_t dst0 = vgetq_lane_u64(vr[instr.dst], 0) * rcp;
+            std::uint64_t dst1 = vgetq_lane_u64(vr[instr.dst], 1) * rcp;
+            vr[instr.dst] = vcombine_u64(vcreate_u64(dst0), vcreate_u64(dst1));
+            break;
+        }
+        default:
+            throw std::runtime_error("unreachable instruction opcode in execute_superscalar_neon");
+        }
+    }
+}
+#endif
+
 } // namespace armrx

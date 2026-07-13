@@ -85,6 +85,11 @@ int main() {
         (void)item;
     }, "items");
 
+    std::vector<std::byte> dataset_buf(5000 * armrx::kRandomXDatasetItemBytes);
+    benchmark("initialize_dataset (5000 items)", 10, [&] {
+        armrx::initialize_dataset(dataset_buf, cache, 0, 5000);
+    }, "items", 5000.0);
+
     // ── 6. JIT compilation only (warm VM with JIT) ────────────────────
     std::uint32_t jit_flags = armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit;
     armrx::VirtualMachine vm(jit_flags);
