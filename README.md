@@ -9,7 +9,7 @@ mainnet consensus, so it is deliberately not the initial target.
 
 The interpreted RandomX Virtual Machine and hash pipeline is fully implemented and passes the official end-to-end RandomX validation test suite. Multi-threaded worker orchestration, target difficulty comparison, nonce partitioning, and automatic memory mode (light vs fast) selection are fully complete.
 
-All reference test vectors (`Input1` and `Input2`) and worker engine lifecycles pass successfully.
+The **AArch64 JIT backend** compiles and links cleanly on real hardware (postmarketOS, GCC 15.2.0, ARMv8-A with crypto extensions). All reference test vectors (`Input1` and `Input2`) and worker engine lifecycles pass successfully — see [2026-07-13 build verification](#).
 
 ## Interpreted Virtual Machine Implementation Details
 
@@ -31,8 +31,11 @@ ctest --test-dir build --output-on-failure
 ```
 
 On AArch64, the build automatically:
+- Enables C, C++20, and ASM languages for the full toolchain
 - Enables hardware AES/NEON (`-march=armv8-a+crypto`) for the scratchpad fill and hash pipeline
 - Compiles `jit_compiler_a64.cpp` + `jit_compiler_a64_static.S` to enable the JIT execution path
+- Compiles `virtual_memory.c` for JIT page allocation (`mmap`/`mprotect`)
+- Compiles `soft_aes.cpp` for AES lookup tables used by the JIT soft-AES fallback
 - Sets `ARMRX_HAVE_JIT=1` so `VirtualMachine` initialises `JitCompilerA64` when `kRandOMXFlagJit` is passed
 
 On x86_64 (cross-build or development host), the JIT files are excluded; the VM falls back to the interpreted loop without any code changes required.
@@ -84,7 +87,7 @@ Options:
 2. AES round primitive, AesGenerator1R/AesGenerator4R, Argon2d cache initialization, exact SuperscalarHash generation/execution, and exact on-demand dataset-item generation (complete).
 3. Interpreted RandomX VM: register files, bytecode compiler, interpreted execution loop, scratchpad state, and final hashing (complete).
 4. Multi-threaded worker pool, nonce partitioning, difficulty target comparison, cache/dataset lifecycle, and automatic mode selection (complete).
-5. AArch64 JIT backend (hardware AES + NEON intrinsics, JIT compiler, `virtual_memory` allocator, and `ARMRX_HAVE_JIT` guard) — complete on AArch64 targets; silently falls back to interpreted mode on other architectures.
+5. AArch64 JIT backend (hardware AES + NEON intrinsics, JIT compiler, `virtual_memory` allocator, and `ARMRX_HAVE_JIT` guard) — complete and **verified on real AArch64 hardware** (Lenovo/MSM8916, postmarketOS, GCC 15.2.0). Full build + test pass. Silently falls back to interpreted mode on other architectures.
 6. Stratum V1 client (`src/stratum_client.cpp`) — TCP connection to XMR pool, `mining.subscribe`, `mining.authorize`, `mining.notify` job dispatch, `mining.set_target` / `mining.set_difficulty` updates, `mining.submit` share submission — complete.
 
 The implementation must pass the official RandomX test vectors before any pool

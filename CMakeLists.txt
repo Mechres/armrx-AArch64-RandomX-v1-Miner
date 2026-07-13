@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(armrx VERSION 0.1.0 LANGUAGES CXX)
+project(armrx VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
@@ -18,11 +18,11 @@ add_library(armrx_core
     src/vm.cpp
     src/aes_hash.cpp
     src/mining_engine.cpp
+    src/soft_aes.cpp
     src/stratum_client.cpp
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|aarch64_be")
-    enable_language(ASM)
     target_sources(armrx_core PRIVATE
         src/jit_compiler_a64.cpp
         src/jit_compiler_a64_static.S

@@ -45,6 +45,16 @@ static constexpr uint32_t RANDOMX_DATASET_BASE_SIZE  = 2147483648U; // 2 GiB
 static constexpr uint32_t RANDOMX_PROGRAM_ITERATIONS = 2048U;
 static constexpr uint32_t RANDOMX_CACHE_ACCESSES     = 8U;          // kRandomXCacheAccesses
 static constexpr uint32_t RANDOMX_SUPERSCALAR_LATENCY = 170U;       // kSuperscalarLatency
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L3      = 2097152U;    // 2 MiB
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L2      = 262144U;     // 256 KiB
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L1      = 16384U;      // 16 KiB
+static constexpr uint32_t CacheLineSize              = 64U;         // RANDOMX_DATASET_ITEM_SIZE
+static constexpr uint32_t CacheSize                  = 2147483648U; // RANDOMX_DATASET_BASE_SIZE
+static constexpr uint32_t ScratchpadL3Mask           = 2097144U;    // (RANDOMX_SCRATCHPAD_L3 / 8 - 1) * 8
+static constexpr uint32_t RegisterNeedsDisplacement   = 5U;
+static constexpr uint32_t ConditionMask               = 0xFFU;       // (1 << RANDOMX_JUMP_BITS) - 1
+static constexpr int      ConditionOffset             = 8;           // RANDOMX_JUMP_OFFSET
+static constexpr int      StoreL3Condition            = 14;
 static constexpr uint32_t RegistersCount              = 8U;
 
 // Soft-AES lookup table stubs (only used when RANDOMX_FLAG_V2 + soft AES path)
@@ -353,7 +363,7 @@ void JitCompilerA64::generateSuperscalarHash(SuperscalarProgramList &programs, s
 		codePos += p2 - p1;
 
 		SuperscalarProgram& prog = programs[i];
-		const size_t progSize = prog.getSize();
+		const size_t progSize = prog.size();
 
 		uint32_t jmp_pos = codePos;
 		codePos += 4;
@@ -434,7 +444,7 @@ void JitCompilerA64::generateSuperscalarHash(SuperscalarProgramList &programs, s
 		codePos += p2 - p1;
 
 		// Update registerValue
-		emit32(ARMV8A::MOV_REG | 10 | (prog.getAddressRegister() << 16), code, codePos);
+		emit32(ARMV8A::MOV_REG | 10 | (prog.address_register() << 16), code, codePos);
 	}
 
 	p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_store_result;
@@ -792,7 +802,8 @@ void JitCompilerA64::h_ISMULH_M(Instruction& instr, uint32_t& codePos)
 void JitCompilerA64::h_IMUL_RCP(Instruction& instr, uint32_t& codePos)
 {
 	const uint32_t divisor = instr.getImm32();
-	if (isZeroOrPowerOf2(divisor))
+	// isZeroOrPowerOf2 check: skip trivial divisors (power-of-two)
+	if ((divisor & (divisor - 1)) == 0)
 		return;
 
 	uint32_t k = codePos;
@@ -803,7 +814,7 @@ void JitCompilerA64::h_IMUL_RCP(Instruction& instr, uint32_t& codePos)
 	const uint32_t literal_id = (ImulRcpLiteralsEnd - literalPos) / sizeof(uint64_t);
 	literalPos -= sizeof(uint64_t);
 
-	const uint64_t reciprocal = randomx_reciprocal_fast(divisor);
+	const uint64_t reciprocal = randomx_reciprocal(divisor);
 	memcpy(code + literalPos, &reciprocal, sizeof(reciprocal));
 
 	if (literal_id < 12)

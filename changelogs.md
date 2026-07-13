@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-13 (AArch64 build verification + JIT fixes)
+
+### Added
+- **`src/instruction_weights.hpp`**: Instruction frequency `#define`s and REP macros for the JIT compiler's 256-entry opcode handler table. Covers all 30 RandomX v1 opcode weights and REP0–REP256 expansion macros.
+- **`src/configuration.h`**: Minimal assembly-compatible header defining `RANDOMX_PROGRAM_MAX_SIZE=384` required by `jit_compiler_a64_static.S`.
+- **`src/soft_aes.cpp`**: AES lookup tables (`randomx_aes_lut_enc[4][256]`, `randomx_aes_lut_dec[4][256]`) extracted from upstream RandomX, needed by the JIT compiler's soft-AES fallback path.
+- **`REASONIX.md`**: Project card capturing stack, layout, commands, conventions, and gotchas for future Reasonix sessions.
+
+### Fixed
+- **`CMakeLists.txt`**: Changed `LANGUAGES CXX` to `LANGUAGES C CXX ASM` so `virtual_memory.c` actually compiles instead of silently dropping the C source.
+- **`src/jit_compiler_a64.cpp`**: Added 12 missing upstream constants (`RANDOMX_SCRATCHPAD_L1/L2/L3`, `CacheLineSize`, `CacheSize`, `ScratchpadL3Mask`, `ConditionMask/Offset`, `StoreL3Condition`, `RegisterNeedsDisplacement`) that were referenced but never defined. Fixed API mismatches (`getSize()`→`size()`, `getAddressRegister()`→`address_register()`), replaced `randomx_reciprocal_fast` with the project's `randomx_reciprocal`, and inlined the `isZeroOrPowerOf2` check.
+
+### Verified
+- **First full build + test pass on real AArch64 hardware** (Lenovo/MSM8916, postmarketOS edge, Linux 6.12.1, GCC 15.2.0). Both `armrx_tests` and `test_mining` pass, confirming:  
+  - Reference hash `Input1` = `639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f` ✅  
+  - Reference hash `Input2` = `300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969` ✅  
+  - JIT + hardware AES/NEON pipeline fully operational on ARMv8-A with crypto extensions.
+
 ## 2026-07-13
 
 ### Added

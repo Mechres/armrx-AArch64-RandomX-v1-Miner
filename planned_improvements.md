@@ -19,8 +19,8 @@ On multi-socket AArch64 servers, allocating the cache and dataset from NUMA-loca
 
 ## 🔧 JIT Compiler
 
-### 6. Verify JIT Correctness on Real Hardware
-The JIT path in [`src/vm.cpp`](file:///home/mechres/Projeler/aarch64-randomx/src/vm.cpp) is wired but has not been validated against the test vectors yet (tests currently run on x86_64). The first priority on a real AArch64 device should be running `armrx_tests` with `ARMRX_HAVE_JIT=1` and checking hash parity.
+### 6. Verify JIT Correctness on Real Hardware ✅
+**Complete.** Built and tested on real AArch64 hardware (Lenovo/MSM8916, postmarketOS, GCC 15.2.0). All RandomX reference test vectors pass with `ARMRX_HAVE_JIT=1`. Build required adding three new source files (`instruction_weights.hpp`, `configuration.h`, `soft_aes.cpp`) and fixing upstream constant references — see changelog for details.
 
 ### 7. JIT Dataset Item Generation
 `JitCompilerA64::generateDatasetInitProgram` (in the upstream ASM stubs) can JIT-compile the dataset item loop too — this is what gives RandomX miners their full fast-mode speed advantage.
@@ -76,14 +76,14 @@ QEMU-based cross-compilation + test runs (`runs-on: ubuntu-latest` + `qemu-user-
 
 | Priority | Item | Impact | Effort |
 |---|---|---|---|
-| 🔴 **1** | Verify JIT on real AArch64 hardware | Correctness | Low |
-| 🔴 **2** | TLS/SSL pool connections | Production-readiness | Medium |
-| 🔴 **3** | Auto-reconnect with backoff | Production-readiness | Low |
-| 🟡 **4** | Parallel dataset generation | Fast-mode speed | Medium |
-| 🟡 **5** | Huge pages for scratchpads | H/s per thread | Low |
-| 🟡 **6** | CPU affinity pinning | H/s stability | Low |
-| 🟢 **7** | Per-worker H/s + share counters | Observability | Low |
-| 🟢 **8** | Multiple pool failover | Resilience | Low |
-| 🟢 **9** | Config file | UX | Medium |
-| ⚪ **10** | Stratum V2 | Future-proofing | High |
+| ~~✅ 🔴 **1**~~ | ~~Verify JIT on real AArch64 hardware (done)~~ | | |
+| 🔴 **1** | TLS/SSL pool connections | Production-readiness | Medium |
+| 🔴 **2** | Auto-reconnect with backoff | Production-readiness | Low |
+| 🟡 **3** | Parallel dataset generation | Fast-mode speed | Medium |
+| 🟡 **4** | Huge pages for scratchpads | H/s per thread | Low |
+| 🟡 **5** | CPU affinity pinning | H/s stability | Low |
+| 🟢 **6** | Per-worker H/s + share counters | Observability | Low |
+| 🟢 **7** | Multiple pool failover | Resilience | Low |
+| 🟢 **8** | Config file | UX | Medium |
+| ⚪ **9** | Stratum V2 | Future-proofing | High |
 
