@@ -10,8 +10,62 @@
 #include <functional>
 #include <memory>
 #include <chrono>
+#include <cstddef>
+#include <cstring>
+#include <stdexcept>
+#include <sys/mman.h>
 
 namespace armrx {
+
+// RAII wrapper for mmap'd memory with huge-page hint.
+// If huge pages are unavailable, falls back to plain anonymous memory.
+class MappedMemory {
+public:
+    MappedMemory() = default;
+
+    explicit MappedMemory(std::size_t bytes) {
+        if (bytes == 0) return;
+        void* ptr = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (ptr == MAP_FAILED) throw std::bad_alloc();
+        ::madvise(ptr, bytes, MADV_HUGEPAGE);
+        data_ = static_cast<std::byte*>(ptr);
+        size_ = bytes;
+    }
+
+    ~MappedMemory() {
+        if (data_) ::munmap(data_, size_);
+    }
+
+    MappedMemory(const MappedMemory&) = delete;
+    MappedMemory& operator=(const MappedMemory&) = delete;
+
+    MappedMemory(MappedMemory&& other) noexcept
+        : data_(other.data_), size_(other.size_)
+    {
+        other.data_ = nullptr;
+        other.size_ = 0;
+    }
+
+    MappedMemory& operator=(MappedMemory&& other) noexcept {
+        if (this != &other) {
+            if (data_) ::munmap(data_, size_);
+            data_ = other.data_;
+            size_ = other.size_;
+            other.data_ = nullptr;
+            other.size_ = 0;
+        }
+        return *this;
+    }
+
+    std::byte* data() noexcept { return data_; }
+    const std::byte* data() const noexcept { return data_; }
+    std::size_t size() const noexcept { return size_; }
+
+private:
+    std::byte* data_ = nullptr;
+    std::size_t size_ = 0;
+};
 
 class MiningEngine {
 public:
@@ -64,13 +118,15 @@ private:
     std::mutex job_mutex_;
     Job current_job_;
     std::atomic<std::uint64_t> job_generation_{0};
-    std::atomic<std::uint64_t> nonce_counter_{0};
     bool has_job_{false};
 
     // Shared Cache and Dataset
     std::shared_ptr<Argon2dCache> shared_cache_;
-    std::shared_ptr<std::vector<std::byte>> shared_dataset_; // Shared pointer to dataset for safe concurrent access during transition
+    std::shared_ptr<MappedMemory> shared_dataset_; // Huge-page backed dataset for safe concurrent access
     std::vector<std::byte> current_seed_key_;
+
+    // CPU core ordering: fastest cores first (big.LITTLE-aware)
+    std::vector<unsigned int> core_order_;
 
     std::vector<std::thread> workers_;
 };

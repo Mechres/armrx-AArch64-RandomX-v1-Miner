@@ -3,12 +3,54 @@
 #include "armrx/randomx_config.hpp"
 #include <iostream>
 #include <cstring>
+#include <fstream>
+#include <string>
+#include <algorithm>
 #include <pthread.h>
 
 namespace armrx {
 
+namespace {
+
+// Detect CPU core ordering by max frequency. Fastest cores first.
+// For big.LITTLE systems this pins workers to big cores first.
+std::vector<unsigned int> detect_core_order() {
+    unsigned int num_cpus = std::thread::hardware_concurrency();
+    if (num_cpus == 0) return {0};
+
+    std::vector<std::pair<unsigned long, unsigned int>> freq_cores;
+    for (unsigned int i = 0; i < num_cpus; ++i) {
+        std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cpufreq/cpuinfo_max_freq";
+        std::ifstream file(path);
+        unsigned long freq = 0;
+        if (file >> freq) {
+            freq_cores.emplace_back(freq, i);
+        }
+    }
+
+    if (freq_cores.empty()) {
+        // Fallback: no cpufreq info — use sequential order
+        std::vector<unsigned int> fallback(num_cpus);
+        for (unsigned int i = 0; i < num_cpus; ++i) fallback[i] = i;
+        return fallback;
+    }
+
+    // Sort by frequency descending (big cores first)
+    std::sort(freq_cores.begin(), freq_cores.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+
+    std::vector<unsigned int> order;
+    order.reserve(freq_cores.size());
+    for (const auto& fc : freq_cores) order.push_back(fc.second);
+    return order;
+}
+
+} // namespace
+
 MiningEngine::MiningEngine(RandomXMode mode, unsigned int num_threads)
-    : mode_(mode), num_threads_(num_threads) {}
+    : mode_(mode), num_threads_(num_threads) {
+    core_order_ = detect_core_order();
+}
 
 MiningEngine::~MiningEngine() {
     stop();
@@ -56,8 +98,9 @@ void MiningEngine::set_job(const Job& job) {
         shared_cache_ = new_cache;
 
         if (mode_ == RandomXMode::fast) {
-            std::cout << "[MiningEngine] Initializing " << (randomx_dataset_item_count() * 64) / (1024U * 1024U) << " MiB dataset...\n";
-            auto new_dataset = std::make_shared<std::vector<std::byte>>(randomx_dataset_item_count() * 64);
+            auto dataset_bytes = randomx_dataset_item_count() * 64;
+            std::cout << "[MiningEngine] Initializing " << dataset_bytes / (1024U * 1024U) << " MiB dataset...\n";
+            auto new_dataset = std::make_shared<MappedMemory>(dataset_bytes);
 
             // Parallelize dataset initialization
             unsigned int init_threads_count = std::max(1U, std::thread::hardware_concurrency());
@@ -83,7 +126,6 @@ void MiningEngine::set_job(const Job& job) {
 
     current_job_ = job;
     job_generation_.fetch_add(1, std::memory_order_release);
-    nonce_counter_.store(0);
     has_job_ = true;
 }
 
@@ -114,10 +156,11 @@ double MiningEngine::hash_rate() const {
 }
 
 void MiningEngine::worker_loop(unsigned int thread_id) {
-    // Pin this worker to a specific CPU core
+    // Pin this worker to a specific CPU core (big cores first on big.LITTLE)
     cpu_set_t cpus{};
     CPU_ZERO(&cpus);
-    CPU_SET(static_cast<int>(thread_id % std::thread::hardware_concurrency()), &cpus);
+    unsigned int cpu_id = core_order_[thread_id % core_order_.size()];
+    CPU_SET(static_cast<int>(cpu_id), &cpus);
     pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
 
     // On AArch64 with crypto extensions, hardware AES is always available
@@ -129,12 +172,14 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     VirtualMachine vm(flags);
 
     std::shared_ptr<Argon2dCache> active_cache;
-    std::shared_ptr<std::vector<std::byte>> active_dataset;
+    std::shared_ptr<MappedMemory> active_dataset;
     Job local_job;
     bool active = false;
 
     std::uint64_t local_hashes = 0;
     std::uint64_t local_gen = 0;
+    // Per-worker nonce: each worker gets thread_id + k * num_threads_
+    std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
     std::vector<std::byte> block_input;
 
@@ -164,8 +209,10 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
             continue;
         }
 
-        // Grab next nonce
-        std::uint64_t nonce = nonce_counter_.fetch_add(1, std::memory_order_relaxed);
+        // Partitioned nonce: each worker uses its own counter with stride = num_threads_
+        // No shared atomic needed — workers never overlap
+        std::uint64_t nonce = local_nonce;
+        local_nonce += num_threads_;
 
         // Copy template to per-worker buffer (only actually reallocates on job change)
         block_input = local_job.block_template;
