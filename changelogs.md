@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-14 (Cache Prefetching + Final Optimizations)
+
+### Added
+- **Scratchpad cache prefetch** (`src/jit_compiler_a64_static.S`): Added `prfm pldl1keep` instructions in the JIT main loop to prefetch three scratchpad cache lines (spAddr0, spAddr1, spAddr1+32) before the load instructions execute. Hides memory latency on Cortex-A53's in-order dual-issue pipeline.
+- **Dataset cache line prefetch upgraded** (`src/jit_compiler_a64_static.S`): Changed `prfm pldl2strm` (L2 streaming hint, next-line eviction) to `prfm pldl1keep` (L1 keep hint) for the cache line read in `rx_calc_dataset_item_prefetch`. Since the data is XOR'd immediately after the SuperscalarHash computation, L1 residency avoids a costly L1→L2 refill. Net gain: +2.2% across all cores.
+- **TUI per-worker bars fixed** (`src/tui.cpp`, `src/mining_engine.cpp`): Worker hash counters were allocated but never incremented (flushes went only to `total_hashes_`). Added `worker_hashes_[thread_id].fetch_add()` alongside the total flush, enabling live per-core bars in the TUI.
+
+### Result
+Steady hashrate of **21.8 H/s** on 8× Cortex-A53 (big: ~3.58 H/s per core, LITTLE: ~1.86 H/s per core). JIT profile: 1.6% compile, 98.4% execute.
+
 ## 2026-07-14 (NEON SIMD Vectorization & JIT/Cache Optimizations)
 
 ### Added
