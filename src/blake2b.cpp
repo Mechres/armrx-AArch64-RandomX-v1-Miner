@@ -6,6 +6,10 @@
 #include <cstring>
 #include <stdexcept>
 
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
+
 namespace armrx {
 namespace {
 
@@ -64,6 +68,121 @@ void store64(std::byte* output, std::uint64_t value) {
 
 void compress(std::array<std::uint64_t, 8>& h, const std::byte* block,
               std::uint64_t bytes, bool last) {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+    // NEON-accelerated BLAKE2b compress
+    alignas(16) std::array<std::uint64_t, 16> m{};
+    alignas(16) std::array<std::uint64_t, 16> v{};
+    for (unsigned i = 0; i < 16; ++i) m[i] = load64(block + 8U * i);
+    for (unsigned i = 0; i < 8; ++i) v[i] = h[i];
+    for (unsigned i = 0; i < 8; ++i) v[i + 8U] = iv[i];
+    v[12] ^= bytes;
+    if (last) v[14] = ~v[14];
+
+    for (const auto& s : sigma) {
+        // Row 0: G(0,4,8,12,x=0,y=1) + G(1,5,9,13,x=2,y=3) — all consecutive
+        {
+            uint64x2_t va = vcombine_u64(vcreate_u64(v[0]), vcreate_u64(v[1]));
+            uint64x2_t vb = vcombine_u64(vcreate_u64(v[4]), vcreate_u64(v[5]));
+            uint64x2_t vc = vcombine_u64(vcreate_u64(v[8]), vcreate_u64(v[9]));
+            uint64x2_t vd = vcombine_u64(vcreate_u64(v[12]), vcreate_u64(v[13]));
+            uint64x2_t mx = vcombine_u64(vcreate_u64(m[s[0]]), vcreate_u64(m[s[2]]));
+            uint64x2_t my = vcombine_u64(vcreate_u64(m[s[1]]), vcreate_u64(m[s[3]]));
+
+            va = vaddq_u64(va, vaddq_u64(vb, mx));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 32), veorq_u64(vd, va), 32);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 40), veorq_u64(vb, vc), 24);
+            va = vaddq_u64(va, vaddq_u64(vb, my));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 48), veorq_u64(vd, va), 16);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 1), veorq_u64(vb, vc), 63);
+
+            vst1q_u64(&v[0], va);
+            vst1q_u64(&v[4], vb);
+            vst1q_u64(&v[8], vc);
+            vst1q_u64(&v[12], vd);
+        }
+
+        // Row 1: G(2,6,10,14,x=4,y=5) + G(3,7,11,15,x=6,y=7) — all consecutive
+        {
+            uint64x2_t va = vcombine_u64(vcreate_u64(v[2]), vcreate_u64(v[3]));
+            uint64x2_t vb = vcombine_u64(vcreate_u64(v[6]), vcreate_u64(v[7]));
+            uint64x2_t vc = vcombine_u64(vcreate_u64(v[10]), vcreate_u64(v[11]));
+            uint64x2_t vd = vcombine_u64(vcreate_u64(v[14]), vcreate_u64(v[15]));
+            uint64x2_t mx = vcombine_u64(vcreate_u64(m[s[4]]), vcreate_u64(m[s[6]]));
+            uint64x2_t my = vcombine_u64(vcreate_u64(m[s[5]]), vcreate_u64(m[s[7]]));
+
+            va = vaddq_u64(va, vaddq_u64(vb, mx));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 32), veorq_u64(vd, va), 32);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 40), veorq_u64(vb, vc), 24);
+            va = vaddq_u64(va, vaddq_u64(vb, my));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 48), veorq_u64(vd, va), 16);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 1), veorq_u64(vb, vc), 63);
+
+            vst1q_u64(&v[2], va);
+            vst1q_u64(&v[6], vb);
+            vst1q_u64(&v[10], vc);
+            vst1q_u64(&v[14], vd);
+        }
+
+        // Row 2: G(0,5,10,15,x=8,y=9) + G(1,6,11,12,x=10,y=11)
+        // vd reversed: lane0=v[15], lane1=v[12]
+        {
+            uint64x2_t va = vcombine_u64(vcreate_u64(v[0]), vcreate_u64(v[1]));
+            uint64x2_t vb = vcombine_u64(vcreate_u64(v[5]), vcreate_u64(v[6]));
+            uint64x2_t vc = vcombine_u64(vcreate_u64(v[10]), vcreate_u64(v[11]));
+            uint64x2_t vd = vcombine_u64(vcreate_u64(v[15]), vcreate_u64(v[12]));
+            uint64x2_t mx = vcombine_u64(vcreate_u64(m[s[8]]), vcreate_u64(m[s[10]]));
+            uint64x2_t my = vcombine_u64(vcreate_u64(m[s[9]]), vcreate_u64(m[s[11]]));
+
+            va = vaddq_u64(va, vaddq_u64(vb, mx));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 32), veorq_u64(vd, va), 32);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 40), veorq_u64(vb, vc), 24);
+            va = vaddq_u64(va, vaddq_u64(vb, my));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 48), veorq_u64(vd, va), 16);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 1), veorq_u64(vb, vc), 63);
+
+            vst1q_u64(&v[0], va);
+            vst1q_u64(&v[5], vb);
+            vst1q_u64(&v[10], vc);
+            v[15] = vgetq_lane_u64(vd, 0);
+            v[12] = vgetq_lane_u64(vd, 1);
+        }
+
+        // Row 3: G(2,7,8,13,x=12,y=13) + G(3,4,9,14,x=14,y=15)
+        // vb non-consecutive: lane0=v[7], lane1=v[4]
+        {
+            uint64x2_t va = vcombine_u64(vcreate_u64(v[2]), vcreate_u64(v[3]));
+            uint64x2_t vb = vcombine_u64(vcreate_u64(v[7]), vcreate_u64(v[4]));
+            uint64x2_t vc = vcombine_u64(vcreate_u64(v[8]), vcreate_u64(v[9]));
+            uint64x2_t vd = vcombine_u64(vcreate_u64(v[13]), vcreate_u64(v[14]));
+            uint64x2_t mx = vcombine_u64(vcreate_u64(m[s[12]]), vcreate_u64(m[s[14]]));
+            uint64x2_t my = vcombine_u64(vcreate_u64(m[s[13]]), vcreate_u64(m[s[15]]));
+
+            va = vaddq_u64(va, vaddq_u64(vb, mx));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 32), veorq_u64(vd, va), 32);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 40), veorq_u64(vb, vc), 24);
+            va = vaddq_u64(va, vaddq_u64(vb, my));
+            vd = vsriq_n_u64(vshlq_n_u64(veorq_u64(vd, va), 48), veorq_u64(vd, va), 16);
+            vc = vaddq_u64(vc, vd);
+            vb = vsriq_n_u64(vshlq_n_u64(veorq_u64(vb, vc), 1), veorq_u64(vb, vc), 63);
+
+            vst1q_u64(&v[2], va);
+            v[7] = vgetq_lane_u64(vb, 0);
+            v[4] = vgetq_lane_u64(vb, 1);
+            vst1q_u64(&v[8], vc);
+            vst1q_u64(&v[13], vd);
+        }
+    }
+
+    for (unsigned i = 0; i < 8; ++i) h[i] ^= v[i] ^ v[i + 8U];
+#else
+    // Scalar path (x86_64, non-NEON AArch64, etc.)
     std::array<std::uint64_t, 16> m{};
     std::array<std::uint64_t, 16> v{};
     for (unsigned i = 0; i < m.size(); ++i) m[i] = load64(block + 8U * i);
@@ -90,6 +209,7 @@ void compress(std::array<std::uint64_t, 8>& h, const std::byte* block,
         g(2, 7, 8, 13, s[12], s[13]); g(3, 4, 9, 14, s[14], s[15]);
     }
     for (unsigned i = 0; i < h.size(); ++i) h[i] ^= v[i] ^ v[i + 8U];
+#endif
 }
 
 } // namespace

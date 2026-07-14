@@ -61,7 +61,7 @@ endif()
 target_include_directories(armrx_core PUBLIC include)
 target_link_libraries(armrx_core PUBLIC Threads::Threads)
 target_compile_features(armrx_core PUBLIC cxx_std_20)
-target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -frounding-math)
+target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=fast -funroll-loops)
 
 if(ARMRX_ENABLE_NATIVE)
     target_compile_options(armrx_core PRIVATE -mcpu=native)

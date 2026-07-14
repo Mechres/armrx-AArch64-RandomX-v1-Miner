@@ -19,6 +19,7 @@
 #include <csignal>
 #include <iomanip>
 #include <memory>
+#include <sys/mman.h>
 
 namespace {
 
@@ -79,6 +80,8 @@ int main(int argc, char** argv) {
     std::string pool_password = "x";
     bool pool_tls = false;
     bool use_tui = false;
+    bool use_mlock = false;
+    bool use_rt_priority = false;
     unsigned int current_pool_idx = 0;
 
     // Load config from file (CLI overrides below)
@@ -202,6 +205,14 @@ int main(int argc, char** argv) {
             use_tui = false;
             continue;
         }
+        if (argument == "--mlock") {
+            use_mlock = true;
+            continue;
+        }
+        if (argument == "--rt-priority") {
+            use_rt_priority = true;
+            continue;
+        }
 
         if (argument == "--help" || argument == "-h") {
             std::cout
@@ -223,6 +234,8 @@ int main(int argc, char** argv) {
                 << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
                 << "  --config=<path>           Config file path (default: ~/.config/armrx/config.json)\n"
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
+                << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
+                << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
                 << "\n"
                 << "  -h, --help                 Display this help menu\n";
             return 0;
@@ -252,6 +265,14 @@ int main(int argc, char** argv) {
               << (memory.constrained_by_cgroup ? " (cgroup-limited)" : "") << '\n'
               << "Selected mode (" << workers << " workers): " << armrx::mode_name(effective_mode)
               << " (requires " << required_bytes / (1024U * 1024U) << " MiB including reserve)\n";
+
+    // Lock all pages into RAM if requested
+    if (use_mlock) {
+        if (::mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+            std::cerr << "[Warning] --mlock requires elevated privileges; continuing without locking.\n";
+            use_mlock = false;
+        }
+    }
 
     if (!mode_is_auto && effective_mode == armrx::RandomXMode::fast
         && memory.available_bytes < required_bytes) {
@@ -287,6 +308,7 @@ int main(int argc, char** argv) {
         job.target       = difficulty_to_target(difficulty);
 
         armrx::MiningEngine engine(effective_mode, workers);
+        engine.set_rt_priority(use_rt_priority);
         engine.set_job(job);
 
         std::atomic<std::uint64_t> shares_found{0};
@@ -351,6 +373,7 @@ int main(int argc, char** argv) {
                   << " pool(s) configured\n";
 
         armrx::MiningEngine engine(effective_mode, workers);
+        engine.set_rt_priority(use_rt_priority);
 
         // Share callback: forward found shares to pool
         auto stratum = std::make_unique<armrx::StratumClient>(

@@ -6,6 +6,8 @@
 #include <fstream>
 #include <string>
 #include <algorithm>
+#include <mutex>
+#include <sched.h>
 #include <pthread.h>
 
 namespace armrx {
@@ -162,6 +164,17 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     unsigned int cpu_id = core_order_[thread_id % core_order_.size()];
     CPU_SET(static_cast<int>(cpu_id), &cpus);
     pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+
+    if (rt_priority_) {
+        struct sched_param param{};
+        param.sched_priority = 1;
+        if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
+            static std::once_flag warn_flag;
+            std::call_once(warn_flag, []{
+                std::cerr << "[Warning] --rt-priority requires CAP_SYS_NICE; falling back to default scheduler.\n";
+            });
+        }
+    }
 
     // On AArch64 with crypto extensions, hardware AES is always available
     std::uint32_t flags = kRandOMXFlagHardAes;
