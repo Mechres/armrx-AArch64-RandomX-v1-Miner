@@ -117,10 +117,32 @@ std::vector<std::byte> blake2b(std::span<const std::byte> input, std::size_t out
     return output;
 }
 
+void blake2b(std::span<const std::byte> input, std::byte* output, std::size_t output_bytes) {
+    if (output_bytes == 0U || output_bytes > 64U) {
+        throw std::invalid_argument{"BLAKE2b output length must be between 1 and 64 bytes"};
+    }
+    std::array<std::uint64_t, 8> state = iv;
+    state[0] ^= 0x01010000ULL ^ static_cast<std::uint64_t>(output_bytes);
+    std::uint64_t bytes{};
+    while (input.size() > 128U) {
+        bytes += 128U;
+        compress(state, input.data(), bytes, false);
+        input = input.subspan(128U);
+    }
+    std::array<std::byte, 128> last{};
+    std::memcpy(last.data(), input.data(), input.size());
+    bytes += static_cast<std::uint64_t>(input.size());
+    compress(state, last.data(), bytes, true);
+    std::array<std::byte, 64> digest{};
+    for (unsigned i = 0; i < state.size(); ++i) {
+        store64(digest.data() + 8U * i, state[i]);
+    }
+    std::memcpy(output, digest.data(), output_bytes);
+}
+
 Hash512 blake2b_512(std::span<const std::byte> input) {
-    const auto digest = blake2b(input, 64);
     Hash512 output{};
-    std::copy(digest.begin(), digest.end(), output.begin());
+    blake2b(input, output.data(), 64U);
     return output;
 }
 

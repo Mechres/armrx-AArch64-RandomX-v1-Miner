@@ -4,6 +4,7 @@ project(armrx VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
+option(ARMRX_JIT_PROFILE "Enable per-hash JIT profiling (adds 3 clock_gettime syscalls per hash)" OFF)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -64,6 +65,11 @@ target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion 
 
 if(ARMRX_ENABLE_NATIVE)
     target_compile_options(armrx_core PRIVATE -mcpu=native)
+endif()
+
+if(ARMRX_JIT_PROFILE)
+    target_compile_definitions(armrx_core PRIVATE ARMRX_JIT_PROFILE)
+    message(STATUS "JIT profiling enabled — adds 3 clock_gettime syscalls per hash")
 endif()
 
 add_executable(armrx src/main.cpp)

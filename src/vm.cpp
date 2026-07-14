@@ -828,7 +828,9 @@ void VirtualMachine::run(const void* seed) {
         config.readReg2 = read_reg2_;
         config.readReg3 = read_reg3_;
 
+#ifdef ARMRX_JIT_PROFILE
         auto t0 = std::chrono::high_resolution_clock::now();
+#endif
         jit_->enableWriting();
         if (dataset_.empty()) {
             // Light mode: JIT compiler generates inline dataset item derivation
@@ -838,7 +840,9 @@ void VirtualMachine::run(const void* seed) {
             jit_->generateProgram(program_, config);
         }
         jit_->enableExecution();
+#ifdef ARMRX_JIT_PROFILE
         auto t1 = std::chrono::high_resolution_clock::now();
+#endif
 
         MemoryRegisters mem_regs{};
         mem_regs.mx = mx_;
@@ -858,11 +862,13 @@ void VirtualMachine::run(const void* seed) {
             &reg_, &mem_regs,
             reinterpret_cast<void*>(scratchpad_data_),
             2048ULL);
+#ifdef ARMRX_JIT_PROFILE
         auto t2 = std::chrono::high_resolution_clock::now();
 
         jit_compile_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
         jit_execute_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
         jit_total_runs_++;
+#endif
 
         // Extract updated mx/ma back from mem_regs after JIT execution
         mx_ = mem_regs.mx;
@@ -952,41 +958,37 @@ void VirtualMachine::hash_and_fill(void* out, void* fill_state) {
     hash_and_fill_aes_1r_x4(std::span<std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a), new_fill_state);
     std::memcpy(fill_state, new_fill_state.data(), 64);
 
-    std::vector<std::byte> input_bytes(sizeof(reg_));
-    std::memcpy(input_bytes.data(), &reg_, sizeof(reg_));
-    auto out_bytes = blake2b(input_bytes, 32);
-    std::memcpy(out, out_bytes.data(), 32);
+    alignas(16) std::array<std::byte, sizeof(RegisterFile)> input_bytes{};
+    std::memcpy(input_bytes.data(), &reg_, sizeof(RegisterFile));
+    blake2b(std::span<const std::byte>(input_bytes), static_cast<std::byte*>(out), 32);
 }
 
 void VirtualMachine::get_final_result(void* out) {
     hash_aes_1r_x4(std::span<const std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a));
 
-    std::vector<std::byte> input_bytes(sizeof(reg_));
-    std::memcpy(input_bytes.data(), &reg_, sizeof(reg_));
-    auto out_bytes = blake2b(input_bytes, 32);
-    std::memcpy(out, out_bytes.data(), 32);
+    alignas(16) std::array<std::byte, sizeof(RegisterFile)> input_bytes{};
+    std::memcpy(input_bytes.data(), &reg_, sizeof(RegisterFile));
+    blake2b(std::span<const std::byte>(input_bytes), static_cast<std::byte*>(out), 32);
 }
 
 void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::size_t input_size, void* output) {
     fenv_t fpstate;
     std::fegetenv(&fpstate);
 
-    alignas(16) AesState tempHash{};
+    alignas(16) std::array<std::byte, 64> tempHash{};
     std::span<const std::byte> input_span(reinterpret_cast<const std::byte*>(input), input_size);
-    auto blake_res = blake2b(input_span, 64);
-    std::memcpy(tempHash.data(), blake_res.data(), 64);
+    blake2b(input_span, tempHash.data(), 64);
 
     machine->init_scratchpad(tempHash.data());
     machine->reset_rounding_mode();
 
+    alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
     for (int chain = 0; chain < 7; ++chain) {
         machine->run(tempHash.data());
 
         const auto& reg = machine->get_register_file();
-        std::vector<std::byte> reg_bytes(sizeof(reg));
         std::memcpy(reg_bytes.data(), &reg, sizeof(reg));
-        auto next_hash = blake2b(reg_bytes, 64);
-        std::memcpy(tempHash.data(), next_hash.data(), 64);
+        blake2b(std::span<const std::byte>(reg_bytes), tempHash.data(), 64);
     }
 
     machine->run(tempHash.data());
