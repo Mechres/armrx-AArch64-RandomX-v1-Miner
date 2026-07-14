@@ -130,6 +130,9 @@ JitCompilerA64::JitCompilerA64()
 #ifdef __GNUC__
 	__builtin___clear_cache(reinterpret_cast<char*>(code), reinterpret_cast<char*>(code + CodeSize));
 #endif
+
+	// Try RWX once; if the kernel allows it, per-hash mprotect calls become no-ops
+	rwx_ = (setPagesRWX(code, CodeSize + CalcDatasetItemSize) == 0);
 }
 
 JitCompilerA64::~JitCompilerA64()
@@ -139,11 +142,13 @@ JitCompilerA64::~JitCompilerA64()
 
 void JitCompilerA64::enableWriting()
 {
+	if (rwx_) return;
 	setPagesRW(code, CodeSize + CalcDatasetItemSize);
 }
 
 void JitCompilerA64::enableExecution()
 {
+	if (rwx_) return;
 	setPagesRX(code, CodeSize + CalcDatasetItemSize);
 }
 

@@ -70,6 +70,7 @@ namespace armrx {
 
 		void setFlags(randomx_flags f) { flags = f; }
 	private:
+		bool rwx_ = false;
 		static InstructionGeneratorA64 engine[256];
 		uint32_t reg_changed_offset[8];
 		uint8_t* code;

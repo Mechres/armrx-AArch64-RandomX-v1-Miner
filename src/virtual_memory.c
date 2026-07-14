@@ -198,9 +198,9 @@ void setPagesRX(void* ptr, size_t bytes) {
 #endif
 }
 
-void setPagesRWX(void* ptr, size_t bytes) {
+int setPagesRWX(void* ptr, size_t bytes) {
 	char *errfunc;
-	pageProtect(ptr, bytes, PAGE_EXECUTE_READWRITE, &errfunc);
+	return pageProtect(ptr, bytes, PAGE_EXECUTE_READWRITE, &errfunc);
 }
 
 void* allocLargePagesMemory(size_t bytes) {

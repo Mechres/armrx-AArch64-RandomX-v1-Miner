@@ -135,6 +135,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
     std::uint64_t local_hashes = 0;
     std::uint64_t local_gen = 0;
+    // Per-worker buffer for block template — resized only on job changes
+    std::vector<std::byte> block_input;
 
     while (running_.load(std::memory_order_relaxed)) {
         // Lock-free job check: only acquire mutex when generation counter changes
@@ -165,7 +167,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         // Grab next nonce
         std::uint64_t nonce = nonce_counter_.fetch_add(1, std::memory_order_relaxed);
 
-        std::vector<std::byte> block_input = local_job.block_template;
+        // Copy template to per-worker buffer (only actually reallocates on job change)
+        block_input = local_job.block_template;
         update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size);
 
         alignas(16) std::array<std::byte, 32> hash{};
@@ -179,7 +182,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         }
 
         // Flush local counter to shared atomic periodically
-        const std::uint64_t flush_interval = (mode_ == RandomXMode::fast) ? 64U : 1U;
+        constexpr std::uint64_t flush_interval = 64U;
         if (local_hashes >= flush_interval) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
             worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);

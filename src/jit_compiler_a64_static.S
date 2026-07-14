@@ -338,7 +338,7 @@ DECL(randomx_program_aarch64_cacheline_align_mask1):
 	add	x20, x20, x1
 
 	# Prefetch dataset data
-	prfm	pldl2strm, [x20]
+	prfm	pldl1keep, [x20]
 
 DECL(randomx_program_aarch64_cacheline_align_mask2):
 	# Actual mask will be inserted by JIT compiler
