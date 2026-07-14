@@ -208,18 +208,14 @@ DECL(randomx_program_aarch64):
 
 	.p2align 5
 DECL(randomx_program_aarch64_main_loop):
-	# spAddr0 = spMix1 & ScratchpadL3Mask64;
-	# spAddr1 = (spMix1 >> 32) & ScratchpadL3Mask64;
-	lsr	x20, x10, 32
-
-	# Actual mask will be inserted by JIT compiler
+	# Actual instructions will be inserted by JIT compiler
 	and	w16, w10, 1
-	and	w17, w20, 1
+	and	w17, w10, 1
 
 	# x16 = scratchpad + spAddr0
 	# x17 = scratchpad + spAddr1
-	add	x16, x16, x2
-	add	x17, x17, x2
+	add	x16, x2, x16, lsl #6
+	add	x17, x2, x17, lsl #6
 
 	# Prefetch scratchpad lines before loading (hide memory latency on Cortex-A53)
 	prfm	pldl1keep, [x16]

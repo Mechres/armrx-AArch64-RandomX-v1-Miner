@@ -159,13 +159,13 @@ void JitCompilerA64::enableAll()
 
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
-	uint32_t codePos = MainLoopBegin + 4;
+	uint32_t codePos = MainLoopBegin;
 
-	// and w16, w10, ScratchpadL3Mask64
-	emit32(0x121A0000 | 16 | (10 << 5) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 7) << 10), code, codePos);
+	// ubfx x16, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
+	emit32(0xD3400000 | 16 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
-	// and w17, w20, ScratchpadL3Mask64
-	emit32(0x121A0000 | 17 | (20 << 5) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 7) << 10), code, codePos);
+	// ubfx x17, x10, #38, #width
+	emit32(0xD3400000 | 17 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
 	codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
@@ -250,13 +250,13 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 
 void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset)
 {
-	uint32_t codePos = MainLoopBegin + 4;
+	uint32_t codePos = MainLoopBegin;
 
-	// and w16, w10, ScratchpadL3Mask64
-	emit32(0x121A0000 | 16 | (10 << 5) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 7) << 10), code, codePos);
+	// ubfx x16, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
+	emit32(0xD3400000 | 16 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
-	// and w17, w20, ScratchpadL3Mask64
-	emit32(0x121A0000 | 17 | (20 << 5) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 7) << 10), code, codePos);
+	// ubfx x17, x10, #38, #width
+	emit32(0xD3400000 | 17 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
 	codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
@@ -608,14 +608,11 @@ void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* co
 	// add tmp_reg, x2, tmp_reg
 	emit32(ARMV8A::ADD | tmp_reg | (2 << 5) | (tmp_reg << 16), code, k);
 
-	// ldpsw tmp_reg, tmp_reg + 1, [tmp_reg]
-	emit32(0x69400000 | tmp_reg | (tmp_reg << 5) | ((tmp_reg + 1) << 10), code, k);
+	// ld1 {tmp_reg_fp.2s}, [tmp_reg]
+	emit32(0x0C407800 | (tmp_reg << 5) | tmp_reg_fp, code, k);
 
-	// ins tmp_reg_fp.d[0], tmp_reg
-	emit32(0x4E081C00 | tmp_reg_fp | (tmp_reg << 5), code, k);
-
-	// ins tmp_reg_fp.d[1], tmp_reg + 1
-	emit32(0x4E181C00 | tmp_reg_fp | ((tmp_reg + 1) << 5), code, k);
+	// sxtl tmp_reg_fp.2d, tmp_reg_fp.2s
+	emit32(0x0F20A400 | (tmp_reg_fp << 5) | tmp_reg_fp, code, k);
 
 	// scvtf tmp_reg_fp.2d, tmp_reg_fp.2d
 	emit32(0x4E61D800 | tmp_reg_fp | (tmp_reg_fp << 5), code, k);
@@ -958,19 +955,8 @@ void JitCompilerA64::h_ISWAP_R(Instruction& instr, uint32_t& codePos)
 
 void JitCompilerA64::h_FSWAP_R(Instruction& instr, uint32_t& codePos)
 {
-	uint32_t k = codePos;
-
 	const uint32_t dst = instr.dst + 16;
-
-	constexpr uint32_t tmp_reg_fp = 28;
-	constexpr uint32_t src_index1 = 1 << 14;
-	constexpr uint32_t dst_index1 = 1 << 20;
-
-	emit32(ARMV8A::MOV_VREG_EL | tmp_reg_fp | (dst << 5) | src_index1, code, k);
-	emit32(ARMV8A::MOV_VREG_EL | dst | (dst << 5) | dst_index1, code, k);
-	emit32(ARMV8A::MOV_VREG_EL | dst | (tmp_reg_fp << 5), code, k);
-
-	codePos = k;
+	emit32(0x6E004000 | dst | (dst << 5) | (dst << 16), code, codePos);
 }
 
 void JitCompilerA64::h_FADD_R(Instruction& instr, uint32_t& codePos)

@@ -346,6 +346,17 @@ int main(int argc, char** argv) {
         std::cout << "Mining benchmark complete.\n"
                   << "Total Hashes computed: " << engine.total_hashes() << "\n"
                   << "Final Shares found: "    << shares_found.load()    << "\n";
+#ifdef ARMRX_JIT_PROFILE
+        std::uint64_t total_compile = engine.total_jit_compile_time_ns();
+        std::uint64_t total_execute = engine.total_jit_execute_time_ns();
+        if (total_compile + total_execute > 0) {
+            double total_time = static_cast<double>(total_compile + total_execute);
+            double compile_pct = (static_cast<double>(total_compile) / total_time) * 100.0;
+            double execute_pct = (static_cast<double>(total_execute) / total_time) * 100.0;
+            std::cout << "JIT Profile: Compile = " << std::fixed << std::setprecision(1) << compile_pct << "%"
+                      << ", Exec = " << execute_pct << "%\n";
+        }
+#endif
     }
 
     // ── Pool mining ──────────────────────────────────────────────────────────

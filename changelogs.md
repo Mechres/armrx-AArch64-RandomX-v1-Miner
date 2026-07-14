@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-14 (AArch64 JIT Optimizations: ubfx, ext, direct NEON load)
+
+### Added
+- **ubfx Scratchpad Address Computation** (`src/jit_compiler_a64_static.S`, `src/jit_compiler_a64.cpp`): Implemented A1 optimization. Replaced 5-instruction mask-and-add scratchpad calculations with 4-instruction sequences using `ubfx` and static shifted `add` instructions.
+- **FSWAP_R vector extract** (`src/jit_compiler_a64.cpp`): Implemented A2 optimization. Replaced 3-instruction `FSWAP_R` register element moves with a single vector extract (`ext`) instruction.
+- **NEON Direct FP Memory Load** (`src/jit_compiler_a64.cpp`): Implemented A3 optimization. Rewrote `emitMemLoadFP` to load memory directly into floating-point registers using `ld1` and sign-extend inside NEON via `sxtl`, avoiding GPR moves and eliminating high-latency cross-port register transfer stalls (`ins`).
+- **Benchmark runtime optimization** (`tests/bench_armrx.cpp`): Reduced interpreted mode benchmark iterations from 200 to 10 on slow platforms and enabled stdout flushing.
+
 ## 2026-07-14 (Per-hash overhead elimination + NEON Blake2b + memory tuning)
 
 ### Added

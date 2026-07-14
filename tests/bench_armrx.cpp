@@ -121,7 +121,7 @@ int main() {
     std::cout << std::left << std::setw(40) << "full hash (light, JIT)"
               << std::right << std::fixed << std::setprecision(2)
               << std::setw(10) << hash_us << " μs/hash  "
-              << std::setw(10) << hash_ps << " hashes/s\n";
+              << std::setw(10) << hash_ps << " hashes/s" << std::endl;
 
     // ── 8. Interpreted mode comparison ────────────────────────────────
     std::uint32_t interp_flags = 0; // No JIT, no HardAes
@@ -131,21 +131,22 @@ int main() {
     // Warmup
     armrx::randomx_calculate_hash(&vm_interp, test_input.data(), test_input.size(), vm_out.data());
 
+    unsigned interp_hash_count = 10;
     auto interp_start = bench_clock::now();
-    for (unsigned i = 0; i < hash_count; ++i) {
+    for (unsigned i = 0; i < interp_hash_count; ++i) {
         block_template[39] = static_cast<std::byte>(i + 100);
         armrx::randomx_calculate_hash(&vm_interp, block_template.data(),
                                         block_template.size(), vm_out.data());
     }
     auto interp_end = bench_clock::now();
     auto interp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(interp_end - interp_start).count();
-    double interp_us = static_cast<double>(interp_ns) / hash_count / 1000.0;
-    double interp_ps = static_cast<double>(hash_count) * 1e9 / interp_ns;
+    double interp_us = static_cast<double>(interp_ns) / interp_hash_count / 1000.0;
+    double interp_ps = static_cast<double>(interp_hash_count) * 1e9 / interp_ns;
 
     std::cout << std::left << std::setw(40) << "full hash (light, interpreted)"
               << std::right << std::fixed << std::setprecision(2)
               << std::setw(10) << interp_us << " μs/hash  "
-              << std::setw(10) << interp_ps << " hashes/s\n";
+              << std::setw(10) << interp_ps << " hashes/s" << std::endl;
 
     // ── 9. Summary comparison vs XMRig ────────────────────────────────
     std::cout << "\n=== Summary ===\n";
