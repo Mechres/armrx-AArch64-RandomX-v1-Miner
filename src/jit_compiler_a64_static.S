@@ -221,6 +221,11 @@ DECL(randomx_program_aarch64_main_loop):
 	add	x16, x16, x2
 	add	x17, x17, x2
 
+	# Prefetch scratchpad lines before loading (hide memory latency on Cortex-A53)
+	prfm	pldl1keep, [x16]
+	prfm	pldl1keep, [x17]
+	prfm	pldl1keep, [x17, 32]
+
 	# xor integer registers with scratchpad data (spAddr0)
 	ldp	x20, x19, [x16]
 	eor	x4, x4, x20
@@ -876,7 +881,7 @@ rx_calc_dataset_item_prefetch:
 	# Actual mask will be inserted by JIT compiler
 	and	x11, x10, 1
 	add	x11, x8, x11, lsl 6
-	prfm	pldl2strm, [x11]
+	prfm	pldl1keep, [x11]
 
 	# Generated SuperScalar hash program goes here
 
