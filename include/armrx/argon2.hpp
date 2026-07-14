@@ -27,15 +27,24 @@ using Argon2Block = std::array<std::uint64_t, 128>;
 class Argon2dCache {
 public:
     explicit Argon2dCache(std::size_t memory_blocks = 262144U, std::size_t passes = 3U);
+    ~Argon2dCache();
+
+    // Disable copy
+    Argon2dCache(const Argon2dCache&) = delete;
+    Argon2dCache& operator=(const Argon2dCache&) = delete;
 
     void initialize(std::span<const std::byte> key);
-    [[nodiscard]] std::span<const Argon2Block> blocks() const { return blocks_; }
+    [[nodiscard]] std::span<const Argon2Block> blocks() const {
+        return std::span<const Argon2Block>(blocks_, memory_blocks_);
+    }
     [[nodiscard]] const std::array<SuperscalarProgram, kRandomXCacheAccesses>& programs() const { return programs_; }
     [[nodiscard]] const std::vector<std::uint64_t>& reciprocal_cache() const { return reciprocal_cache_; }
 
 private:
     std::size_t passes_;
-    std::vector<Argon2Block> blocks_;
+    std::size_t memory_blocks_;
+    Argon2Block* blocks_ = nullptr;
+    std::size_t allocated_size_ = 0;
     std::array<SuperscalarProgram, kRandomXCacheAccesses> programs_{};
     std::vector<std::uint64_t> reciprocal_cache_;
 };
