@@ -206,6 +206,7 @@ DECL(randomx_program_aarch64):
 	ldr	q14, literal_v14
 	ldr	q15, literal_v15
 
+	.p2align 5
 DECL(randomx_program_aarch64_main_loop):
 	# spAddr0 = spMix1 & ScratchpadL3Mask64;
 	# spAddr1 = (spMix1 >> 32) & ScratchpadL3Mask64;

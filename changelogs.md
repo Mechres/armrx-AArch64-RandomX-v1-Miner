@@ -9,6 +9,7 @@
 - **Argon2d Cache Huge Page allocation** (`include/armrx/argon2.hpp`, `src/argon2.cpp`): Converted the 256 MiB Argon2d cache memory layout from standard `std::vector` (malloc heap pages) to a raw block allocated via `mmap` with transparent huge page hint `madvise(MADV_HUGEPAGE)`. This reduces translation lookaside buffer (TLB) thrashing under random Light Mode lookups, increasing hashrate to ~23 H/s.
 - **JIT compilation timing profiling** (`include/armrx/vm.hpp`, `src/vm.cpp`, `include/armrx/mining_engine.hpp`, `src/mining_engine.cpp`, `include/armrx/tui.hpp`, `src/tui.cpp`, `src/main.cpp`): Integrated high-resolution JIT compilation and execution timers inside `VirtualMachine::run`, periodically reported as a breakdown in the terminal UI dashboard and CLI logger.
 - **Link Time Optimization (LTO/IPO) integration** (`CMakeLists.txt`): Enabled Interprocedural Optimization (LTO) across all build targets. This allows cross-translation unit optimization and inlining, reducing remote ctest runtime by ~48% (from 51.2s to 26.5s) and speeding up mining framework logic.
+- **JIT Loop Alignment optimization** (`src/jit_compiler_a64_static.S`): Added `.p2align 5` before `randomx_program_aarch64_main_loop` in the static assembly template. This aligns the JIT compiled program's main loop entry point to a 32-byte boundary, optimizing instruction fetch unit utilization and branch prediction accuracy on Cortex-A53.
 
 ## 2026-07-13 (CryptoNote/Herominers Stratum support)
 
