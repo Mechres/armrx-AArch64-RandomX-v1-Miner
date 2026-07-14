@@ -206,21 +206,18 @@ DECL(randomx_program_aarch64):
 	ldr	q14, literal_v14
 	ldr	q15, literal_v15
 
-	.p2align 5
-DECL(randomx_program_aarch64_main_loop):
-	# Actual instructions will be inserted by JIT compiler
-	and	w16, w10, 1
-	and	w17, w10, 1
-
-	# x16 = scratchpad + spAddr0
-	# x17 = scratchpad + spAddr1
+	# Compute first iteration's spAddr0 and spAddr1
+	ubfx	x16, x10, #6, #15
+	ubfx	x17, x10, #38, #15
 	add	x16, x2, x16, lsl #6
 	add	x17, x2, x17, lsl #6
-
-	# Prefetch scratchpad lines before loading (hide memory latency on Cortex-A53)
 	prfm	pldl1keep, [x16]
 	prfm	pldl1keep, [x17]
 	prfm	pldl1keep, [x17, 32]
+
+	.p2align 5
+DECL(randomx_program_aarch64_main_loop):
+.Lmain_loop:
 
 	# xor integer registers with scratchpad data (spAddr0)
 	ldp	x20, x19, [x16]
@@ -334,7 +331,7 @@ DECL(randomx_program_aarch64_cacheline_align_mask1):
 	add	x20, x20, x1
 
 	# Prefetch dataset data
-	prfm	pldl1keep, [x20]
+	prfm	pldl2keep, [x20]
 
 DECL(randomx_program_aarch64_cacheline_align_mask2):
 	# Actual mask will be inserted by JIT compiler
@@ -360,6 +357,19 @@ rx_program_xor_with_dataset_line:
 DECL(randomx_program_aarch64_update_spMix1):
 	# JIT compiler will replace it with "eor x10, config.readReg0, config.readReg1"
 	eor	x10, x0, x0
+
+	# Actual instructions will be inserted by JIT compiler
+	and	w19, w10, 1
+	and	w20, w10, 1
+
+	# Compute next iteration's scratchpad addresses
+	add	x19, x2, x19, lsl #6
+	add	x20, x2, x20, lsl #6
+
+	# Prefetch next iteration's scratchpad data
+	prfm	pldl1keep, [x19]
+	prfm	pldl1keep, [x20]
+	prfm	pldl1keep, [x20, 32]
 
 	# Store integer registers to scratchpad (spAddr1)
 	stp	x4, x5, [x17, 0]
@@ -458,8 +468,12 @@ randomx_program_aarch64_FE_store:
 	stp	q16, q17, [x16, 0]
 	stp	q18, q19, [x16, 32]
 
+	# Move next-iteration scratchpad addresses into active registers
+	mov	x16, x19
+	mov	x17, x20
+
 	subs	x3, x3, 1
-	bne	DECL(randomx_program_aarch64_main_loop)
+	bne	.Lmain_loop
 	
 	# Restore x0
 	ldr	x0, [sp], 16

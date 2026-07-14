@@ -159,15 +159,7 @@ void JitCompilerA64::enableAll()
 
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
-	uint32_t codePos = MainLoopBegin;
-
-	// ubfx x16, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 16 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	// ubfx x17, x10, #38, #width
-	emit32(0xD3400000 | 17 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	codePos = PrologueSize;
+	uint32_t codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
 	num32bitLiterals = 0;
 
@@ -202,6 +194,12 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 	// eor x10, config.readReg0, config.readReg1
 	codePos = ((uint8_t*)randomx_program_aarch64_update_spMix1) - ((uint8_t*)randomx_program_aarch64);
 	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
+
+	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
+	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+
+	// ubfx x20, x10, #38, #width
+	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
 	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
 
@@ -250,15 +248,7 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 
 void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset)
 {
-	uint32_t codePos = MainLoopBegin;
-
-	// ubfx x16, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 16 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	// ubfx x17, x10, #38, #width
-	emit32(0xD3400000 | 17 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	codePos = PrologueSize;
+	uint32_t codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
 	num32bitLiterals = 0;
 
@@ -301,6 +291,12 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 	// eor x10, config.readReg0, config.readReg1
 	codePos = ((uint8_t*)randomx_program_aarch64_update_spMix1) - ((uint8_t*)randomx_program_aarch64);
 	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
+
+	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
+	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+
+	// ubfx x20, x10, #38, #width
+	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
 
 	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
 

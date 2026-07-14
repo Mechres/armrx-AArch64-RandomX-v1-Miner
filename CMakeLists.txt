@@ -68,7 +68,7 @@ if(ARMRX_ENABLE_NATIVE)
 endif()
 
 if(ARMRX_JIT_PROFILE)
-    target_compile_definitions(armrx_core PRIVATE ARMRX_JIT_PROFILE)
+    target_compile_definitions(armrx_core PUBLIC ARMRX_JIT_PROFILE)
     message(STATUS "JIT profiling enabled — adds 3 clock_gettime syscalls per hash")
 endif()
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-14 (AArch64 JIT Loop Branch & ODR fixes)
+
+### Fixed
+- **JIT Loop Branch Relocation Fix** (`src/jit_compiler_a64_static.S`): Introduced a local label `.Lmain_loop` for the conditional loop branch (`bne .Lmain_loop`), eliminating the `R_AARCH64_CONDBR19` relocation against the global symbol `DECL(randomx_program_aarch64_main_loop)`. This prevents linker-induced loop branch corruption under Position Independent Executable (PIE) builds.
+- **MiningEngine ODR Violation and Exit Crash Fix** (`CMakeLists.txt`): Changed the visibility of the `ARMRX_JIT_PROFILE` compile definition on the `armrx_core` target from `PRIVATE` to `PUBLIC`. This ensures that all downstream targets linking against `armrx_core` (e.g., `test_mining`) see the same struct layout for `MiningEngine` (specifically the JIT profiling fields), resolving a classic ODR violation that caused segmentation faults on program exit on musl libc systems.
+
 ## 2026-07-14 (AArch64 JIT Optimizations: ubfx, ext, direct NEON load)
 
 ### Added
