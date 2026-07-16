@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-07-16 (Phase 1 — Performance & tooling baseline)
+
+### Performance
+- **O1 — `alignas(16)` on RegisterFile** (`include/armrx/vm.hpp`): Added 16-byte alignment to the RegisterFile struct. Eliminates unaligned copies in the blake2b hot path.
+- **O3 — Rounding mode cache** (`src/vm.cpp`): `rx_set_rounding_mode` now caches the last rounding mode in a `static` variable and skips the `fesetround` syscall when unchanged. CFROUND frequency is 1/256, so ~99.6% of calls are no-ops.
+- **O7 — T-table AES fallback** (`src/aes.cpp`): Replaced the runtime `gf_inverse` → `sbox` → `gf_multiply` AES SubBytes+ShiftRows+MixColumns implementation with precomputed T-table lookups (`randomx_aes_lut_enc[4][256]` / `randomx_aes_lut_dec[4][256]` from `soft_aes.cpp`). Reduces software AES latency from ~hundreds of GF(2^8) ops to 16 table lookups per round.
+
+### Build System & Tooling
+- **bench_armrx registered in CTest** (`CMakeLists.txt`): The benchmark is now discoverable via `ctest --test-dir build`, preventing silent JIT regressions.
+- **ASan/UBSan CMake options** (`CMakeLists.txt`): Added `-DARMRX_ENABLE_ASAN=ON` and `-DARMRX_ENABLE_UBSAN=ON` for sanitizer builds. S3 OOB check can now be confirmed with ASan.
+- **`.clang-format` / `.clang-tidy` baseline**: Added project-wide formatting and linting configurations. No CI integration yet.
+
+### Verification
+- CTest: 100% passed (3/3) — armrx_tests + test_mining + bench_armrx.
+- Benchmark: stable at ~4 H/s (light JIT, single-thread) — no regression from AES rewrite.
+
 ## 2026-07-16 (Phase 0 — Security & correctness baseline)
 
 ### Security

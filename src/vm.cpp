@@ -67,11 +67,15 @@ static inline std::int64_t smulh(std::int64_t a, std::int64_t b) {
 }
 
 static inline void rx_set_rounding_mode(std::uint32_t mode) {
-    switch (mode & 3) {
+    static std::uint32_t last_mode = 0xFF; // invalid sentinel
+    mode &= 3;
+    if (mode == last_mode) return;
+    last_mode = mode;
+    switch (mode) {
         case 1: std::fesetround(FE_DOWNWARD); break;
         case 2: std::fesetround(FE_UPWARD); break;
         case 3: std::fesetround(FE_TOWARDZERO); break;
-        case 0: std::fesetround(FE_TONEAREST); break;
+        default: std::fesetround(FE_TONEAREST); break;
     }
 }
 

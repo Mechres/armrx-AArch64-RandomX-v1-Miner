@@ -128,6 +128,11 @@ TCP connection to any Monero-compatible pool with:
 | **Dataset OOB read guard** | ✅ |
 | **JIT W^X compliance** | ✅ |
 | **KATs in both JIT + interpreted mode** | ✅ |
+| **T-table AES fallback** | ✅ |
+| **Rounding mode cache** | ✅ |
+| **`alignas(16)` RegisterFile** | ✅ |
+| **ASan/UBSan CMake options** | ✅ |
+| **`bench_armrx` in CTest** | ✅ |
 
 ### Performance
 

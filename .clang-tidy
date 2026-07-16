@@ -1,0 +1,25 @@
+Checks: >
+    bugprone-*,
+    cert-*,
+    clang-analyzer-*,
+    cppcoreguidelines-pro-type-cstyle-cast,
+    performance-*,
+    readability-magic-numbers,
+    -cert-err58-cpp,
+    -cppcoreguidelines-avoid-magic-numbers,
+    -readability-identifier-length,
+    -readability-magic-numbers,
+    -bugprone-easily-swappable-parameters,
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.MemberSuffix
+    value: _

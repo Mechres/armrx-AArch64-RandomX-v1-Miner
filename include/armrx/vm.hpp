@@ -21,7 +21,7 @@ struct FloatRegister {
     double hi;
 };
 
-struct RegisterFile {
+struct alignas(16) RegisterFile {
     std::uint64_t r[8];
     FloatRegister f[4];
     FloatRegister e[4];

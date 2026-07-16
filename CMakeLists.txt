@@ -7,6 +7,8 @@ option(ARMRX_BUILD_TESTS "Build unit tests" ON)
 option(ARMRX_JIT_PROFILE "Enable per-hash JIT profiling (adds 3 clock_gettime syscalls per hash)" OFF)
 option(ARMRX_ENABLE_JIT_FAST_DIV_SQRT "Enable fast Newton-Raphson JIT FDIV and FSQRT" OFF)
 option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OFF)
+option(ARMRX_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(ARMRX_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 set(ARMRX_PGO "OFF" CACHE STRING "Profile-Guided Optimization: OFF, GENERATE, or USE")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -97,6 +99,18 @@ if(ARMRX_ENABLE_JIT_FAST_DIV_SQRT)
     message(STATUS "Fast JIT FDIV and FSQRT (Newton-Raphson) enabled")
 endif()
 
+if(ARMRX_ENABLE_ASAN)
+    target_compile_options(armrx_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(armrx_core PRIVATE -fsanitize=address)
+    message(STATUS "AddressSanitizer enabled")
+endif()
+
+if(ARMRX_ENABLE_UBSAN)
+    target_compile_options(armrx_core PRIVATE -fsanitize=undefined)
+    target_link_options(armrx_core PRIVATE -fsanitize=undefined)
+    message(STATUS "UndefinedBehaviorSanitizer enabled")
+endif()
+
 add_executable(armrx src/main.cpp)
 target_link_libraries(armrx PRIVATE armrx_core)
 
@@ -112,6 +126,7 @@ if(ARMRX_BUILD_TESTS)
 
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
+    add_test(NAME bench_armrx COMMAND bench_armrx)
 endif()
 
 # Enable Interprocedural Optimization (LTO) if supported
