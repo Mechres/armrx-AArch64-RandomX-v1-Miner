@@ -54,8 +54,9 @@ Provide an AArch64 CMake toolchain file and leave `ARMRX_ENABLE_NATIVE` off.
 ./build/armrx --pool=pool.example.com:3333 --wallet=<YOUR_WALLET> [--password=x] [--mode=auto] [--workers=N]
 ```
 
-Supports standard Stratum V1 and automatically falls back to the **CryptoNote protocol** (such as `herominers.com`) if the pool rejects Stratum V1.
-Disconnects are **automatically retried** with exponential backoff (1s → 2s → … → 30s max).
+Supports **standard Stratum V1** and automatically falls back to the **CryptoNote protocol** (required by pools like `herominers.com`). Most pools use TLS — enable with `--tls`.
+Disconnects are **automatically retried** with exponential backoff (1s → 2s → … → 30s max, 5 retries then failover).
+Multiple pools can be specified for automatic failover: `--pool=A:1111 --pool=B:1111`.
 
 ---
 
@@ -113,9 +114,28 @@ TCP connection to any Monero-compatible pool with:
 | Multi-threaded worker pool + target comparison + mode selection | ✅ |
 | AArch64 JIT backend (ASM + JIT compiler + virtual memory) | ✅ verified on hardware |
 | Stratum V1 / CryptoNote client (subscribe, authorize, notify, submit) | ✅ |
-| **Auto-reconnect with backoff** | ✅ |
+| Auto-reconnect with backoff | ✅ |
+| TLS/SSL pool connections | ✅ |
+| Multi-pool failover | ✅ |
+| Config file (`~/.config/armrx/config.json`) | ✅ |
+| TUI dashboard (`--tui`) | ✅ |
+| CPU affinity + per-worker H/s counters | ✅ |
+| NEON SIMD SuperscalarHash | ✅ |
+| JIT loop alignment + prefetch + NEON loads | ✅ |
 
-All reference test vectors pass:
+### Performance
+
+Tested on **8× Cortex-A53 @ ~1.2 GHz** (Lenovo MSM8916, postmarketOS):
+
+| Mode | Hashrate |
+|------|----------|
+| **Light, 8 workers** | **~22 H/s** (big: 3.58/core, LITTLE: 1.86/core) |
+| Light, 4 workers (big only) | ~14 H/s |
+| Fast mode | Requires ≥2.3 GiB available RAM |
+
+Reference XMRig on same hardware: ~27 H/s. See [OPTIMIZATION_REFERENCE.md](OPTIMIZATION_REFERENCE.md) for the full optimization history.
+
+### Reference Test Vectors
 ```
 Input1: 639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f
 Input2: 300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969

@@ -278,7 +278,7 @@ DECL(randomx_program_aarch64_vm_instructions):
 
 	# buffer for generated instructions
 	# FDIV_M is the largest instruction taking up to 12 ARMv8 instructions
-	.fill RANDOMX_PROGRAM_MAX_SIZE*12,4,0
+	.fill RANDOMX_PROGRAM_MAX_SIZE*16,4,0
 
 literal_x0:  .fill 1,8,0
 literal_x11: .fill 1,8,0
@@ -368,7 +368,7 @@ DECL(randomx_program_aarch64_update_spMix1):
 
 	# Prefetch next iteration's scratchpad data
 	prfm	pldl1keep, [x19]
-	prfm	pldl1keep, [x20]
+	prfm	pldl1strm, [x20]
 	prfm	pldl1keep, [x20, 32]
 
 	# Store integer registers to scratchpad (spAddr1)

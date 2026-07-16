@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-16 (XMRig comparison + OPTIMIZATION_REFERENCE.md)
+
+### Added
+- **`OPTIMIZATION_REFERENCE.md`**: Comprehensive document cataloging every optimization tried, what worked (✅), what failed (❌), what's deferred (⏸️), with perf analysis, build flags reference, and CLI reference.
+- **XMRig `xmrig-dev` source added**: For direct comparison of JIT code generation.
+
+### Analysis (perf comparison on same hardware)
+- armrx: 64.3B instructions vs XMRig: 48.2B — **33% more instructions** is the primary gap
+- armrx: 152M branch misses vs XMRig: 11M — **13× more**
+- Static ASM and JIT handlers are nearly identical — gap is distributed across years of XMRig's iterative profiling
+- Buffer enlarged 4608→6144 slots, dataset prefetch changed `pldl1keep`→`pldl1strm` (matched to XMRig)
+
 ## 2026-07-14 (AArch64 JIT Loop Branch & ODR fixes)
 
 ### Fixed
