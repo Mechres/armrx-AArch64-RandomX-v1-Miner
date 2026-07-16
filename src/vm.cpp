@@ -258,397 +258,358 @@ void VirtualMachine::initialize_vm_state() {
 }
 
 void VirtualMachine::compile_instruction(const Instruction& instr, int i, InstructionByteCode& ibc) {
-    int opcode = instr.opcode;
+    (this->*kCompileHandlers[instr.opcode])(instr, i, ibc);
+}
 
-    if (opcode < ceil_IADD_RS) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IADD_RS;
-        ibc.idst = &reg_.r[dst];
-        ibc.isrc = &reg_.r[src];
-        ibc.shift = instr.getModShift();
-        if (dst != 5) {
-            ibc.imm = 0;
-        } else {
-            ibc.imm = signExtend2sCompl(instr.getImm32());
-        }
-        register_usage_[dst] = i;
-        return;
+// ── Instruction compiler handlers ────────────────────────────────────────
+
+void VirtualMachine::h_IADD_RS(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    auto src = instr.src % 8;
+    ibc.type = InstructionType::IADD_RS;
+    ibc.idst = &reg_.r[dst];
+    ibc.isrc = &reg_.r[src];
+    ibc.shift = instr.getModShift();
+    ibc.imm = (dst != 5) ? 0 : signExtend2sCompl(instr.getImm32());
+    register_usage_[dst] = i;
+}
+
+static void compile_mem_op(InstructionByteCode& ibc, const Instruction& instr,
+                           std::uint64_t* dst_ptr, std::uint64_t* src_ptr,
+                           InstructionType type, std::uint64_t imm) {
+    ibc.type = type;
+    ibc.idst = dst_ptr;
+    ibc.imm = imm;
+    if (src_ptr != dst_ptr) {
+        ibc.isrc = src_ptr;
+        ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
+    } else {
+        static const std::uint64_t zero_val = 0;
+        ibc.isrc = &zero_val;
+        ibc.memMask = kScratchpadL3Mask;
     }
+}
 
-    if (opcode < ceil_IADD_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IADD_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
+static void compile_alu_reg(InstructionByteCode& ibc, const Instruction& instr,
+                            std::uint64_t* dst_ptr, std::uint64_t* src_ptr,
+                            InstructionType type, std::uint64_t imm) {
+    ibc.type = type;
+    ibc.idst = dst_ptr;
+    if (src_ptr != dst_ptr) {
+        ibc.isrc = src_ptr;
+    } else {
+        ibc.imm = imm;
+        ibc.isrc = &ibc.imm;
     }
+}
 
-    if (opcode < ceil_ISUB_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::ISUB_R;
-        ibc.idst = &reg_.r[dst];
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-        } else {
-            ibc.imm = signExtend2sCompl(instr.getImm32());
-            ibc.isrc = &ibc.imm;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
+void VirtualMachine::h_IADD_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::IADD_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
 
-    if (opcode < ceil_ISUB_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::ISUB_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
+void VirtualMachine::h_ISUB_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_alu_reg(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                    InstructionType::ISUB_R, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
 
-    if (opcode < ceil_IMUL_R) {
+void VirtualMachine::h_ISUB_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::ISUB_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IMUL_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_alu_reg(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                    InstructionType::IMUL_R, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IMUL_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::IMUL_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IMULH_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    ibc.type = InstructionType::IMULH_R;
+    ibc.idst = &reg_.r[dst];
+    ibc.isrc = &reg_.r[instr.src % 8];
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IMULH_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::IMULH_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_ISMULH_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    ibc.type = InstructionType::ISMULH_R;
+    ibc.idst = &reg_.r[dst];
+    ibc.isrc = &reg_.r[instr.src % 8];
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_ISMULH_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::ISMULH_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IMUL_RCP(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    const std::uint32_t divisor = instr.getImm32();
+    if (!isZeroOrPowerOf2(divisor)) {
         auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
         ibc.type = InstructionType::IMUL_R;
         ibc.idst = &reg_.r[dst];
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-        } else {
-            ibc.imm = signExtend2sCompl(instr.getImm32());
-            ibc.isrc = &ibc.imm;
-        }
+        ibc.imm = randomx_reciprocal(divisor);
+        ibc.isrc = &ibc.imm;
         register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IMUL_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IMUL_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IMULH_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IMULH_R;
-        ibc.idst = &reg_.r[dst];
-        ibc.isrc = &reg_.r[src];
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IMULH_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IMULH_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_ISMULH_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::ISMULH_R;
-        ibc.idst = &reg_.r[dst];
-        ibc.isrc = &reg_.r[src];
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_ISMULH_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::ISMULH_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IMUL_RCP) {
-        const std::uint32_t divisor = instr.getImm32();
-        if (!isZeroOrPowerOf2(divisor)) {
-            auto dst = instr.dst % 8;
-            ibc.type = InstructionType::IMUL_R;
-            ibc.idst = &reg_.r[dst];
-            ibc.imm = randomx_reciprocal(divisor);
-            ibc.isrc = &ibc.imm;
-            register_usage_[dst] = i;
-        } else {
-            ibc.type = InstructionType::NOP;
-        }
-        return;
-    }
-
-    if (opcode < ceil_INEG_R) {
-        auto dst = instr.dst % 8;
-        ibc.type = InstructionType::INEG_R;
-        ibc.idst = &reg_.r[dst];
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IXOR_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IXOR_R;
-        ibc.idst = &reg_.r[dst];
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-        } else {
-            ibc.imm = signExtend2sCompl(instr.getImm32());
-            ibc.isrc = &ibc.imm;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IXOR_M) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IXOR_M;
-        ibc.idst = &reg_.r[dst];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            static const std::uint64_t zero_val = 0;
-            ibc.isrc = &zero_val;
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IROR_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IROR_R;
-        ibc.idst = &reg_.r[dst];
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-        } else {
-            ibc.imm = instr.getImm32();
-            ibc.isrc = &ibc.imm;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_IROL_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::IROL_R;
-        ibc.idst = &reg_.r[dst];
-        if (src != dst) {
-            ibc.isrc = &reg_.r[src];
-        } else {
-            ibc.imm = instr.getImm32();
-            ibc.isrc = &ibc.imm;
-        }
-        register_usage_[dst] = i;
-        return;
-    }
-
-    if (opcode < ceil_ISWAP_R) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        if (src != dst) {
-            ibc.idst = &reg_.r[dst];
-            ibc.isrc = &reg_.r[src];
-            ibc.type = InstructionType::ISWAP_R;
-            register_usage_[dst] = i;
-            register_usage_[src] = i;
-        } else {
-            ibc.type = InstructionType::NOP;
-        }
-        return;
-    }
-
-    if (opcode < ceil_FSWAP_R) {
-        auto dst = instr.dst % 8;
-        ibc.type = InstructionType::FSWAP_R;
-        if (dst < 4) {
-            ibc.fdst = &reg_.f[dst];
-        } else {
-            ibc.fdst = &reg_.e[dst - 4];
-        }
-        return;
-    }
-
-    if (opcode < ceil_FADD_R) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 4;
-        ibc.type = InstructionType::FADD_R;
-        ibc.fdst = &reg_.f[dst];
-        ibc.fsrc = &reg_.a[src];
-        return;
-    }
-
-    if (opcode < ceil_FADD_M) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::FADD_M;
-        ibc.fdst = &reg_.f[dst];
-        ibc.isrc = &reg_.r[src];
-        ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        return;
-    }
-
-    if (opcode < ceil_FSUB_R) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 4;
-        ibc.type = InstructionType::FSUB_R;
-        ibc.fdst = &reg_.f[dst];
-        ibc.fsrc = &reg_.a[src];
-        return;
-    }
-
-    if (opcode < ceil_FSUB_M) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::FSUB_M;
-        ibc.fdst = &reg_.f[dst];
-        ibc.isrc = &reg_.r[src];
-        ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        return;
-    }
-
-    if (opcode < ceil_FSCAL_R) {
-        auto dst = instr.dst % 4;
-        ibc.fdst = &reg_.f[dst];
-        ibc.type = InstructionType::FSCAL_R;
-        return;
-    }
-
-    if (opcode < ceil_FMUL_R) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 4;
-        ibc.type = InstructionType::FMUL_R;
-        ibc.fdst = &reg_.e[dst];
-        ibc.fsrc = &reg_.a[src];
-        return;
-    }
-
-    if (opcode < ceil_FDIV_M) {
-        auto dst = instr.dst % 4;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::FDIV_M;
-        ibc.fdst = &reg_.e[dst];
-        ibc.isrc = &reg_.r[src];
-        ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        return;
-    }
-
-    if (opcode < ceil_FSQRT_R) {
-        auto dst = instr.dst % 4;
-        ibc.type = InstructionType::FSQRT_R;
-        ibc.fdst = &reg_.e[dst];
-        return;
-    }
-
-    if (opcode < ceil_CBRANCH) {
-        ibc.type = InstructionType::CBRANCH;
-        int creg = instr.dst % 8;
-        ibc.idst = &reg_.r[creg];
-        ibc.target = register_usage_[creg];
-        int shift = instr.getModCond() + 8;
-        ibc.imm = signExtend2sCompl(instr.getImm32()) | (1ULL << shift);
-        if (shift > 0) {
-            ibc.imm &= ~(1ULL << (shift - 1));
-        }
-        ibc.memMask = 255U << shift;
-        for (unsigned j = 0; j < 8; ++j) {
-            register_usage_[j] = i;
-        }
-        return;
-    }
-
-    if (opcode < ceil_CFROUND) {
-        auto src = instr.src % 8;
-        ibc.isrc = &reg_.r[src];
-        ibc.type = InstructionType::CFROUND;
-        ibc.imm = instr.getImm32() & 63;
-        return;
-    }
-
-    if (opcode < ceil_ISTORE) {
-        auto dst = instr.dst % 8;
-        auto src = instr.src % 8;
-        ibc.type = InstructionType::ISTORE;
-        ibc.idst = &reg_.r[dst];
-        ibc.isrc = &reg_.r[src];
-        ibc.imm = signExtend2sCompl(instr.getImm32());
-        if (instr.getModCond() < 14) {
-            ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
-        } else {
-            ibc.memMask = kScratchpadL3Mask;
-        }
-        return;
-    }
-
-    if (opcode < ceil_NOP) {
+    } else {
         ibc.type = InstructionType::NOP;
-        return;
     }
-
-    throw std::runtime_error("unreachable opcode");
 }
+
+void VirtualMachine::h_INEG_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    ibc.type = InstructionType::INEG_R;
+    ibc.idst = &reg_.r[dst];
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IXOR_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_alu_reg(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                    InstructionType::IXOR_R, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IXOR_M(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_mem_op(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                   InstructionType::IXOR_M, signExtend2sCompl(instr.getImm32()));
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IROR_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_alu_reg(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                    InstructionType::IROR_R, instr.getImm32());
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_IROL_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    compile_alu_reg(ibc, instr, &reg_.r[dst], &reg_.r[instr.src % 8],
+                    InstructionType::IROL_R, instr.getImm32());
+    register_usage_[dst] = i;
+}
+
+void VirtualMachine::h_ISWAP_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    auto src = instr.src % 8;
+    if (src != dst) {
+        ibc.idst = &reg_.r[dst];
+        ibc.isrc = &reg_.r[src];
+        ibc.type = InstructionType::ISWAP_R;
+        register_usage_[dst] = i;
+        register_usage_[src] = i;
+    } else {
+        ibc.type = InstructionType::NOP;
+    }
+}
+
+void VirtualMachine::h_FSWAP_R(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    (void)i;
+    auto dst = instr.dst % 8;
+    ibc.type = InstructionType::FSWAP_R;
+    if (dst < 4) {
+        ibc.fdst = &reg_.f[dst];
+    } else {
+        ibc.fdst = &reg_.e[dst - 4];
+    }
+}
+
+void VirtualMachine::h_FADD_R(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FADD_R;
+    ibc.fdst = &reg_.f[instr.dst % 4];
+    ibc.fsrc = &reg_.a[instr.src % 4];
+}
+
+void VirtualMachine::h_FADD_M(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FADD_M;
+    ibc.fdst = &reg_.f[instr.dst % 4];
+    ibc.isrc = &reg_.r[instr.src % 8];
+    ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
+    ibc.imm = signExtend2sCompl(instr.getImm32());
+}
+
+void VirtualMachine::h_FSUB_R(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FSUB_R;
+    ibc.fdst = &reg_.f[instr.dst % 4];
+    ibc.fsrc = &reg_.a[instr.src % 4];
+}
+
+void VirtualMachine::h_FSUB_M(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FSUB_M;
+    ibc.fdst = &reg_.f[instr.dst % 4];
+    ibc.isrc = &reg_.r[instr.src % 8];
+    ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
+    ibc.imm = signExtend2sCompl(instr.getImm32());
+}
+
+void VirtualMachine::h_FSCAL_R(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.fdst = &reg_.f[instr.dst % 4];
+    ibc.type = InstructionType::FSCAL_R;
+}
+
+void VirtualMachine::h_FMUL_R(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FMUL_R;
+    ibc.fdst = &reg_.e[instr.dst % 4];
+    ibc.fsrc = &reg_.a[instr.src % 4];
+}
+
+void VirtualMachine::h_FDIV_M(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FDIV_M;
+    ibc.fdst = &reg_.e[instr.dst % 4];
+    ibc.isrc = &reg_.r[instr.src % 8];
+    ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
+    ibc.imm = signExtend2sCompl(instr.getImm32());
+}
+
+void VirtualMachine::h_FSQRT_R(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::FSQRT_R;
+    ibc.fdst = &reg_.e[instr.dst % 4];
+}
+
+void VirtualMachine::h_CBRANCH(const Instruction& instr, int i, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::CBRANCH;
+    int creg = instr.dst % 8;
+    ibc.idst = &reg_.r[creg];
+    ibc.target = register_usage_[creg];
+    int shift = instr.getModCond() + 8;
+    ibc.imm = signExtend2sCompl(instr.getImm32()) | (1ULL << shift);
+    if (shift > 0) {
+        ibc.imm &= ~(1ULL << (shift - 1));
+    }
+    ibc.memMask = 255U << shift;
+    for (unsigned j = 0; j < 8; ++j) {
+        register_usage_[j] = i;
+    }
+}
+
+void VirtualMachine::h_CFROUND(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    ibc.isrc = &reg_.r[instr.src % 8];
+    ibc.type = InstructionType::CFROUND;
+    ibc.imm = instr.getImm32() & 63;
+}
+
+void VirtualMachine::h_ISTORE(const Instruction& instr, int /*i*/, InstructionByteCode& ibc) {
+    auto dst = instr.dst % 8;
+    auto src = instr.src % 8;
+    ibc.type = InstructionType::ISTORE;
+    ibc.idst = &reg_.r[dst];
+    ibc.isrc = &reg_.r[src];
+    ibc.imm = signExtend2sCompl(instr.getImm32());
+    if (instr.getModCond() < 14) {
+        ibc.memMask = (instr.getModMem() ? kScratchpadL1Mask : kScratchpadL2Mask);
+    } else {
+        ibc.memMask = kScratchpadL3Mask;
+    }
+}
+
+void VirtualMachine::h_NOP(const Instruction& /*instr*/, int /*i*/, InstructionByteCode& ibc) {
+    ibc.type = InstructionType::NOP;
+}
+
+// Dispatch table: maps each opcode (0-255) to its compile handler.
+// Opcode ranges and ceil_X constants match the RandomX v1 spec.
+const VirtualMachine::CompileHandler VirtualMachine::kCompileHandlers[256] = {
+    /*  0-15 */ &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
+    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
+    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
+    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
+    /* 16-22 */ &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M,
+    &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M,
+    /* 23-38 */ &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
+    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
+    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
+    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
+    /* 39-45 */ &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M,
+    &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M,
+    /* 46-61 */ &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
+    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
+    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
+    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
+    /* 62-65 */ &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M,
+    /* 66-69 */ &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R,
+    /* 70    */ &VirtualMachine::h_IMULH_M,
+    /* 71-74 */ &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R,
+    /* 75    */ &VirtualMachine::h_ISMULH_M,
+    /* 76-83 */ &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP,
+    &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP,
+    /* 84-85 */ &VirtualMachine::h_INEG_R, &VirtualMachine::h_INEG_R,
+    /* 86-100 */ &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
+    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
+    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
+    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
+    /*101-105 */ &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M,
+    &VirtualMachine::h_IXOR_M,
+    /*106-113 */ &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R,
+    &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R,
+    /*114-115 */ &VirtualMachine::h_IROL_R, &VirtualMachine::h_IROL_R,
+    /*116-119 */ &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R,
+    /*120-123 */ &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R,
+    /*124-139 */ &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
+    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
+    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
+    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
+    /*140-144 */ &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M,
+    &VirtualMachine::h_FADD_M,
+    /*145-160 */ &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
+    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
+    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
+    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
+    /*161-165 */ &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M,
+    &VirtualMachine::h_FSUB_M,
+    /*166-171 */ &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R,
+    &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R,
+    /*172-203 */ &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
+    /*204-207 */ &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M,
+    /*208-213 */ &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R,
+    &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R,
+    /*214-238 */ &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
+    &VirtualMachine::h_CBRANCH,
+    /*239    */ &VirtualMachine::h_CFROUND,
+    /*240-255 */ &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
+    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
+    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
+    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
+};
 
 void VirtualMachine::compile_program() {
     std::fill(std::begin(register_usage_), std::end(register_usage_), -1);
@@ -797,7 +758,7 @@ void VirtualMachine::execute_bytecode() {
 }
 
 void VirtualMachine::dataset_read(std::uint64_t address, std::uint64_t (&r)[8]) {
-    if (flags_ & kRandOMXFlagFullMem) {
+    if (is_fast_mode()) {
         ARMRX_ASSERT(address + 64 <= dataset_.size(), "dataset_read OOB");
         const std::byte* datasetLine = dataset_.data() + address;
         for (int i = 0; i < 8; ++i) {
@@ -829,64 +790,74 @@ void VirtualMachine::run(const void* seed) {
 
 #ifdef ARMRX_HAVE_JIT
     if (jit_) {
-        // Build ProgramConfiguration from the initialized VM state
-        ProgramConfiguration config{};
-        config.eMask[0] = e_mask_[0];
-        config.eMask[1] = e_mask_[1];
-        config.readReg0 = read_reg0_;
-        config.readReg1 = read_reg1_;
-        config.readReg2 = read_reg2_;
-        config.readReg3 = read_reg3_;
-
-#ifdef ARMRX_JIT_PROFILE
-        auto t0 = std::chrono::high_resolution_clock::now();
-#endif
-        jit_->enableWriting();
-        if (dataset_.empty()) {
-            // Light mode: JIT compiler generates inline dataset item derivation
-            jit_->generateProgramLight(program_, config, dataset_offset_);
-        } else {
-            // Fast mode: JIT compiler reads directly from pre-computed dataset
-            jit_->generateProgram(program_, config);
-        }
-        jit_->enableExecution();
-#ifdef ARMRX_JIT_PROFILE
-        auto t1 = std::chrono::high_resolution_clock::now();
-#endif
-
-        MemoryRegisters mem_regs{};
-        mem_regs.mx = mx_;
-        mem_regs.ma = ma_;
-        if (dataset_.empty()) {
-            // Light mode: JIT needs cache pointer to derive dataset items on the fly
-            mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
-        } else {
-            // Fast mode: JIT reads from pre-computed dataset
-            mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
-        }
-
-        // Copy eMask into the top of reg_.a as the native ABI expects
-        std::memcpy(&reg_.a[0], config.eMask, sizeof(config.eMask));
-
-        jit_->getProgramFunc()(
-            &reg_, &mem_regs,
-            reinterpret_cast<void*>(scratchpad_data_),
-            2048ULL);
-#ifdef ARMRX_JIT_PROFILE
-        auto t2 = std::chrono::high_resolution_clock::now();
-
-        jit_compile_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
-        jit_execute_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
-        jit_total_runs_++;
-#endif
-
-        // Extract updated mx/ma back from mem_regs after JIT execution
-        mx_ = mem_regs.mx;
-        ma_ = mem_regs.ma;
+        run_jit();
         return;
     }
 #endif
 
+    run_interpreted();
+}
+
+#ifdef ARMRX_HAVE_JIT
+void VirtualMachine::run_jit() {
+    // Build ProgramConfiguration from the initialized VM state
+    ProgramConfiguration config{};
+    config.eMask[0] = e_mask_[0];
+    config.eMask[1] = e_mask_[1];
+    config.readReg0 = read_reg0_;
+    config.readReg1 = read_reg1_;
+    config.readReg2 = read_reg2_;
+    config.readReg3 = read_reg3_;
+
+#ifdef ARMRX_JIT_PROFILE
+    auto t0 = std::chrono::high_resolution_clock::now();
+#endif
+    jit_->enableWriting();
+    if (!is_fast_mode()) {
+        // Light mode: JIT compiler generates inline dataset item derivation
+        jit_->generateProgramLight(program_, config, dataset_offset_);
+    } else {
+        // Fast mode: JIT compiler reads directly from pre-computed dataset
+        jit_->generateProgram(program_, config);
+    }
+    jit_->enableExecution();
+#ifdef ARMRX_JIT_PROFILE
+    auto t1 = std::chrono::high_resolution_clock::now();
+#endif
+
+    MemoryRegisters mem_regs{};
+    mem_regs.mx = mx_;
+    mem_regs.ma = ma_;
+    if (!is_fast_mode()) {
+        // Light mode: JIT needs cache pointer to derive dataset items on the fly
+        mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
+    } else {
+        // Fast mode: JIT reads from pre-computed dataset
+        mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
+    }
+
+    // Copy eMask into the top of reg_.a as the native ABI expects
+    std::memcpy(&reg_.a[0], config.eMask, sizeof(config.eMask));
+
+    jit_->getProgramFunc()(
+        &reg_, &mem_regs,
+        reinterpret_cast<void*>(scratchpad_data_),
+        2048ULL);
+#ifdef ARMRX_JIT_PROFILE
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    jit_compile_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+    jit_execute_time_ns_ += std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count();
+    jit_total_runs_++;
+#endif
+
+    // Extract updated mx/ma back from mem_regs after JIT execution
+    mx_ = mem_regs.mx;
+    ma_ = mem_regs.ma;
+}
+#endif
+
+void VirtualMachine::run_interpreted() {
     compile_program();
 
     std::uint32_t spAddr0 = mx_;
@@ -928,7 +899,7 @@ void VirtualMachine::run(const void* seed) {
 
         execute_bytecode();
 
-                const std::uint64_t readPtr = dataset_offset_ + (ma_ & 0x7fffffc0ULL);
+        const std::uint64_t readPtr = dataset_offset_ + (ma_ & 0x7fffffc0ULL);
         mx_ ^= reg_.r[read_reg2_] ^ reg_.r[read_reg3_];
 
         dataset_read(readPtr, reg_.r);

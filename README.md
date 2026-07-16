@@ -133,6 +133,9 @@ TCP connection to any Monero-compatible pool with:
 | **`alignas(16)` RegisterFile** | ✅ |
 | **ASan/UBSan CMake options** | ✅ |
 | **`bench_armrx` in CTest** | ✅ |
+| **VM refactor: `is_fast_mode()`** | ✅ |
+| **VM refactor: `run()` split** | ✅ |
+| **VM refactor: dispatch table** | ✅ |
 
 ### Performance
 

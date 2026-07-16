@@ -100,6 +100,50 @@ private:
     void compile_instruction(const Instruction& instr, int instr_index, InstructionByteCode& ibc);
     void execute_bytecode();
 
+    // Fast-mode helpers
+    [[nodiscard]] bool is_fast_mode() const { return (flags_ & kRandOMXFlagFullMem) != 0; }
+
+    // Split run paths
+#ifdef ARMRX_HAVE_JIT
+    void run_jit();
+#endif
+    void run_interpreted();
+
+    // Instruction compiler dispatch table (replaces the 24-block opcode ladder)
+    using CompileHandler = void(VirtualMachine::*)(const Instruction&, int, InstructionByteCode&);
+    static const CompileHandler kCompileHandlers[256];
+
+    void h_IADD_RS(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IADD_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISUB_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISUB_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IMUL_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IMUL_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IMULH_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IMULH_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISMULH_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISMULH_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IMUL_RCP(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_INEG_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IXOR_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IXOR_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IROR_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_IROL_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISWAP_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FSWAP_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FADD_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FADD_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FSUB_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FSUB_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FSCAL_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FMUL_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FDIV_M(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_FSQRT_R(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_CBRANCH(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_CFROUND(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_ISTORE(const Instruction& instr, int i, InstructionByteCode& ibc);
+    void h_NOP(const Instruction& /*instr*/, int /*i*/, InstructionByteCode& ibc);
+
     // Dataset read logic helper (interprets light vs fast mode)
     void dataset_read(std::uint64_t address, std::uint64_t (&r)[8]);
 

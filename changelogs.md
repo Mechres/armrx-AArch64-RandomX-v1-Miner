@@ -1,6 +1,15 @@
 # Changelog
 
-## 2026-07-16 (Phase 1 — Performance & tooling baseline)
+## 2026-07-16 (Phase 2 — VM refactor: run split + dispatch table)
+
+### Architecture
+- **`is_fast_mode()` helper** (`include/armrx/vm.hpp`, `src/vm.cpp`): Added single source of truth `(flags_ & kRandOMXFlagFullMem)` — replaces the dual check (`flags_` in interpreter, `dataset_.empty()` in JIT). Applied consistently in `dataset_read()` and `run_jit()`.
+- **`run()` split** (`include/armrx/vm.hpp`, `src/vm.cpp`): `run()` now dispatches to `run_jit()` (AArch64 JIT path, gated by `#ifdef ARMRX_HAVE_JIT`) or `run_interpreted()` (bytecode interpreter). Shared setup remains in `run()`.
+- **Dispatch table for instruction compilation** (`include/armrx/vm.hpp`, `src/vm.cpp`): Replaced the 392-line, 24-block cascading `if (opcode < ceil_X)` ladder with a `kCompileHandlers[256]` table of member function pointers. Each opcode maps to one of 30 handler methods (h_IADD_RS through h_NOP). Two static helpers (`compile_mem_op`, `compile_alu_reg`) eliminate the 6× duplicated memory-op pattern.
+
+### Verification
+- CTest: all KATs pass (armrx_tests 16s, test_mining 11s) on real AArch64 hardware.
+- Both JIT and interpreted execution paths verified with identical hash outputs.
 
 ### Performance
 - **O1 — `alignas(16)` on RegisterFile** (`include/armrx/vm.hpp`): Added 16-byte alignment to the RegisterFile struct. Eliminates unaligned copies in the blake2b hot path.
