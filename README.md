@@ -122,6 +122,12 @@ TCP connection to any Monero-compatible pool with:
 | CPU affinity + per-worker H/s counters | ✅ |
 | NEON SIMD SuperscalarHash | ✅ |
 | JIT loop alignment + prefetch + NEON loads | ✅ |
+| **Security hardening (S1–S5, S8)** | ✅ |
+| **Always-on assertions (`ARMRX_ASSERT`)** | ✅ |
+| **JSON injection protection** | ✅ |
+| **Dataset OOB read guard** | ✅ |
+| **JIT W^X compliance** | ✅ |
+| **KATs in both JIT + interpreted mode** | ✅ |
 
 ### Performance
 

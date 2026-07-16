@@ -3,6 +3,7 @@
 #include "armrx/blake2b.hpp"
 #include "armrx/dataset.hpp"
 #include "armrx/aes_generator.hpp"
+#include "armrx/assert.hpp"
 #include <algorithm>
 #include <bit>
 #include <cfenv>
@@ -194,8 +195,12 @@ void VirtualMachine::set_cache(const Argon2dCache* cache) {
 #endif
 }
 
-void VirtualMachine::set_dataset(std::span<const std::byte> dataset) {
+bool VirtualMachine::set_dataset(std::span<const std::byte> dataset) {
+    if ((flags_ & kRandOMXFlagFullMem) && dataset.size() != kRandomXDatasetBytes) {
+        return false;
+    }
     dataset_ = dataset;
+    return true;
 }
 
 void VirtualMachine::allocate() {
@@ -789,6 +794,7 @@ void VirtualMachine::execute_bytecode() {
 
 void VirtualMachine::dataset_read(std::uint64_t address, std::uint64_t (&r)[8]) {
     if (flags_ & kRandOMXFlagFullMem) {
+        ARMRX_ASSERT(address + 64 <= dataset_.size(), "dataset_read OOB");
         const std::byte* datasetLine = dataset_.data() + address;
         for (int i = 0; i < 8; ++i) {
             r[i] ^= load64(datasetLine + 8 * i);

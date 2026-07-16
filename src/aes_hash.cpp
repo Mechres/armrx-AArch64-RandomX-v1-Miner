@@ -1,7 +1,7 @@
 #include "armrx/aes_hash.hpp"
+#include "armrx/assert.hpp"
 #include <algorithm>
 #include <cstring>
-#include <cassert>
 #include <cstdint>
 
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
@@ -71,7 +71,7 @@ inline void write_block_to_span(std::span<std::byte> output, std::size_t offset,
 } // namespace
 
 void fill_aes_1r_x4(AesState& state, std::span<std::byte> output) {
-    assert(output.size() % 64 == 0);
+    ARMRX_ASSERT(output.size() % 64 == 0, "output size must be multiple of 64");
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
     uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 0));
     uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 16));
@@ -127,7 +127,7 @@ void fill_aes_1r_x4(AesState& state, std::span<std::byte> output) {
 }
 
 void fill_aes_4r_x4(AesState& state, std::span<std::byte> output) {
-    assert(output.size() % 64 == 0);
+    ARMRX_ASSERT(output.size() % 64 == 0, "output size must be multiple of 64");
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
     uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 0));
     uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 16));
@@ -204,7 +204,7 @@ void fill_aes_4r_x4(AesState& state, std::span<std::byte> output) {
 }
 
 void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash) {
-    assert(input.size() % 64 == 0);
+    ARMRX_ASSERT(input.size() % 64 == 0, "input size must be multiple of 64");
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
     uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_0.data()));
     uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_1.data()));
@@ -278,7 +278,7 @@ void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash) {
 }
 
 void hash_and_fill_aes_1r_x4(std::span<std::byte> scratchpad, AesState& hash, AesState& fill_state) {
-    assert(scratchpad.size() % 64 == 0);
+    ARMRX_ASSERT(scratchpad.size() % 64 == 0, "scratchpad size must be multiple of 64");
 #if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
     uint8x16_t hs0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_0.data()));
     uint8x16_t hs1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_1.data()));

@@ -28,6 +28,14 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 #include "armrx/jit_compiler_a64.hpp"
+#include "armrx/assert.hpp"
+#include "configuration.h"
+
+// Verify the JIT code buffer layout: the .fill directive in static.S reserves
+// RANDOMX_PROGRAM_MAX_SIZE * 16 * 4 bytes (6144 AArch64 instruction slots).
+// Each RandomX instruction must compile to at most 16 AArch64 words.
+// RANDOMX_PROGRAM_MAX_SIZE is fixed at 384 per the RandomX v1 spec.
+static_assert(RANDOMX_PROGRAM_MAX_SIZE == 384, "Upstream RandomX v1 constant");
 #include "armrx/superscalar.hpp"
 #include "armrx/program.hpp"
 #include "armrx/virtual_memory.h"
@@ -132,7 +140,12 @@ JitCompilerA64::JitCompilerA64()
 #endif
 
 	// Try RWX once; if the kernel allows it, per-hash mprotect calls become no-ops
+	// On secure platforms (OpenBSD, NetBSD, macOS), skip RWX entirely
+#ifndef RANDOMX_FORCE_SECURE
 	rwx_ = (setPagesRWX(code, CodeSize + CalcDatasetItemSize) == 0);
+#else
+	rwx_ = false;
+#endif
 }
 
 JitCompilerA64::~JitCompilerA64()
@@ -152,11 +165,6 @@ void JitCompilerA64::enableExecution()
 	setPagesRX(code, CodeSize + CalcDatasetItemSize);
 }
 
-void JitCompilerA64::enableAll()
-{
-	setPagesRWX(code, CodeSize + CalcDatasetItemSize);
-}
-
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
 	uint32_t codePos = PrologueSize;
@@ -171,6 +179,7 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 		Instruction& instr = program(i);
 		instr.src %= RegistersCount;
 		instr.dst %= RegistersCount;
+		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode");
 		(this->*engine[instr.opcode])(instr, codePos);
 	}
 
@@ -260,6 +269,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		Instruction& instr = program(i);
 		instr.src %= RegistersCount;
 		instr.dst %= RegistersCount;
+		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode in generateProgramLight");
 		(this->*engine[instr.opcode])(instr, codePos);
 	}
 

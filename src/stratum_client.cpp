@@ -20,6 +20,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 // POSIX sockets
 #include <arpa/inet.h>
@@ -36,6 +37,23 @@ namespace armrx {
 // Minimal JSON helpers (no library dependency)
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
+
+/** JSON-escape a string: backslash and quote characters */
+std::string json_escape(std::string_view s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"':  out += "\\\""; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:   out += c;      break;
+        }
+    }
+    return out;
+}
 
 /** Return the value of "key":"<value>" or "key":<value> in JSON string. */
 std::string json_get(const std::string& json, const std::string& key) {
@@ -359,8 +377,8 @@ std::string StratumClient::build_login_msg() const {
            ",\"jsonrpc\":\"2.0\"" +
            ",\"method\":\"login\"" +
            ",\"params\":{" +
-             "\"login\":\"" + wallet_ + "\"," +
-             "\"pass\":\"" + password_ + "\"," +
+             "\"login\":\"" + json_escape(wallet_) + "\"," +
+             "\"pass\":\"" + json_escape(password_) + "\"," +
              "\"agent\":\"armrx/1.0\"," +
              "\"rigid\":\"\"," +
              "\"algo\":[\"rx/0\"]" +
@@ -371,7 +389,7 @@ std::string StratumClient::build_authorize_msg() const {
     const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
     const_cast<StratumClient*>(this)->authorize_req_id_ = id;
     return json_rpc(id, "mining.authorize",
-                    "[\"" + wallet_ + "\",\"" + password_ + "\"]");
+                    "[\"" + json_escape(wallet_) + "\",\"" + json_escape(password_) + "\"]");
 }
 
 std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
@@ -387,13 +405,13 @@ std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                ",\"method\":\"submit\"" +
                ",\"params\":{" +
                  "\"id\":\"" + session_id_ + "\"," +
-                 "\"job_id\":\"" + job.job_id + "\"," +
+                 "\"job_id\":\"" + json_escape(job.job_id) + "\"," +
                  "\"nonce\":\"" + nonce_hex + "\"," +
                  "\"result\":\"" + result_hex + "\"" +
                "}}\n";
     } else {
         return json_rpc(id, "mining.submit",
-                        "[\"" + wallet_ + "\",\"" + job.job_id + "\",\"" +
+                        "[\"" + json_escape(wallet_) + "\",\"" + json_escape(job.job_id) + "\",\"" +
                         nonce_hex + "\"]");
     }
 }

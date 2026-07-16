@@ -199,5 +199,19 @@ int main() {
     std::cout << "Input2 actual hash: " << hex(output_hash) << std::endl;
     assert(hex(output_hash) == "300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969");
 
+    // JIT-mode KAT: same vectors through the JIT compiler path
+#ifdef ARMRX_HAVE_JIT
+    armrx::VirtualMachine jit_vm{armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit};
+    jit_vm.set_cache(&reference_cache);
+
+    armrx::randomx_calculate_hash(&jit_vm, input1, sizeof(input1) - 1, output_hash.data());
+    std::cout << "Input1 (JIT) hash: " << hex(output_hash) << std::endl;
+    assert(hex(output_hash) == "639183aae1bf4c9a35884cb46b09cad9175f04efd7684e7262a0ac1c2f0b4e3f");
+
+    armrx::randomx_calculate_hash(&jit_vm, input2, sizeof(input2) - 1, output_hash.data());
+    std::cout << "Input2 (JIT) hash: " << hex(output_hash) << std::endl;
+    assert(hex(output_hash) == "300a0adb47603dedb42228ccb2b211104f4da45af709cd7547cd049e9489c969");
+#endif
+
     return 0;
 }

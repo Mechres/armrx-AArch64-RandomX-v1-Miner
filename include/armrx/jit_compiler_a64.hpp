@@ -66,7 +66,6 @@ namespace armrx {
 
 		void enableWriting();
 		void enableExecution();
-		void enableAll();
 
 		void setFlags(randomx_flags f) { flags = f; }
 	private:

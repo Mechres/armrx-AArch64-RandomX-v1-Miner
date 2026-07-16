@@ -65,7 +65,7 @@ public:
     VirtualMachine& operator=(const VirtualMachine&) = delete;
 
     void set_cache(const Argon2dCache* cache);
-    void set_dataset(std::span<const std::byte> dataset);
+    [[nodiscard]] bool set_dataset(std::span<const std::byte> dataset);
 
     void allocate();
     void init_scratchpad(void* seed);

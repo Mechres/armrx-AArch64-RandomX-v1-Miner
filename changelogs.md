@@ -1,10 +1,36 @@
 # Changelog
 
-## 2026-07-16 (XMRig comparison + OPTIMIZATION_REFERENCE.md)
+## 2026-07-16 (Phase 0 — Security & correctness baseline)
+
+### Security
+- **S3 — OOB dataset read fixed** (`vm.hpp`, `vm.cpp`, `mining_engine.cpp`): `set_dataset()` changed from `void` to `[[nodiscard]] bool`. In fast mode, validates `dataset.size() == kRandomXDatasetBytes` and returns `false` on mismatch. Added debug-mode bounds assertion in `dataset_read`. Call site in mining engine checks the return value and skips the job on failure.
+- **S1 — JSON injection in Stratum TX** (`stratum_client.cpp`): Added `json_escape(string_view)` helper that escapes `\`, `"`, `\n`, `\r`, `\t`. Applied to `wallet_`, `password_`, and `job.job_id` in all three message builder functions (login, authorize, submit).
+- **S2/S4 — W^X security** (`jit_compiler_a64.cpp`, `jit_compiler_a64.hpp`): `RANDOMX_FORCE_SECURE` now honored in the constructor — skips `setPagesRWX()` when set. Removed `enableAll()` entirely (dead code — never called).
+- **S5 — Always-on assertions** (`include/armrx/assert.hpp` new): `ARMRX_ASSERT` macro that evaluates in all build configurations. Debug builds `abort()` on failure; release builds log a warning and continue. Replaced 5 plain `assert()` calls in `aes_hash.cpp` and `vm.cpp` that compiled out under `NDEBUG`.
+- **S8 — JIT dispatch null guard** (`jit_compiler_a64.cpp`): Added `ARMRX_ASSERT(engine[instr.opcode] != nullptr, ...)` before both dispatch calls in `generateProgram` and `generateProgramLight`. Prevents UB from null member-function pointers.
+
+### Correctness
+- **JIT code buffer invariant** (`jit_compiler_a64.cpp`): Added `static_assert(RANDOMX_PROGRAM_MAX_SIZE == 384)` verifying the RandomX v1 constant that governs the `.fill RANDOMX_PROGRAM_MAX_SIZE*16` reservation in the static assembly template.
+- **KAT tests now run in JIT mode** (`tests/test_blake2b.cpp`): Added a `#ifdef ARMRX_HAVE_JIT` section that creates a second VM with `kRandOMXFlagHardAes | kRandOMXFlagJit` and runs the same KAT vectors through the JIT compiler. Previously only the interpreted path was tested.
+
+### Infrastructure
+- **Devbox SSH fix** (`tools/devbox/devbox_mcp.py`): Added `-F /dev/null` to all SSH/rsync invocations to bypass the broken `/etc/ssh/ssh_config.d/20-systemd-ssh-proxy.conf` symlink (owned by `nobody`, blocking OpenSSH).
+- **`.gitignore` hygiene** (`.gitignore`): Replaced overly broad `*.txt` with specific `PERF_BASELINE.txt`. Added `test_aarch64.cpp`. Removed duplicate `scratch_vm_study/upstream_rx`.
+- **`PERF_BASELINE.txt`**: Recorded baseline performance (light mode JIT: 4.03 H/s single-thread, interpreted: 0.38 H/s).
+
+### Verification
+- CTest: 100% passed (2/2) — all KATs green in both interpreted and JIT mode.
+- Benchmark: stable at 4.03 H/s (light JIT, single-thread) — no regression from security fixes.
 
 ### Added
 - **`OPTIMIZATION_REFERENCE.md`**: Comprehensive document cataloging every optimization tried, what worked (✅), what failed (❌), what's deferred (⏸️), with perf analysis, build flags reference, and CLI reference.
 - **XMRig `xmrig-dev` source added**: For direct comparison of JIT code generation.
+- **`armrx-devbox` SSH & rsync Setup**: Configured the target PostmarketOS/Alpine AArch64 devbox (`192.168.10.156`) with the local `id_ed25519` SSH key. Installed `rsync` on the remote device via `apk` to enable MCP-driven synchronization.
+- **`armrx-devbox` verification pass**: Successfully triggered status query, directory synchronization, code compilation (build), and CTest unit suite execution on the actual AArch64 device. All tests passed.
+- **`armrx-devbox` tool extensions**:
+  - Added support for custom parallel build job bounds (`build_jobs` in configuration or `parallel` tool argument) and appending custom configure flags (`extra_flags` in `devbox_build`).
+  - Integrated `lscpu` outputs and policy-based cpufreq nodes into `devbox_status`.
+  - Implemented the `devbox_perf_stat` tool to profile execution on the target device via `perf stat`, returning structured JSON reports with instructions, cycles, IPC, and branch-miss rates.
 
 ### Analysis (perf comparison on same hardware)
 - armrx: 64.3B instructions vs XMRig: 48.2B — **33% more instructions** is the primary gap

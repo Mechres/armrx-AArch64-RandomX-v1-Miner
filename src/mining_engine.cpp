@@ -212,7 +212,10 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
                 vm.set_cache(active_cache.get());
                 if (mode_ == RandomXMode::fast && active_dataset) {
-                    vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()));
+                    if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {
+                        std::fprintf(stderr, "[worker %zu] dataset size mismatch, skipping job\n", thread_id);
+                        active = false;
+                    }
                 }
             }
         }
