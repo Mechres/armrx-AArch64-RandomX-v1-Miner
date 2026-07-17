@@ -146,6 +146,9 @@ TCP connection to any Monero-compatible pool with:
 | **const_cast elimination** | ✅ |
 | **Pool connection fixed** | ✅ |
 | **PoolManager extraction** | ✅ |
+| **JSON `get_array_element`** | ✅ |
+| **handle_notify scanner cleanup** | ✅ |
+| **Flag constant de-duplication** | ✅ |
 
 ### Performance
 

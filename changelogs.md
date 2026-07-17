@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-17 (JSON module expansion + flag de-duplication)
+
+### Cleanup
+- **`handle_notify` positional scanner replaced** (`src/stratum_client.cpp`): Removed the last hand-rolled JSON parser — a 40-line positional array scanner in `handle_notify`. Replaced with 4 calls to `armrx::json::get_array_element()`. Added `get_array_element(json, key, index)` to the JSON module (`include/armrx/json.hpp`, `src/json.cpp`) as a general-purpose Nth-element array extractor.
+- **Flag constant de-duplication** (`src/jit_compiler_a64.cpp`): 4 constants (`RANDOMX_CACHE_ACCESSES`, `RANDOMX_SUPERSCALAR_LATENCY`, `RANDOMX_SCRATCHPAD_L3`, `CacheSize`) now alias `armrx::kRandomX*` project constants via `static_cast`. Documented the `RANDOMX_FLAG_*` to armrx flag mapping and the intentional difference between `RANDOMX_DATASET_BASE_SIZE` (2 GiB) and `kRandomXDatasetBytes` (2080 MiB).
+
 ## 2026-07-17 (PoolManager extraction + execute_bytecode)
 
 ### Architecture
