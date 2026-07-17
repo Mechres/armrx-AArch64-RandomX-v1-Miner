@@ -60,7 +60,41 @@ backward jump, causing the VM instruction pointer to loop forever.
 
 `0x54000000 | (1 << 5) | 1` → `0x54000000 | (2 << 5) | 1` (imm19=2, skip 8 bytes)
 
-## Suspected Root Cause
+### Status
+
+The fix is deployed, passing all KATs, and included in the current build.
+The 5 hypotheses in the original "Suspected Root Cause" section below were
+written before the real imm19 bug was identified — they are all **superseded**
+and kept only as a record of the investigation process.
+
+### BTB aliasing caveat
+
+AArch64's static branch prediction (backward=taken, forward=not-taken) only
+affects *cold* branches. Once the JIT'd program runs its ~2048 iterations,
+the dynamic predictor learns the true behavior. However, the JIT buffer is
+regenerated per program (every new seed), so a fixed code *address* sees a
+rotating set of different branch behaviors over time — this BTB/history
+aliasing may be a significant contributor to the 13× branch miss gap
+regardless of single-branch encoding. The real fix may involve reducing
+how often branch-heavy addresses are reused with different behavior.
+
+The imm19 fix is correct and deployed; the `-0.5%` estimate remains
+unverified until Phase 1 `perf stat -e branch-misses` confirms the
+mispredict rate dropped on real hardware.
+
+### Unit test recommendation
+
+Add a test that decodes the emitted `bne`/`b` bytes for a CBRANCH sequence
+and asserts the computed target address. This turns a "wait 120s for timeout"
+failure mode into an instant, localized assertion for any future branch-encoding
+changes (relevant for IROR_R/IROL_R `extr` or load-pair coalescing).
+
+---
+
+## Superseded investigation notes
+
+The following hypotheses were written before the real imm19 bug was found.
+They are kept for reference but are **not the actual root cause**.
 
 The unconditional `b` instruction uses a 26-bit signed offset (`imm26`),
 while the original `beq` uses a 19-bit signed offset (`imm19`). The offset

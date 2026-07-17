@@ -1,4 +1,4 @@
-# Peephole JIT Coalescing — Plan
+# Peephole JIT Coalescing — Plan (v2, incorporating review)
 
 **Goal**: Close the ~33% instruction-count gap between armrx and XMRig's
 AArch64 JIT output (measured at 64.3B vs 48.2B instructions per benchmark).
@@ -11,81 +11,102 @@ requires systematic comparison of per-opcode emitted code.
 
 ---
 
-## Methodology
+## Guiding principles
 
-1. **Dump the generated code** from both armrx and XMRig for the same seed/key.
-2. **Disassemble** both dumps and align by opcode boundary.
-3. For each opcode handler, **compare instruction sequences** and identify
-   differences.
-4. For each difference, **verify correctness** (KAT parity) and **measure
-   impact** (instructions retired).
-5. **Merge** winning patterns into armrx's JIT compiler.
+1. **Hashrate vetoes** — instruction count is a proxy metric. A change that
+   reduces instructions but increases cycles (pipeline stalls, cache pressure)
+   is a loss. Hashrate on real hardware is the final arbiter.
+2. **Clean-room** — study XMRig's *output* (disassembly), not its source.
+   All implementations must be original.
+3. **KAT parity before every commit** — no exceptions for a hash function.
+4. **Frequency data before optimization** — don't optimize opcodes that
+   rarely appear in real programs.
 
 ---
 
-## Phase 1 — Infrastructure (tooling to enable comparison)
+## Phase 1 — Infrastructure & Data Gathering
 
-### 1.1 Code dumping tool
+### 1.1 Code dumping with boundary markers
 Add a `--jit-dump` flag to `armrx` that:
 - Runs one hash with a given seed/key
-- Dumps the JIT code buffer (`code` array from `JitCompilerA64`) to stdout as hex
-- Exits without executing (or executes, then dumps)
+- Dumps the JIT code buffer to stdout as hex, with **opcode boundary markers**
+  (a side-channel offset table written alongside the raw bytes, so each emitted
+  instruction sequence can be sliced per opcode)
+- Exits without executing
 
 **File**: `src/main.cpp`, new `--jit-dump` flag
-**Output format**: raw bytes (pipe to `xxd` or `objdump`)
+**Output**: raw bytes + offset table (start position, opcode ID, length for each)
 
-### 1.2 Seed-program determinism test
-Add a test that compiles the same program twice and asserts identical
-JIT output. Catches non-determinism in the JIT compiler.
+### 1.2 Instruction-level benchmark with opcode frequency histograms
+Add micro-benchmarks that:
+- Run a batch of real RandomX programs from random seeds
+- Record opcode frequency histograms (count per opcode across all programs)
+- Use `perf stat -e instructions` per opcode to measure instruction retired cost
 
-**File**: `tests/test_jit_determinism.cpp`
-
-### 1.3 Instruction-level benchmark
-Add micro-benchmarks for individual opcode handlers that measure
-instructions retired per opcode dispatch (via `perf stat -e instructions`).
+**Key insight from review**: Don't prioritize optimizations by intuition.
+IMUL_RCP savings only matter if IMUL_RCP is common. Frequency data stops
+you spending a week polishing opcodes that turn out to be rare.
 
 **File**: `tests/bench_opcodes.cpp`
 
+### 1.3 Spot-check: register allocation vs peephole dominance
+Pick 2-3 opcodes and compare not just their local instruction sequence but
+whether GPR/NEON spill/reload patterns around them differ between armrx and
+XMRig. If allocation differences dominate the instruction-count gap, we need
+a register allocator overhaul rather than per-opcode peepholing.
+
+**File**: Manual investigation using Phase 1.1 dumps + objdump comparison.
+
+### 1.4 CBRANCH encoding unit test
+Add a test that decodes the emitted `bne`/`b` bytes for a CBRANCH sequence
+and asserts the computed target address matches the `reg_changed_offset` value.
+This turns a "wait 120s for timeout" failure mode into an instant, localized
+assertion for any future branch-encoding change. The `extr` instruction for
+IROR_R/IROL_R and load-pair coalescing in Phase 3 will also touch encodings.
+
+**File**: `tests/test_jit_encodings.cpp`
+
+### 1.5 Seed-program determinism test
+Add a test that compiles the same program twice and asserts identical JIT output.
+Catches non-determinism in the JIT compiler.
+
+**File**: `tests/test_jit_determinism.cpp`
+
 ---
 
-## Phase 2 — Per-opcode audit
+## Phase 2 — Per-opcode audit (informed by frequency data)
 
-For each of the 30 opcodes, extract the emitted AArch64 sequence and
-compare against XMRig's output. The XMRig source is at `xmrig-dev/src/`.
-
-### Known gaps to investigate first
-
-Based on the OPTIMIZATION_REFERENCE "33% more instructions" finding:
+After Phase 1.2, re-prioritize this list based on actual opcode frequency.
+The order below is the initial guess, to be replaced by data.
 
 | Priority | Opcode | armrx issue | Est. savings |
 |----------|--------|-------------|--------------|
-| P0 | **IMUL_RCP** | Emits `mov xN, #imm; umulh` — XMRig may fold constant into `movk` sequence | −1–2% |
-| P0 | **CBRANCH** | New `bne+b` path is correct but adds 1 instruction vs old `beq`; XMRig may use different add+test combination | −0.5% |
-| P1 | **IROR_R / IROL_R** | armrx uses `rotr`/`rotl` (function call or intrinsics); XMRig may use `extr` (AArch64 rotate-insert) | −1–3% |
-| P1 | **FDIV_M / FSQRT_R** | armrx emits software divide/sqrt calls; XMRig may use inline Newton-Raphson sequences | −2–5% |
-| P2 | **All memory ops** | getScratchpadAddress pattern (`add + and`) — XMRig may fold addressing modes | −1–2% |
-| P2 | **ADD/SUB immediate** | `emitAddImmediate` emits 1-2 `add` instructions; XMRig may use `adds`/`subs` to save flags | −0.5% |
+| P0 | **IMUL_RCP** | Emits `mov xN, #imm; umulh` — may fold constant into `movk` | −1–2% |
+| P0 | **CBRANCH** | Branchless `bne+b` fix is deployed (imm19=2). Compare against XMRig's approach — they may use different add+test combos | −0.5% |
+| P1 | **IROR_R / IROL_R** | armrx uses `rotr`/`rotl`; XMRig may use `extr` (rotate-insert) | −1–3% |
+| P1 | **FDIV_M / FSQRT_R** | armrx emits software divide/sqrt; XMRig may use Newton-Raphson | −2–5% |
+| P2 | **All memory ops** | `getScratchpadAddress` pattern — XMRig may fold addressing modes | −1–2% |
+| P2 | **ADD/SUB immediate** | `emitAddImmediate` emits 1-2 add; XMRig may use fused add+flags | −0.5% |
 
 ### Audit process for each opcode
 
 1. Find the `h_` handler in `jit_compiler_a64.cpp`
 2. Trace the emitted instructions via `emit32` calls
-3. Find the corresponding handler in XMRig's source
-4. Diff the emitted sequences
-5. If different: implement the XMRig pattern → KAT verify → benchmark
+3. Locate the corresponding opcode in the --jit-dump using boundary markers
+4. Disassemble and compare against XMRig's output for the same program
+5. If different: implement the improvement → KAT verify → instruction-count
+   verify → hashrate verify
 
 ---
 
 ## Phase 3 — Cross-opcode optimizations
 
-These span multiple opcodes and require deeper analysis:
-
 | # | Optimization | Description | Est. savings |
 |---|-------------|-------------|--------------|
-| 3.1 | **Register allocation reuse** | Track which GPRs/NEON regs are "dead" after each opcode and avoid spilling | −2–3% |
-| 3.2 | **Constant folding** | Pre-compute immediates that can be expressed as single `mov` + shifted operand | −1% |
-| 3.3 | **Dead instruction elimination** | Skip emitting instructions whose results are overwritten before use | −1–2% |
-| 3.4 | **Load-pair coalescing** | Merge adjacent single loads into `ldp` where register pairing allows | −1–2% |
+| 3.1 | **Register allocation reuse** | Track which regs are "dead" after each opcode, avoid spilling. (Spot-check in Phase 1.3 first to see if this dominates the gap.) | −2–3% |
+| 3.2 | **Constant folding** | Pre-compute immediates as single `mov` + shifted operand | −1% |
+| 3.3 | **Dead instruction elimination** | Skip instructions whose results are overwritten before use | −1–2% |
+| 3.4 | **Load-pair coalescing** | Merge adjacent single loads into `ldp` | −1–2% |
 
 ---
 
@@ -93,10 +114,12 @@ These span multiple opcodes and require deeper analysis:
 
 Each change requires:
 
-1. **KAT parity**: All existing KAT vectors produce identical hashes
-2. **Determinism**: Same seed → same JIT output (test from Phase 1.2)
-3. **Instruction count**: `perf stat` shows reduction for the affected opcode
-4. **Hashrate**: No regression on real hardware (>3 runs, average)
+1. **KAT parity** — all existing KAT vectors produce identical hashes
+2. **Determinism** — same seed → same JIT output (test from Phase 1.4)
+3. **Instruction count** — `perf stat` shows reduction for the affected opcode
+4. **Hashrate** — **the veto metric**. No regression on real hardware
+   (>3 runs, average). A change that reduces instructions but hurts hashrate
+   is rejected.
 
 ---
 
@@ -104,20 +127,30 @@ Each change requires:
 
 | Phase | Effort | Expected gain |
 |-------|--------|---------------|
-| Phase 1 (tooling) | 1-2 days | — |
+| Phase 1 (tooling + data) | 2-3 days | — |
 | Phase 2 (opcode audit) | 1-2 weeks | −5–10% |
 | Phase 3 (cross-opcode) | 2-4 weeks | −5–10% |
 | Phase 4 (validation) | Ongoing | — |
-| **Total** | **3-6 weeks** | **−15–20% instructions** (~matching XMRig) |
+| **Total** | **3-6 weeks** | **−15–20%** |
+
+---
+
+## CBRANCH — status update
+
+The earlier `bne+b` fix is already deployed and passing KATs (the hang was caused
+by `imm19=1` instead of `imm19=2` in the `bne` offset — since fixed). The current
+CBRANCH emits 1 extra instruction vs the original `beq`. Compare against XMRig's
+approach in Phase 2 to see if they avoid this entirely with a different encoding.
+
+See `docs/branchless-cbranch.md` for the full post-mortem.
 
 ---
 
 ## Risks
 
-- **KAT regressions**: Every instruction sequence change risks producing
-  different hashes. Mitigation: run full KAT suite before every commit.
-- **XMRig code is not clean-room**: We can compare outputs and study
-  techniques, but cannot copy XMRig source. All implementations must be
-  original.
-- **Diminishing returns**: The first few optimizations may yield large gains;
-  later ones may be marginal. Stop when the gap is ≤5%.
+- **KAT regressions** — Mitigation: run full KAT suite before every commit.
+- **Clean-room constraint** — Study XMRig's output, not source.
+- **Diminishing returns** — Stop when the gap is ≤5%.
+- **Instruction count ≠ throughput** — A change that reduces instruction count
+  but creates longer dependency chains or pipeline stalls can hurt real
+  hashrate. Hashrate vetoes all proxy metrics.

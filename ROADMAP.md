@@ -60,6 +60,14 @@
 | O9 | Load interleaving (NEON direct FP loads via `ldr dN` + `sshll`) | ✅ |
 | O10 | Prefetch hint tuning (`pldl2keep` → `pldl1keep` for dataset) | ✅ |
 | O11 | Branchless CBRANCH (`bne .Lskip; b target` — fixes 99.6% mispredict rate) | ✅ |
+| — | `emit32` UB fix (pointer cast → `memcpy`) | ✅ |
+| — | hwloc CPU pinning (optional, v2.12.2) | ✅ |
+
+### Docs
+| Doc | Description |
+|-----|-------------|
+| [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
+| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed plan for Phase 3 (frequency data, allocation spot-check, per-opcode audit, hashrate veto) |
 | — | Pool connection fixed (handshake race, JSON `"id"` parsing) | ✅ |
 | — | KATs in both JIT + interpreted mode | ✅ |
 
@@ -71,8 +79,7 @@
 
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
-| **O11** | **Branchless CBRANCH** — replace `beq` (99.6% mispredicted) with `bne+b` or `csel` approach | `jit_compiler_a64.cpp` | +1–2% | 🟡 Medium | `docs/branchless-cbranch.md` written. Needs profiling first to confirm hotspot. **Recommended next step.** |
-| **P3** | **Peephole JIT coalescing** — the only path to close the 33% instruction-count gap vs XMRig | `jit_compiler_a64.cpp`, `static.S` | ~+15–20% | 🔴 Major | Months of work. Study XMRig's AArch64 JIT output, iterate on generated code density. |
+| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+15–20% | 🔴 Major | 4-phase plan: tooling → frequency-informed opcode audit → cross-opcode → hashrate veto. The only path to close the 33% instruction-count gap. |
 
 ### Features
 
@@ -80,7 +87,6 @@
 |---|------|--------|-------|
 | — | Stratum V2 protocol support | 🔴 Major | Next-gen pool compatibility |
 | — | HTTP Prometheus metrics endpoint | 🟡 Medium | Monitoring / dashboard integration |
-| — | hwloc-aware thread pinning | 🟡 Medium | Topology-aware placement |
 | — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | Failed once (segfault). Do not retry without KAT proof and XMRig source study. |
 
 ### Maintenance
@@ -89,18 +95,12 @@
 |---|------|--------|-------|
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
 | — | Phase-2 test suite expansion | 🟡 Medium | Property tests, malformed JSON, etc. |
-| — | S7: `emit32` UB fix (use memcpy like `emit64`) | 🟢 Low | `jit_compiler_a64.hpp:84` |
 
 ---
 
-## Recommendation
+## Reference Docs
 
-You're testing on real hardware, so CI is optional. For maximum performance:
-
-1. **Branchless CBRANCH** (+1–2%, low risk once encoding is correct)
-2. **Peephole JIT coalescing** (+15–20%, the real gap-closer)
-3. Profile-guided optimization (PGO) via `-DARMRX_PGO=GENERATE/USE`
-
-The `docs/branchless-cbranch.md` file has all the research done — fixing the encoding
-is the most efficient next step. After that, Phase 3 peephole work is the only path
-to matching XMRig's instruction count.
+| Doc | Description |
+|-----|-------------|
+| [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
+| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |

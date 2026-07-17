@@ -8,6 +8,10 @@
 ### Infrastructure
 - **hwloc-aware CPU pinning** (`CMakeLists.txt`, `src/mining_engine.cpp`): Added optional hwloc detection via `pkg-config`. `detect_core_order()` now uses `libhwloc` (v2.12.2) to enumerate processing units when available, falling back to the existing sysfs cpufreq sorting. Set `ARMRX_HAVE_HWLOC=1` in build flags. hwloc provides more accurate topology discovery on heterogeneous systems.
 
+### Documentation
+- **Peephole JIT plan** ([`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md)): Created detailed plan for Phase 3 — closing the 33% instruction-count gap vs XMRig. Covers 4 phases: tooling with opcode boundary markers and frequency histograms, per-opcode audit informed by frequency data, cross-opcode optimizations, and hashrate-vetoed validation. Incorporates review feedback: register allocation spot-check, CBRANCH encoding unit test, BTB aliasing caveat.
+- **Branchless CBRANCH postmortem** ([`docs/branchless-cbranch.md`](docs/branchless-cbranch.md)): Updated with imm19 root cause, BTB aliasing caveat, and unit test recommendation. Superseded hypotheses marked for clarity.
+
 ### Performance
 - **O11 — Branchless CBRANCH** (`src/jit_compiler_a64.cpp`): Replaced `beq target` (backward conditional branch, predicted TAKEN but only taken ~0.4%) with `bne .Lskip; b target` (forward `bne` predicted NOT-taken, correct 99.6%; unconditional `b` always correct). Root cause of first-attempt hang: `bne` offset was `imm19=1` but should be `imm19=2`. All KATs pass.
 

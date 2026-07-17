@@ -104,6 +104,8 @@ TCP connection to any Monero-compatible pool with:
 
 ## Status
 
+Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
+
 | Component | Status |
 |-----------|--------|
 | BLAKE2b + Argon2-compatible H' | ✅ |
@@ -152,6 +154,8 @@ TCP connection to any Monero-compatible pool with:
 | **Branchless CBRANCH (O11)** | ✅ |
 | **emit32 UB fix** | ✅ |
 | **hwloc CPU pinning** | ✅ |
+| **Peephole JIT plan** | 📄 [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
+| **CBRANCH postmortem** | 📄 [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
 
 ### Performance
 
