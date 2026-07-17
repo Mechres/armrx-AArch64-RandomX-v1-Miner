@@ -19,7 +19,7 @@ CMake requires `LANGUAGES C CXX ASM`. On AArch64: JIT + hardware AES/NEON auto-e
 - TLS pool connections require OpenSSL at build time (`find_package(OpenSSL QUIET)`). Disabled silently if not found.
 - Multiple `--pool=host:port` flags enable automatic failover after 5 retries with 2s cooldown.
 - No lint/format tools configured.
-- **herominers.com** uses custom Stratum protocol — not compatible with standard Stratum V1. Use pools with standard protocol.
+- **Monero pools** (including herominers.com) use the CryptoNote Stratum protocol (`login` + `job`), not Bitcoin-style Stratum V1 (`mining.subscribe` + `mining.authorize`). The AUTO mode tries CryptoNote first, then falls back to Stratum V1.
 
 ## Entry Points
 - Main executable: `src/main.cpp`

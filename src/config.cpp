@@ -1,4 +1,5 @@
 #include "armrx/config.hpp"
+#include "armrx/json.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -7,63 +8,6 @@
 
 namespace armrx {
 namespace {
-
-// Minimal JSON string value extractor (same pattern as stratum_client.cpp)
-std::string json_str(const std::string& json, const std::string& key) {
-    auto pos = json.find("\"" + key + "\"");
-    if (pos == std::string::npos) return {};
-    pos = json.find(':', pos + key.size() + 2);
-    if (pos == std::string::npos) return {};
-    ++pos;
-    while (pos < json.size() && json[pos] == ' ') ++pos;
-    if (pos >= json.size() || json[pos] != '"') return {};
-    ++pos;
-    std::string val;
-    while (pos < json.size() && json[pos] != '"') {
-        if (json[pos] == '\\') { ++pos; if (pos >= json.size()) break; }
-        val.push_back(json[pos++]);
-    }
-    return val;
-}
-
-std::string json_bool(const std::string& json, const std::string& key) {
-    auto pos = json.find("\"" + key + "\"");
-    if (pos == std::string::npos) return {};
-    pos = json.find(':', pos + key.size() + 2);
-    if (pos == std::string::npos) return {};
-    ++pos;
-    while (pos < json.size() && json[pos] == ' ') ++pos;
-    auto end = json.find_first_of(",}\n", pos);
-    return json.substr(pos, end - pos);
-}
-
-std::string json_num(const std::string& json, const std::string& key) {
-    return json_bool(json, key); // same logic for numbers
-}
-
-// Extract string array elements from "key":["v1","v2",...]
-std::vector<std::string> json_str_array(const std::string& json, const std::string& key) {
-    std::vector<std::string> result;
-    auto pos = json.find("\"" + key + "\"");
-    if (pos == std::string::npos) return result;
-    pos = json.find('[', pos);
-    if (pos == std::string::npos) return result;
-    ++pos;
-    while (pos < json.size()) {
-        while (pos < json.size() && json[pos] != '"' && json[pos] != ']') ++pos;
-        if (pos >= json.size() || json[pos] == ']') break;
-        ++pos;
-        std::string val;
-        while (pos < json.size() && json[pos] != '"') {
-            val.push_back(json[pos++]);
-        }
-        if (!val.empty()) result.push_back(val);
-        if (pos < json.size()) ++pos;
-        // skip comma
-        while (pos < json.size() && (json[pos] == ',' || json[pos] == ' ')) ++pos;
-    }
-    return result;
-}
 
 // Parse "host:port" string
 PoolConfig parse_pool_str(const std::string& s) {
@@ -94,34 +38,34 @@ AppConfig load_config(const std::string& path) {
     const auto json = ss.str();
 
     // Pool(s)
-    auto pool_str = json_str(json, "pool");
+    auto pool_str = armrx::json::get_string(json, "pool");
     if (!pool_str.empty()) {
         cfg.pools.push_back(parse_pool_str(pool_str));
     }
-    auto pools_arr = json_str_array(json, "pools");
+    auto pools_arr = armrx::json::get_str_array(json, "pools");
     for (auto& s : pools_arr) {
         cfg.pools.push_back(parse_pool_str(s));
     }
 
-    cfg.wallet     = json_str(json, "wallet");
-    cfg.password   = json_str(json, "password");
+    cfg.wallet     = armrx::json::get_string(json, "wallet");
+    cfg.password   = armrx::json::get_string(json, "password");
     if (cfg.password.empty()) cfg.password = "x";
-    cfg.mode       = json_str(json, "mode");
+    cfg.mode       = armrx::json::get_string(json, "mode");
     if (cfg.mode.empty()) cfg.mode = "auto";
 
-    auto tls_str = json_bool(json, "tls");
+    auto tls_str = armrx::json::get_raw(json, "tls");
     cfg.pool_tls = (tls_str == "true");
 
-    auto tui_str = json_bool(json, "tui");
+    auto tui_str = armrx::json::get_raw(json, "tui");
     cfg.tui = (tui_str == "true");
 
-    auto workers_str = json_num(json, "workers");
+    auto workers_str = armrx::json::get_raw(json, "workers");
     if (!workers_str.empty()) cfg.workers = static_cast<unsigned>(std::stoul(workers_str));
 
-    auto diff_str = json_num(json, "difficulty");
+    auto diff_str = armrx::json::get_raw(json, "difficulty");
     if (!diff_str.empty()) cfg.difficulty = std::stoull(diff_str);
 
-    auto sec_str = json_num(json, "seconds");
+    auto sec_str = armrx::json::get_raw(json, "seconds");
     if (!sec_str.empty()) cfg.seconds = static_cast<unsigned>(std::stoul(sec_str));
 
     std::cout << "[Config] Loaded " << path << " (" << cfg.pools.size() << " pool(s))\n";

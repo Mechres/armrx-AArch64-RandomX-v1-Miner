@@ -32,6 +32,7 @@ add_library(armrx_core
     src/soft_aes.cpp
     src/stratum_client.cpp
     src/config.cpp
+    src/json.cpp
     src/tui.cpp
 )
 

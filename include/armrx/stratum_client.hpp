@@ -195,6 +195,7 @@ private:
     std::uint64_t authorize_req_id_{0};
     std::thread keepalive_thread_;
     std::atomic<bool> fallback_in_progress_{false};
+    std::atomic<bool> handshake_in_progress_{false};
 };
 
 /** Default reconnect config constant. */

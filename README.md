@@ -136,6 +136,7 @@ TCP connection to any Monero-compatible pool with:
 | **VM refactor: `is_fast_mode()`** | ✅ |
 | **VM refactor: `run()` split** | ✅ |
 | **VM refactor: dispatch table** | ✅ |
+| **`armrx::json` module** | ✅ |
 
 ### Performance
 

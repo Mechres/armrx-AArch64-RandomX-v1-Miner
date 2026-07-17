@@ -12,6 +12,8 @@
 
 #include "armrx/stratum_client.hpp"
 
+#include "armrx/json.hpp"
+
 #include <algorithm>
 #include <cerrno>
 #include <cstring>
@@ -20,7 +22,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <string_view>
 
 // POSIX sockets
 #include <arpa/inet.h>
@@ -33,106 +34,7 @@
 
 namespace armrx {
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Minimal JSON helpers (no library dependency)
-// ─────────────────────────────────────────────────────────────────────────────
-namespace {
-
-/** JSON-escape a string: backslash and quote characters */
-std::string json_escape(std::string_view s) {
-    std::string out;
-    out.reserve(s.size() + 8);
-    for (char c : s) {
-        switch (c) {
-            case '\\': out += "\\\\"; break;
-            case '"':  out += "\\\""; break;
-            case '\n': out += "\\n";  break;
-            case '\r': out += "\\r";  break;
-            case '\t': out += "\\t";  break;
-            default:   out += c;      break;
-        }
-    }
-    return out;
-}
-
-/** Return the value of "key":"<value>" or "key":<value> in JSON string. */
-std::string json_get(const std::string& json, const std::string& key) {
-    // Find key
-    const std::string search_key = "\"" + key + "\"";
-    auto pos = json.find(search_key);
-    if (pos == std::string::npos) return {};
-    pos += search_key.size();
-    // Skip colon and whitespace
-    while (pos < json.size() && (json[pos] == ':' || json[pos] == ' ')) ++pos;
-    if (pos >= json.size()) return {};
-    if (json[pos] == '"') {
-        // String value
-        ++pos;
-        std::string result;
-        while (pos < json.size() && json[pos] != '"') {
-            if (json[pos] == '\\') ++pos; // skip escape
-            if (pos < json.size()) result.push_back(json[pos]);
-            ++pos;
-        }
-        return result;
-    }
-    if (json[pos] == '{' || json[pos] == '[') {
-        char open_char = json[pos];
-        char close_char = (open_char == '{') ? '}' : ']';
-        int depth = 1;
-        std::size_t i = pos + 1;
-        bool in_string = false;
-        while (i < json.size() && depth > 0) {
-            char c = json[i];
-            if (c == '"') {
-                if (i > 0 && json[i-1] != '\\') {
-                    in_string = !in_string;
-                }
-            } else if (!in_string) {
-                if (c == open_char) ++depth;
-                else if (c == close_char) --depth;
-            }
-            ++i;
-        }
-        return json.substr(pos, i - pos);
-    }
-    if (json[pos] == 'n') return {}; // null
-    // Number or boolean – read until delimiter
-    auto end = json.find_first_of(",}]\n", pos);
-    return json.substr(pos, end - pos);
-}
-
-/** Extract the first array element after "key": [...]. */
-std::string json_get_array_first(const std::string& json, const std::string& key) {
-    const std::string search_key = "\"" + key + "\"";
-    auto pos = json.find(search_key);
-    if (pos == std::string::npos) return {};
-    auto bracket = json.find('[', pos + search_key.size());
-    if (bracket == std::string::npos) return {};
-    ++bracket;
-    while (bracket < json.size() && json[bracket] == ' ') ++bracket;
-    if (bracket >= json.size()) return {};
-    if (json[bracket] == '"') {
-        ++bracket;
-        std::string result;
-        while (bracket < json.size() && json[bracket] != '"') {
-            result.push_back(json[bracket++]);
-        }
-        return result;
-    }
-    auto end = json.find_first_of(",]", bracket);
-    return json.substr(bracket, end - bracket);
-}
-
-/** Build a simple JSON-RPC request line. */
-std::string json_rpc(std::uint64_t id, const std::string& method,
-                     const std::string& params) {
-    return "{\"id\":" + std::to_string(id) +
-           ",\"method\":\"" + method + "\"" +
-           ",\"params\":" + params + "}\n";
-}
-
-} // namespace
+// JSON helpers moved to armrx/json.hpp — stratum_client now uses armrx::json::*
 
 // ─────────────────────────────────────────────────────────────────────────────
 // StratumClient — construction / destruction
@@ -184,6 +86,13 @@ void StratumClient::close_connection() {
 void StratumClient::connect() {
     if (connected_.load()) return;
     reconnect_enabled_.store(true);
+    handshake_in_progress_.store(true);
+
+    // RAII guard: clear handshake flag on scope exit
+    struct HandshakeGuard {
+        std::atomic<bool>& flag;
+        ~HandshakeGuard() { flag.store(false); }
+    } guard{handshake_in_progress_};
 
     // Clean up any stale threads from a previous connection lifecycle
     if (reader_thread_.joinable() && std::this_thread::get_id() != reader_thread_.get_id()) {
@@ -257,7 +166,7 @@ void StratumClient::connect() {
         // Start reader thread before handshake so we can receive replies
         reader_thread_ = std::thread(&StratumClient::reader_thread_fn, this);
 
-        const StratumProtocol active_protocol = (protocol_ == StratumProtocol::AUTO) ? StratumProtocol::STRATUM_V1 : protocol_;
+        const StratumProtocol active_protocol = (protocol_ == StratumProtocol::AUTO) ? StratumProtocol::CRYPTONOTE : protocol_;
 
         std::string msg;
         if (active_protocol == StratumProtocol::STRATUM_V1) {
@@ -281,11 +190,9 @@ void StratumClient::connect() {
 
         if (!subscribe_ok_) {
             if (protocol_ == StratumProtocol::AUTO) {
-                std::cerr << "[Stratum] Handshake failed with Stratum V1. Falling back to CryptoNote protocol...\n";
-                protocol_ = StratumProtocol::CRYPTONOTE;
-                fallback_in_progress_.store(true);
+                std::cerr << "[Stratum] Handshake failed with CryptoNote. Falling back to Stratum V1 protocol...\n";
+                protocol_ = StratumProtocol::STRATUM_V1;
                 close_connection();
-                fallback_in_progress_.store(false);
                 connected_.store(false);
                 continue;
             } else {
@@ -367,7 +274,7 @@ std::string StratumClient::build_subscribe_msg() const {
     };
     unsigned num_formats = 4;
     unsigned idx = const_cast<StratumClient*>(this)->subscribe_try_ % num_formats;
-    return json_rpc(id, methods[idx], formats[idx]);
+    return armrx::json::rpc_envelope(id, methods[idx], formats[idx]);
 }
 
 std::string StratumClient::build_login_msg() const {
@@ -377,8 +284,8 @@ std::string StratumClient::build_login_msg() const {
            ",\"jsonrpc\":\"2.0\"" +
            ",\"method\":\"login\"" +
            ",\"params\":{" +
-             "\"login\":\"" + json_escape(wallet_) + "\"," +
-             "\"pass\":\"" + json_escape(password_) + "\"," +
+             "\"login\":\"" + armrx::json::escape(wallet_) + "\"," +
+             "\"pass\":\"" + armrx::json::escape(password_) + "\"," +
              "\"agent\":\"armrx/1.0\"," +
              "\"rigid\":\"\"," +
              "\"algo\":[\"rx/0\"]" +
@@ -388,8 +295,8 @@ std::string StratumClient::build_login_msg() const {
 std::string StratumClient::build_authorize_msg() const {
     const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
     const_cast<StratumClient*>(this)->authorize_req_id_ = id;
-    return json_rpc(id, "mining.authorize",
-                    "[\"" + json_escape(wallet_) + "\",\"" + json_escape(password_) + "\"]");
+    return armrx::json::rpc_envelope(id, "mining.authorize",
+                    "[\"" + armrx::json::escape(wallet_) + "\",\"" + armrx::json::escape(password_) + "\"]");
 }
 
 std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
@@ -405,13 +312,13 @@ std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                ",\"method\":\"submit\"" +
                ",\"params\":{" +
                  "\"id\":\"" + session_id_ + "\"," +
-                 "\"job_id\":\"" + json_escape(job.job_id) + "\"," +
+                 "\"job_id\":\"" + armrx::json::escape(job.job_id) + "\"," +
                  "\"nonce\":\"" + nonce_hex + "\"," +
                  "\"result\":\"" + result_hex + "\"" +
                "}}\n";
     } else {
-        return json_rpc(id, "mining.submit",
-                        "[\"" + json_escape(wallet_) + "\",\"" + json_escape(job.job_id) + "\",\"" +
+        return armrx::json::rpc_envelope(id, "mining.submit",
+                        "[\"" + armrx::json::escape(wallet_) + "\",\"" + armrx::json::escape(job.job_id) + "\",\"" +
                         nonce_hex + "\"]");
     }
 }
@@ -452,6 +359,8 @@ bool StratumClient::read_line(std::string& out) {
         auto nl = read_buf_.find('\n');
         if (nl != std::string::npos) {
             out = read_buf_.substr(0, nl);
+            // Strip optional trailing \r (handles \r\n line endings)
+            if (!out.empty() && out.back() == '\r') out.pop_back();
             read_buf_.erase(0, nl + 1);
             return true;
         }
@@ -466,7 +375,18 @@ bool StratumClient::read_line(std::string& out) {
 #else
         n = ::recv(sockfd_, tmp, sizeof(tmp), 0);
 #endif
-        if (n <= 0) return false; // Connection closed or error
+        if (n <= 0) {
+            // Connection closed or error — return any buffered data
+            // (some servers close the connection immediately after sending
+            // a response without a trailing newline, e.g. herominers on
+            // unsupported protocol errors).
+            if (!read_buf_.empty()) {
+                out = std::move(read_buf_);
+                read_buf_.clear();
+                return true;
+            }
+            return false;
+        }
         read_buf_.append(tmp, static_cast<std::size_t>(n));
     }
 }
@@ -486,16 +406,14 @@ void StratumClient::reader_thread_fn() {
 
     // Connection lost — try to reconnect
     connected_.store(false);
-    if (!fallback_in_progress_.load()) {
-        if (reconnect_enabled_.load()) {
-            if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
-                reconnect_thread_.join();
-            }
-            reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
-        } else {
-            if (error_callback_) {
-                error_callback_("connection closed");
-            }
+    if (reconnect_enabled_.load() && !handshake_in_progress_.load()) {
+        if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
+            reconnect_thread_.join();
+        }
+        reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
+    } else {
+        if (error_callback_) {
+            error_callback_("connection closed");
         }
     }
 }
@@ -509,22 +427,22 @@ void StratumClient::handle_line(const std::string& line) {
     // Distinguish notifications (have "method") from replies (have "result")
     const bool has_method = line.find("\"method\"") != std::string::npos;
     if (has_method) {
-        const auto method = json_get(line, "method");
+        const auto method = armrx::json::get_string(line, "method");
         if (method == "mining.notify")           handle_notify(line);
         else if (method == "mining.set_target")  handle_set_target(line);
         else if (method == "mining.set_difficulty") handle_set_difficulty(line);
         // mining.set_extranonce: update extra_nonce1 / extra_nonce2_size
         else if (method == "mining.set_extranonce") {
-            const auto en1 = json_get_array_first(line, "params");
+            const auto en1 = armrx::json::get_array_first(line, "params");
             if (!en1.empty()) extra_nonce1_ = en1;
         }
         else if (method == "job") {
             // CryptoNote job notification
-            const auto params_obj = json_get(line, "params");
-            const auto job_id = json_get(params_obj, "job_id");
-            const auto blob_hex = json_get(params_obj, "blob");
-            const auto target_hex = json_get(params_obj, "target");
-            const auto seed_hex = json_get(params_obj, "seed_hash");
+            const auto params_obj = armrx::json::get_object(line, "params");
+            const auto job_id = armrx::json::get_string(params_obj, "job_id");
+            const auto blob_hex = armrx::json::get_string(params_obj, "blob");
+            const auto target_hex = armrx::json::get_string(params_obj, "target");
+            const auto seed_hex = armrx::json::get_string(params_obj, "seed_hash");
             process_cryptonote_job(job_id, blob_hex, target_hex, seed_hex);
         }
     } else {
@@ -615,7 +533,7 @@ void StratumClient::handle_notify(const std::string& line) {
 
 void StratumClient::handle_set_target(const std::string& line) {
     // params: ["<64-char-hex-target>"]
-    const auto tgt_hex = json_get_array_first(line, "params");
+    const auto tgt_hex = armrx::json::get_array_first(line, "params");
     if (tgt_hex.size() != 64) return;
     const auto bytes = hex_to_bytes(tgt_hex);
     Target t{};
@@ -631,7 +549,7 @@ void StratumClient::handle_set_target(const std::string& line) {
 
 void StratumClient::handle_set_difficulty(const std::string& line) {
     // Older Stratum v1: params: [<numeric difficulty>]
-    const auto diff_str = json_get_array_first(line, "params");
+    const auto diff_str = armrx::json::get_array_first(line, "params");
     if (diff_str.empty()) return;
     try {
         const double diff = std::stod(diff_str);
@@ -643,19 +561,23 @@ void StratumClient::handle_set_difficulty(const std::string& line) {
 }
 
 void StratumClient::handle_reply(const std::string& line) {
-    const auto result = json_get(line, "result");
-    const auto error  = json_get(line, "error");
-    const auto id_str = json_get(line, "id");
+    const auto error  = armrx::json::get_object(line, "error");
+    const auto result = armrx::json::get_object(line, "result");
+    const auto id_str = armrx::json::get_raw(line, "id");
+
+    // Determine the active handshake protocol from the response content.
+    // CryptoNote responses include "jsonrpc":"2.0"; Stratum V1 responses do not.
+    const bool is_cryptonote_reply = (line.find("\"jsonrpc\":\"2.0\"") != std::string::npos);
 
     if (id_str == std::to_string(handshake_req_id_)) {
-        if (protocol_ == StratumProtocol::CRYPTONOTE) {
+        if (is_cryptonote_reply) {
             if (!error.empty() && error != "null") {
                 std::cerr << "[Stratum] Login failed: " << error << '\n';
                 subscribe_ok_ = false;
                 subscribe_done_.set_value(false);
                 return;
             }
-            session_id_ = json_get(result, "id");
+            session_id_ = armrx::json::get_string(result, "id");
             if (session_id_.empty()) {
                 std::cerr << "[Stratum] Warning: session ID is empty in login reply\n";
             }
@@ -664,20 +586,19 @@ void StratumClient::handle_reply(const std::string& line) {
             subscribe_ok_ = true;
             subscribe_done_.set_value(true);
 
-            const auto job_obj = json_get(result, "job");
+            const auto job_obj = armrx::json::get_object(result, "job");
             if (!job_obj.empty()) {
-                const auto job_id = json_get(job_obj, "job_id");
-                const auto blob_hex = json_get(job_obj, "blob");
-                const auto target_hex = json_get(job_obj, "target");
-                const auto seed_hex = json_get(job_obj, "seed_hash");
+                const auto job_id = armrx::json::get_string(job_obj, "job_id");
+                const auto blob_hex = armrx::json::get_string(job_obj, "blob");
+                const auto target_hex = armrx::json::get_string(job_obj, "target");
+                const auto seed_hex = armrx::json::get_string(job_obj, "seed_hash");
                 process_cryptonote_job(job_id, blob_hex, target_hex, seed_hex);
             }
             return;
         } else {
             // Subscribe reply — check for success or error
-            const auto sub_error  = json_get(line, "error");
-            if (!sub_error.empty() && sub_error != "null") {
-                std::cerr << "[Stratum] Subscribe rejected: " << sub_error << '\n';
+            if (!error.empty() && error != "null") {
+                std::cerr << "[Stratum] Subscribe rejected: " << error << '\n';
                 subscribe_ok_ = false;
                 subscribe_done_.set_value(false);
                 return;
@@ -720,18 +641,24 @@ void StratumClient::handle_reply(const std::string& line) {
         if (!error.empty() && error != "null") {
             std::cerr << "[Stratum] Authorize failed: " << error << '\n';
         } else {
-            std::cout << "[Stratum] Authorize " << (result == "true" ? "OK" : "FAILED") << '\n';
+            const bool ok = line.find("\"result\":true") != std::string::npos ||
+                            line.find("\"result\":\"true\"") != std::string::npos;
+            std::cout << "[Stratum] Authorize " << (ok ? "OK" : "FAILED") << '\n';
         }
         return;
     }
 
     // Keepalive response or duplicate handshake
-    if (line.find("KEEPALIVED") != std::string::npos || result == "{\"status\":\"KEEPALIVED\"}" || result == "KEEPALIVED") {
+    if (line.find("KEEPALIVED") != std::string::npos ||
+        line.find("\"status\":\"KEEPALIVED\"") != std::string::npos) {
         return;
     }
 
     // Submit reply
-    if (result == "true" || result == "{\"status\":\"OK\"}" || line.find("\"status\":\"OK\"") != std::string::npos) {
+    const bool share_ok = line.find("\"result\":true") != std::string::npos ||
+                          line.find("\"result\":\"true\"") != std::string::npos ||
+                          line.find("\"status\":\"OK\"") != std::string::npos;
+    if (share_ok) {
         std::cout << "[Stratum] Share accepted!\n";
     } else if (!result.empty() && result != "null") {
         std::cerr << "[Stratum] Share rejected: " << result << '\n';

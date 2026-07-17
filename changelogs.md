@@ -1,8 +1,9 @@
 # Changelog
 
-## 2026-07-16 (Phase 2 — VM refactor: run split + dispatch table)
+## 2026-07-16 (Phase 2 — VM refactor + JSON module)
 
 ### Architecture
+- **`armrx::json` module** (`include/armrx/json.hpp`, `src/json.cpp`): Extracted a shared JSON utility module consolidating 4 hand-rolled parser functions from `stratum_client.cpp` (`json_get`, `json_get_array_first`, `json_rpc`) and 4 from `config.cpp` (`json_str`, `json_bool`, `json_num`, `json_str_array`) into a single `armrx::json` namespace with 7 public functions: `escape`, `get_string`, `get_raw`, `get_array_first`, `get_str_array`, `get_object`, `rpc_envelope`. The new module fixes the `\\"` escape handling bug present in both old parsers (which only checked `json[i-1] != '\\'` instead of counting consecutive backslashes).
 - **`is_fast_mode()` helper** (`include/armrx/vm.hpp`, `src/vm.cpp`): Added single source of truth `(flags_ & kRandOMXFlagFullMem)` — replaces the dual check (`flags_` in interpreter, `dataset_.empty()` in JIT). Applied consistently in `dataset_read()` and `run_jit()`.
 - **`run()` split** (`include/armrx/vm.hpp`, `src/vm.cpp`): `run()` now dispatches to `run_jit()` (AArch64 JIT path, gated by `#ifdef ARMRX_HAVE_JIT`) or `run_interpreted()` (bytecode interpreter). Shared setup remains in `run()`.
 - **Dispatch table for instruction compilation** (`include/armrx/vm.hpp`, `src/vm.cpp`): Replaced the 392-line, 24-block cascading `if (opcode < ceil_X)` ladder with a `kCompileHandlers[256]` table of member function pointers. Each opcode maps to one of 30 handler methods (h_IADD_RS through h_NOP). Two static helpers (`compile_mem_op`, `compile_alu_reg`) eliminate the 6× duplicated memory-op pattern.
