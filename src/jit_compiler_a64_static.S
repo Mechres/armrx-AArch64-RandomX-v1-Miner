@@ -213,7 +213,7 @@ DECL(randomx_program_aarch64):
 	add	x17, x2, x17, lsl #6
 	prfm	pldl1keep, [x16]
 	prfm	pldl1keep, [x17]
-	prfm	pldl1keep, [x17, 32]
+	prfm	pldl1keep, [x17, #32]
 
 	.p2align 5
 DECL(randomx_program_aarch64_main_loop):
@@ -233,40 +233,33 @@ DECL(randomx_program_aarch64_main_loop):
 	eor	x14, x14, x20
 	eor	x15, x15, x19
 
-	# Load group F registers (spAddr1)
-	ldpsw	x20, x19, [x17]
-	ins	v16.d[0], x20
-	ins	v16.d[1], x19
-	ldpsw	x20, x19, [x17, 8]
-	ins	v17.d[0], x20
-	ins	v17.d[1], x19
-	ldpsw	x20, x19, [x17, 16]
-	ins	v18.d[0], x20
-	ins	v18.d[1], x19
-	ldpsw	x20, x19, [x17, 24]
-	ins	v19.d[0], x20
-	ins	v19.d[1], x19
+	# Load group F registers (spAddr1) — scalar NEON load + sign-extend
+	# Replaces ldpsw+ins+ins (GPR round-trip) with ldr+sshll (direct NEON path)
+	ldr	d16, [x17]
+	sshll	v16.2d, v16.2s, #0
 	scvtf	v16.2d, v16.2d
+	ldr	d17, [x17, #8]
+	sshll	v17.2d, v17.2s, #0
 	scvtf	v17.2d, v17.2d
+	ldr	d18, [x17, #16]
+	sshll	v18.2d, v18.2s, #0
 	scvtf	v18.2d, v18.2d
+	ldr	d19, [x17, #24]
+	sshll	v19.2d, v19.2s, #0
 	scvtf	v19.2d, v19.2d
 
 	# Load group E registers (spAddr1)
-	ldpsw	x20, x19, [x17, 32]
-	ins	v20.d[0], x20
-	ins	v20.d[1], x19
-	ldpsw	x20, x19, [x17, 40]
-	ins	v21.d[0], x20
-	ins	v21.d[1], x19
-	ldpsw	x20, x19, [x17, 48]
-	ins	v22.d[0], x20
-	ins	v22.d[1], x19
-	ldpsw	x20, x19, [x17, 56]
-	ins	v23.d[0], x20
-	ins	v23.d[1], x19
+	ldr	d20, [x17, #32]
+	sshll	v20.2d, v20.2s, #0
 	scvtf	v20.2d, v20.2d
+	ldr	d21, [x17, #40]
+	sshll	v21.2d, v21.2s, #0
 	scvtf	v21.2d, v21.2d
+	ldr	d22, [x17, #48]
+	sshll	v22.2d, v22.2s, #0
 	scvtf	v22.2d, v22.2d
+	ldr	d23, [x17, #56]
+	sshll	v23.2d, v23.2s, #0
 	scvtf	v23.2d, v23.2d
 	bif	v20.16b, v30.16b, v29.16b
 	bif	v21.16b, v30.16b, v29.16b
@@ -330,8 +323,9 @@ DECL(randomx_program_aarch64_cacheline_align_mask1):
 	and	x20, x20, 1
 	add	x20, x20, x1
 
-	# Prefetch dataset data
-	prfm	pldl2keep, [x20]
+	# Prefetch dataset data (pldl1keep for immediate use; pldl2keep may be better
+	# on systems where L1 scratchpad eviction is measurable in fast mode)
+	prfm	pldl1keep, [x20]
 
 DECL(randomx_program_aarch64_cacheline_align_mask2):
 	# Actual mask will be inserted by JIT compiler
@@ -373,9 +367,9 @@ DECL(randomx_program_aarch64_update_spMix1):
 
 	# Store integer registers to scratchpad (spAddr1)
 	stp	x4, x5, [x17, 0]
-	stp	x6, x7, [x17, 16]
-	stp	x12, x13, [x17, 32]
-	stp	x14, x15, [x17, 48]
+	stp	x6, x7, [x17, #16]
+	stp	x12, x13, [x17, #32]
+	stp	x14, x15, [x17, #48]
 
 	# RandomX v2 AES tweak (mix group F and group E registers using AES)
 DECL(randomx_program_aarch64_v2_FE_mix):

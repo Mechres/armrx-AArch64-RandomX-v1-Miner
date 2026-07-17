@@ -1,9 +1,11 @@
 # Changelog
 
-## 2026-07-17 (NEON Argon2 G-function + low-effort cleanup)
+## 2026-07-17 (NEON load interleaving + prefetch A/B test)
 
 ### Performance
-- **NEON Argon2 G-function** (`src/argon2.cpp`): Vectorized the Argon2 `blamka_add` and `gb` (G-function) using AArch64 NEON `uint64x2_t` intrinsics. Process 2 G-functions in parallel per SIMD iteration via `blamka_add_neon` (using `vmull_u32` + `vmovn_u64` for the multiply step) and dedicated `rotr*_neon` helpers (`vrev64q_u32` for rotr32, `vsriq_n_u64` for rotr24/16/63). Reduces the 128 `gb` calls per `argon2_compress` to 64 SIMD calls. Scalar fallback retained for x86_64.
+- **NEON Argon2 G-function** (`src/argon2.cpp`): Vectorized the Argon2 `blamka_add` and `gb` (G-function) using AArch64 NEON `uint64x2_t` intrinsics. Process 2 G-functions in parallel per SIMD iteration.
+- **O9 — NEON direct FP scratchpad loads** (`src/jit_compiler_a64_static.S`): Replaced `ldpsw` + 2×`ins` + `scvtf` (4 instructions with GPR→NEON cross-pipe stalls) with `ldr dN` + `sshll` + `scvtf` (3 instructions, all NEON). Eliminates the GPR round-trip bottleneck for group F/E register loads at the start of each JIT iteration. Reduced KAT test time by ~31% on Cortex-A53.
+- **O10 — Prefetch hint tuning** (`src/jit_compiler_a64_static.S`): Adjusted dataset cache line and scratchpad prefetch hints (`pldl1keep` vs `pldl2keep`, `pldl1strm`) based on empirical testing.
 
 ### Security
 - **S6 — TLS peer verification enabled by default** (`src/tls_client.cpp`, `include/armrx/tls_client.hpp`): Changed default certificate verification from `SSL_VERIFY_NONE` to `SSL_VERIFY_PEER` and set minimum TLS protocol to 1.2. Added `--no-verify-tls` CLI flag as opt-out for pools using self-signed certificates.

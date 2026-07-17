@@ -137,6 +137,8 @@ TCP connection to any Monero-compatible pool with:
 | **VM refactor: `run()` split** | ✅ |
 | **VM refactor: dispatch table** | ✅ |
 | **`armrx::json` module** | ✅ |
+| **NEON direct FP loads (O9)** | ✅ |
+| **Prefetch tuning (O10)** | ✅ |
 | **NEON Argon2 G-function** | ✅ |
 | **TLS peer verification** | ✅ |
 | **`--no-verify-tls` flag** | ✅ |
