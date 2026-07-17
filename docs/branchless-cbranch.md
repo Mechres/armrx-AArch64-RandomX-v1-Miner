@@ -39,11 +39,26 @@ b target              ; unconditional backward (always taken)
 
 This should reduce CBRANCH mispredictions from ~99.6% to ~0.4%.
 
-## Result: TEST HANG
+## Result: TEST HANG (first attempt — fixed with imm19=2)
 
-When deployed, the KAT test suite (`armrx_tests`) hung indefinitely (120s
+When first deployed, the KAT test suite (`armrx_tests`) hung indefinitely (120s
 timeout vs normal ~16s). The branchless encoding was reverted to the original
 `beq`.
+
+### Root Cause (found by review)
+
+The `bne` forward-skip offset was `imm19=1`, but `B.cond` computes its target as
+`PC_of_bne + imm19*4`. To skip the 4-byte `b target` instruction ahead, the
+target must be `PC + 8`, requiring **`imm19=2`**.
+
+With `imm19=1`, the `bne` landed on the `b target` instruction itself — meaning
+the unconditional backward branch **always** executed, regardless of whether the
+CBRANCH condition was met. This turned every CBRANCH into an unconditional
+backward jump, causing the VM instruction pointer to loop forever.
+
+### Fix
+
+`0x54000000 | (1 << 5) | 1` → `0x54000000 | (2 << 5) | 1` (imm19=2, skip 8 bytes)
 
 ## Suspected Root Cause
 

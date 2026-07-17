@@ -1,6 +1,13 @@
 # Changelog
 
-## 2026-07-17 (JSON module expansion + flag de-duplication)
+## 2026-07-17 (Branchless CBRANCH fix + JSON expansion + flag de-duplication)
+
+### Performance
+- **O11 — Branchless CBRANCH** (`src/jit_compiler_a64.cpp`): Replaced `beq target` (backward conditional branch, predicted TAKEN but only taken ~0.4%) with `bne .Lskip; b target` (forward `bne` predicted NOT-taken, correct 99.6%; unconditional `b` always correct). Root cause of first-attempt hang: `bne` offset was `imm19=1` but should be `imm19=2`. All KATs pass.
+
+### Cleanup
+- **`handle_notify` positional scanner replaced** (`src/stratum_client.cpp`): Removed last hand-rolled JSON parser. Added `get_array_element()` to JSON module.
+- **Flag constant de-duplication** (`src/jit_compiler_a64.cpp`): 4 constants aliased to `armrx::kRandomX*` project constants.
 
 ### Cleanup
 - **`handle_notify` positional scanner replaced** (`src/stratum_client.cpp`): Removed the last hand-rolled JSON parser — a 40-line positional array scanner in `handle_notify`. Replaced with 4 calls to `armrx::json::get_array_element()`. Added `get_array_element(json, key, index)` to the JSON module (`include/armrx/json.hpp`, `src/json.cpp`) as a general-purpose Nth-element array extractor.

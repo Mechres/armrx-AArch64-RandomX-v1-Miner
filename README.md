@@ -149,6 +149,7 @@ TCP connection to any Monero-compatible pool with:
 | **JSON `get_array_element`** | ✅ |
 | **handle_notify scanner cleanup** | ✅ |
 | **Flag constant de-duplication** | ✅ |
+| **Branchless CBRANCH (O11)** | ✅ |
 
 ### Performance
 

@@ -1154,13 +1154,21 @@ void JitCompilerA64::h_CBRANCH(Instruction& instr, uint32_t& codePos)
 	emit32((0xF2781C1F - (modCond << 16)) | (dst << 5), code, k);
 
 	int32_t offset = reg_changed_offset[instr.dst];
-	offset = ((offset - k) >> 2) & ((1 << 19) - 1);
 
-	// beq target (backward conditional branch; AArch64 predicts TAKEN but
-	// condition is only met ~0.4%, causing mispredictions. A branchless
-	// alternative using bne+b was tried but caused test hangs — revisit
-	// after dedicated branch-miss profiling per OPTIMIZATION_REFERENCE.)
-	emit32(0x54000000 | (offset << 5), code, k);
+	// Branchless CBRANCH: instead of a single backward `beq target` (AArch64
+	// predicts backward cond branches TAKEN, but CBRANCH is only taken ~0.4% of
+	// the time → 99.6% misprediction rate), emit:
+	//   bne .Lskip          -- forward, predicted NOT-taken (correct 99.6%)
+	//   b target            -- unconditional backward (always taken)
+	//
+	// imm19=2 because B.cond PC-relative offset = PC + imm19*4.
+	// To skip the 4-byte `b` instruction ahead, the target is PC+8 → imm19=2.
+	emit32(0x54000000 | (2 << 5) | 1, code, k); // bne +8 (skip next instr)
+
+	// Unconditional backward branch to target (26-bit signed offset in words).
+	// Offset computed after bne emission since k advanced by 4.
+	int32_t branch_off = ((offset - static_cast<int32_t>(k)) >> 2);
+	emit32(0x14000000 | (branch_off & 0x03FFFFFF), code, k);
 
 	for (uint32_t i = 0; i < RegistersCount; ++i)
 		reg_changed_offset[i] = k;
