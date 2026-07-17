@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-17 (PoolManager extraction + execute_bytecode)
+
+### Architecture
+- **PoolManager extraction** (`include/armrx/pool_manager.hpp`, `src/pool_manager.cpp`, `src/main.cpp`): Extracted inline pool failover, StratumClient lifecycle, and reconnect rotation logic from `main.cpp` into a dedicated `armrx::PoolManager` class. Replaces ~50 lines of inline lambdas and state variables with clean API (`connect()`, `tick()`, `submit_share()`, `current_pool_name()`).
+
+### Performance (experimental)
+- **execute_bytecode dispatch table** (`src/vm.cpp`): Attempted to replace the `switch(ibc.type)` (30-case, compiler-optimized) with an explicit `kExecHandlers[30]` function pointer table. **Reverted** — indirect function calls prevented compiler inlining on the hot path (~500K dispatches per hash), causing ~50% hashrate regression. The `switch` compiles to the same jump table but allows the compiler to inline across case boundaries, which is critical at this dispatch frequency.
+
 ## 2026-07-17 (NEON load interleaving + prefetch A/B test)
 
 ### Performance

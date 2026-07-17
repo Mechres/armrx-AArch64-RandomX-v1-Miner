@@ -145,6 +145,7 @@ TCP connection to any Monero-compatible pool with:
 | **Dead code cleanup** | ✅ |
 | **const_cast elimination** | ✅ |
 | **Pool connection fixed** | ✅ |
+| **PoolManager extraction** | ✅ |
 
 ### Performance
 
