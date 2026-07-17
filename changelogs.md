@@ -1,6 +1,18 @@
 # Changelog
 
-## 2026-07-17 (get_array_first fix + session_id escape)
+## 2026-07-17 (TLS hostname verification + stratum mutex + parser fixes + JIT dedup)
+
+### Security
+- **TLS hostname verification** (`src/tls_client.cpp:59-67`): Added `X509_VERIFY_PARAM_set1_host()` call before `SSL_connect()`. Previously only SNI was set — any CA-signed cert for any domain would pass. `--tls` now authenticates the server.
+- **`session_id_` escaped in submit and keepalive frames** (`src/stratum_client.cpp:315,683`): `session_id_` from pool login responses is now wrapped in `armrx::json::escape()`. This was a partial regression of the S1 JSON injection fix.
+
+### Correctness
+- **`stratum_` mutex** (`include/armrx/pool_manager.hpp`, `src/pool_manager.cpp`): Added `stratum_mutex_` guarding `PoolManager::stratum_` assignment and access. Worker threads calling `submit_share()` and main thread reassigning `stratum_` during failover no longer race.
+- **`get_array_first` dead-code bug** (`src/json.cpp:126-131`): Removed first `if (json[pos] == '"')` branch which had a 512-byte truncation bug and rendered the correct second branch unreachable. Affected `mining.set_target`, `set_difficulty`, `set_extranonce` parsing.
+- **`find_key` scope fix** (`src/json.cpp:64-77`): Now requires the character before a matched key to be `{` or `,` (object-key position). A pool returning `{"error":"\"method\" bad","method":"login"}` no longer returns garbage for `method`.
+
+### Maintainability
+- **`generateProgram`/`generateProgramLight` dedup** (`src/jit_compiler_a64.cpp`): Extracted the duplicated 24-line v2 AES-tweak block into a shared `emitV2AesTweak()` static member function. Both fast and light generation paths now share one implementation, eliminating a silent drift risk for v2-mode programs.
 
 ### Security
 - **`session_id_` escaped in submit and keepalive frames** (`src/stratum_client.cpp:315,683`): `session_id_` from pool login responses is now wrapped in `armrx::json::escape()` before inclusion in submit and keepalive messages. This was a partial regression of the S1 JSON injection fix — `wallet_`, `password_`, and `job_id` were already protected.

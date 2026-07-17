@@ -58,6 +58,9 @@ bool TlsClient::connect(int fd, const std::string& host) {
     // Set SNI hostname so the pool can present the correct certificate
     if (!host.empty()) {
         SSL_set_tlsext_host_name(ssl_.get(), host.c_str());
+        // Also verify the hostname matches the certificate
+        X509_VERIFY_PARAM* param = SSL_get0_param(ssl_.get());
+        X509_VERIFY_PARAM_set1_host(param, host.c_str(), host.size());
     }
 
     const int ret = SSL_connect(ssl_.get());

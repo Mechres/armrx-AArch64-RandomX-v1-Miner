@@ -129,5 +129,7 @@ namespace armrx {
 		void h_CFROUND(Instruction&, uint32_t&);
 		void h_ISTORE(Instruction&, uint32_t&);
 		void h_NOP(Instruction&, uint32_t&);
+
+		static void emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_t codePos);
 	};
 }

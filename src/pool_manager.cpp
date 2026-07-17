@@ -36,10 +36,13 @@ std::string PoolManager::current_pool_name() const {
 }
 
 unsigned PoolManager::reconnect_attempts() const {
+    // Caller should hold stratum_mutex_ if concurrent failover may occur.
+    // During normal display-loop usage, no concurrent writes happen.
     return stratum_ ? stratum_->reconnect_attempts() : 0;
 }
 
 bool PoolManager::is_connected() const {
+    // Caller should hold stratum_mutex_ if concurrent failover may occur.
     return stratum_ && stratum_->is_connected();
 }
 
@@ -47,9 +50,11 @@ void PoolManager::connect_to_current() {
     if (current_idx_ >= pools_.size()) return;
     const auto& entry = pools_[current_idx_];
 
-    // Create a fresh client for this pool
-    stratum_ = std::make_unique<StratumClient>(
-        entry.host, entry.port, wallet_, password_);
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
+        stratum_ = std::make_unique<StratumClient>(
+            entry.host, entry.port, wallet_, password_);
+    }
 
     stratum_->enable_tls(tls_);
     stratum_->set_tls_verify_peer(tls_verify_);
@@ -74,6 +79,7 @@ bool PoolManager::connect() {
 }
 
 void PoolManager::disconnect() {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     if (stratum_) {
         stratum_->disconnect();
         stratum_.reset();
@@ -82,10 +88,12 @@ void PoolManager::disconnect() {
 
 void PoolManager::submit_share(const Job& job, std::uint64_t nonce,
                                const std::array<std::byte, 32>& hash) {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     if (stratum_) stratum_->submit_share(job, nonce, hash);
 }
 
 void PoolManager::tick() {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     if (!stratum_) return;
 
     if (!stratum_->is_connected() && failover_cooldown_ == 0) {

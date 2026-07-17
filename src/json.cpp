@@ -64,8 +64,23 @@ std::string escape(std::string_view s) {
 static bool find_key(const std::string& json, std::string_view key,
                      std::size_t& value_pos) {
     std::string search = "\"" + std::string(key) + "\"";
-    auto pos = json.find(search);
-    if (pos == std::string::npos) return false;
+    std::size_t pos = 0;
+    while (true) {
+        pos = json.find(search, pos);
+        if (pos == std::string::npos) return false;
+
+        // Scope check: the key must be at an object-key position,
+        // not inside a string value. Check that the character
+        // before it (skipping whitespace) is '{' or ','.
+        std::size_t before = pos;
+        while (before > 0 && (json[before - 1] == ' ' || json[before - 1] == '\t'))
+            --before;
+        if (before == 0 || json[before - 1] == '{' || json[before - 1] == ',')
+            break;
+
+        // Not an object key — skip past this occurrence and retry
+        pos += search.size();
+    }
 
     pos += search.size();
     skip_ws(json, pos);

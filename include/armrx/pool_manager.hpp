@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -74,6 +75,7 @@ private:
 
     StratumClient::JobCallback job_cb_;
     StratumClient::ErrorCallback error_cb_;
+    mutable std::mutex stratum_mutex_;
 };
 
 } // namespace armrx
