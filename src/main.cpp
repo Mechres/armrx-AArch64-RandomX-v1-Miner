@@ -6,6 +6,7 @@
 #include "armrx/stratum_client.hpp"
 #include "armrx/config.hpp"
 #include "armrx/tui.hpp"
+#include "armrx/pool_manager.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -378,80 +379,43 @@ int main(int argc, char** argv) {
         std::cerr << "[DEBUG] Connecting to pool: " << pool_list[0].first << ":" << pool_list[0].second
                   << " wallet=" << pool_wallet.substr(0, 10) << "... tls=" << pool_tls << "\n";
 
-        // Pool failover: cycle through the pool list on permanent disconnects
-        current_pool_idx = 0;
+        // Build PoolConfig vector from the flat pool_list
+        std::vector<armrx::PoolConfig> pool_configs;
+        for (const auto& p : pool_list) {
+            pool_configs.push_back({p.first, p.second, pool_tls});
+        }
 
-        auto get_pool_name = [&](unsigned idx) -> std::string {
-            if (idx >= pool_list.size()) return "(none)";
-            return pool_list[idx].first + ":" + std::to_string(pool_list[idx].second);
-        };
-
-        std::cout << "\nStarting pool miner — " << pool_list.size()
+        std::cout << "\nStarting pool miner — " << pool_configs.size()
                   << " pool(s) configured\n";
 
         armrx::MiningEngine engine(effective_mode, workers);
         engine.set_rt_priority(use_rt_priority);
 
-        // Share callback: forward found shares to pool
-        auto stratum = std::make_unique<armrx::StratumClient>(
-            pool_list[0].first, pool_list[0].second, pool_wallet, pool_password);
-
         std::atomic<std::uint64_t> shares_submitted{0};
         std::atomic<std::uint64_t> total_hashes_snapshot{0};
+
+        auto pool_mgr = std::make_unique<armrx::PoolManager>(
+            pool_configs, pool_wallet, pool_password, pool_tls, pool_tls_verify);
+
+        pool_mgr->set_job_callback([&](const armrx::Job& job) {
+            engine.set_job(job);
+        });
+
+        pool_mgr->set_error_callback([&](const std::string& reason) {
+            std::cerr << "[Pool] " << pool_mgr->current_pool_name()
+                      << ": " << reason << '\n';
+        });
 
         auto share_callback = [&](const armrx::Job& job, std::uint64_t nonce,
                                   std::array<std::byte, 32> hash) {
             shares_submitted.fetch_add(1, std::memory_order_relaxed);
             std::cout << "[Pool] Share found! Nonce: " << std::hex << nonce
                       << " Hash: " << hash_to_hex(hash) << std::dec << '\n';
-            stratum->submit_share(job, nonce, hash);
-        };
-
-        stratum->enable_tls(pool_tls);
-        stratum->set_tls_verify_peer(pool_tls_verify);
-
-        // Job callback: push new jobs from pool into the mining engine
-        stratum->set_job_callback([&](const armrx::Job& job) {
-            engine.set_job(job);
-        });
-
-        // Error callback: print disconnect/error messages
-        stratum->set_error_callback([&](const std::string& reason) {
-            std::cerr << "[Stratum] " << get_pool_name(current_pool_idx)
-                      << ": " << reason << '\n';
-        });
-
-        // Setup reconnect: try next pool after max retries on current one
-        stratum->set_reconnect_config(5, 1000); // 5 retries per pool, 1s base
-
-        auto connect_to_pool = [&](unsigned idx) -> bool {
-            if (idx >= pool_list.size()) return false;
-            // Cleanly stop the old client before replacing it (prevents thread races)
-            if (stratum) stratum->disconnect();
-            stratum = std::make_unique<armrx::StratumClient>(
-                pool_list[idx].first, pool_list[idx].second, pool_wallet, pool_password);
-            stratum->enable_tls(pool_tls);
-            stratum->set_tls_verify_peer(pool_tls_verify);
-            stratum->set_job_callback([&](const armrx::Job& job) {
-                engine.set_job(job);
-            });
-            stratum->set_error_callback([&](const std::string& reason) {
-                std::cerr << "[Stratum] " << get_pool_name(current_pool_idx)
-                          << ": " << reason << '\n';
-            });
-            stratum->set_reconnect_config(5, 1000);
-            try {
-                stratum->connect();
-                return true;
-            } catch (const std::exception& ex) {
-                std::cerr << "[Stratum] " << get_pool_name(idx)
-                          << ": " << ex.what() << '\n';
-                return false;
-            }
+            pool_mgr->submit_share(job, nonce, hash);
         };
 
         engine.start(share_callback);
-        connect_to_pool(0);
+        pool_mgr->connect();
 
         // Optional TUI dashboard
         std::unique_ptr<armrx::Tui> tui;
@@ -463,35 +427,19 @@ int main(int argc, char** argv) {
 
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
-        unsigned failover_cooldown = 0;
 
         while (keep_running) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             ++elapsed_sec;
 
-            // Pool failover: only after the reconnect loop has exhausted its retries
-            if (!stratum->is_connected() && failover_cooldown == 0) {
-                const auto retries = stratum->reconnect_attempts();
-                if (retries >= 5) { // max_retries_ = 5, reconnect gives up after 5th attempt
-                    current_pool_idx = (current_pool_idx + 1) % pool_list.size();
-                    std::cerr << "[Stratum] Failing over to "
-                              << get_pool_name(current_pool_idx) << '\n';
-                    failover_cooldown = 2; // wait 2s before attempting
-                }
-            }
-
-            if (failover_cooldown > 0) {
-                --failover_cooldown;
-                if (failover_cooldown == 0) {
-                    connect_to_pool(current_pool_idx);
-                }
-            }
+            // Pool failover handled internally by PoolManager
+            pool_mgr->tick();
 
             const double speed  = engine.hash_rate();
             const auto total    = engine.total_hashes();
             const auto shares   = shares_submitted.load();
-            const bool online   = stratum->is_connected();
-            const auto retries  = stratum->reconnect_attempts();
+            const bool online   = pool_mgr->is_connected();
+            const auto retries  = pool_mgr->reconnect_attempts();
 
             double compile_pct = -1.0;
             double execute_pct = -1.0;
@@ -510,12 +458,12 @@ int main(int argc, char** argv) {
                 for (unsigned w = 0; w < workers; ++w) {
                     worker_rates.push_back(engine.worker_hash_rate(w));
                 }
-                tui->render(get_pool_name(current_pool_idx), status,
+                tui->render(pool_mgr->current_pool_name(), status,
                             elapsed_sec, speed, total, shares,
                             worker_rates, workers, armrx::mode_name(effective_mode),
                             compile_pct, execute_pct);
             } else {
-                std::cout << "[Pool] " << get_pool_name(current_pool_idx)
+                std::cout << "[Pool] " << pool_mgr->current_pool_name()
                           << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                           << " | Shares: " << shares
                           << " | Total: "     << total
@@ -537,7 +485,7 @@ int main(int argc, char** argv) {
         }
         std::cout << std::endl;
 
-        stratum->disconnect();
+        pool_mgr->disconnect();
         engine.stop();
 
         std::cout << "Pool mining stopped.\n"

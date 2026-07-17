@@ -33,6 +33,7 @@ add_library(armrx_core
     src/stratum_client.cpp
     src/config.cpp
     src/json.cpp
+    src/pool_manager.cpp
     src/tui.cpp
 )
 
