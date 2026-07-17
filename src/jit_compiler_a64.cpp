@@ -41,23 +41,26 @@ static_assert(RANDOMX_PROGRAM_MAX_SIZE == 384, "Upstream RandomX v1 constant");
 #include "armrx/virtual_memory.h"
 #include "armrx/randomx_config.hpp"
 
-// Upstream RANDOMX_FLAG constants used inside the JIT compiler body
-// These mirror the values in upstream randomx.h
+// Upstream RANDOMX_FLAG constants used inside the JIT compiler body.
+// These mirror the values in upstream randomx.h and are distinct from
+// the armrx flag constants (kRandOMXFlag*) in vm.hpp — see map_to_randomx_flags().
 static constexpr uint32_t RANDOMX_FLAG_HARD_AES = 2;
 static constexpr uint32_t RANDOMX_FLAG_FULL_MEM  = 4;
 static constexpr uint32_t RANDOMX_FLAG_JIT       = 8;
 static constexpr uint32_t RANDOMX_FLAG_V2        = 128;
 
-// Upstream configuration constants used inside JIT body
-static constexpr uint32_t RANDOMX_DATASET_BASE_SIZE  = 2147483648U; // 2 GiB
+// Upstream configuration constants used inside JIT body and static.S.
+// Values that have an armrx equivalent are aliased to the project constant
+// for a single source of truth.
+static constexpr uint32_t RANDOMX_DATASET_BASE_SIZE  = 2147483648U; // 2 GiB base (kRandomXDatasetBytes adds 32 MiB extra)
 static constexpr uint32_t RANDOMX_PROGRAM_ITERATIONS = 2048U;
-static constexpr uint32_t RANDOMX_CACHE_ACCESSES     = 8U;          // kRandomXCacheAccesses
-static constexpr uint32_t RANDOMX_SUPERSCALAR_LATENCY = 170U;       // kSuperscalarLatency
-static constexpr uint32_t RANDOMX_SCRATCHPAD_L3      = 2097152U;    // 2 MiB
-static constexpr uint32_t RANDOMX_SCRATCHPAD_L2      = 262144U;     // 256 KiB
-static constexpr uint32_t RANDOMX_SCRATCHPAD_L1      = 16384U;      // 16 KiB
-static constexpr uint32_t CacheLineSize              = 64U;         // RANDOMX_DATASET_ITEM_SIZE
-static constexpr uint32_t CacheSize                  = 268435456U;  // 256 MiB (RANDOMX_ARGON_MEMORY * 1024)
+static constexpr uint32_t RANDOMX_CACHE_ACCESSES     = static_cast<uint32_t>(armrx::kRandomXCacheAccesses);
+static constexpr uint32_t RANDOMX_SUPERSCALAR_LATENCY = static_cast<uint32_t>(armrx::kSuperscalarLatency);
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L3      = static_cast<uint32_t>(armrx::kRandomXScratchpadBytes);
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L2      = 262144U;     // 256 KiB (no armrx equivalent)
+static constexpr uint32_t RANDOMX_SCRATCHPAD_L1      = 16384U;      // 16 KiB (no armrx equivalent)
+static constexpr uint32_t CacheLineSize              = 64U;
+static constexpr uint32_t CacheSize                  = static_cast<uint32_t>(armrx::kRandomXCacheBytes);
 static constexpr uint32_t ScratchpadL3Mask           = 2097144U;    // (RANDOMX_SCRATCHPAD_L3 / 8 - 1) * 8
 static constexpr uint32_t RegisterNeedsDisplacement   = 5U;
 static constexpr uint32_t ConditionMask               = 0xFFU;       // (1 << RANDOMX_JUMP_BITS) - 1
