@@ -123,10 +123,6 @@ std::string get_array_first(const std::string& json, std::string_view key) {
     skip_ws(json, pos);
     if (pos >= json.size()) return {};
 
-    if (json[pos] == '"') {
-        return get_string(json.substr(0, pos + 512), key); // hacky but works for short arrays near the key
-        // Actually use skip_string directly:
-    }
     // For string elements: extract the first string
     if (json[pos] == '"') {
         ++pos;

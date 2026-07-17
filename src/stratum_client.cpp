@@ -312,7 +312,7 @@ std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                ",\"jsonrpc\":\"2.0\"" +
                ",\"method\":\"submit\"" +
                ",\"params\":{" +
-                 "\"id\":\"" + session_id_ + "\"," +
+                 "\"id\":\"" + armrx::json::escape(session_id_) + "\"," +
                  "\"job_id\":\"" + armrx::json::escape(job.job_id) + "\"," +
                  "\"nonce\":\"" + nonce_hex + "\"," +
                  "\"result\":\"" + result_hex + "\"" +
@@ -680,7 +680,7 @@ void StratumClient::keepalive_loop() {
                               ",\"jsonrpc\":\"2.0\"" +
                               ",\"method\":\"keepalived\"" +
                               ",\"params\":{" +
-                                "\"id\":\"" + session_id_ + "\"" +
+                                "\"id\":\"" + armrx::json::escape(session_id_) + "\"" +
                               "}}\n";
             std::lock_guard lock(send_mutex_);
             send_line(msg);

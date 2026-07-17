@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-17 (get_array_first fix + session_id escape)
+
+### Security
+- **`session_id_` escaped in submit and keepalive frames** (`src/stratum_client.cpp:315,683`): `session_id_` from pool login responses is now wrapped in `armrx::json::escape()` before inclusion in submit and keepalive messages. This was a partial regression of the S1 JSON injection fix — `wallet_`, `password_`, and `job_id` were already protected.
+
+### Correctness
+- **`get_array_first` dead-code bug** (`src/json.cpp:126-131`): Removed the first `if (json[pos] == '"')` branch in `get_array_first` which had a 512-byte truncation bug and caused the correct second branch to be unreachable. The dead code made `json::get_array_first` silently truncate values near 512 bytes, affecting `mining.set_target`, `mining.set_difficulty`, and `mining.set_extranonce` parsing.
+
 ## 2026-07-17 (emit32 UB fix + hwloc pinning)
 
 ### Cleanup

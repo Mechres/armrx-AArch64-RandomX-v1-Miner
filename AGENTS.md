@@ -25,3 +25,13 @@ CMake requires `LANGUAGES C CXX ASM`. On AArch64: JIT + hardware AES/NEON auto-e
 - Main executable: `src/main.cpp`
 - Core library: `armrx_core` (CMake target)
 - Tests: `tests/test_blake2b.cpp`, `tests/test_mining.cpp`
+
+## Changelog & docs discipline
+
+After every code change that is deployed and verified (KATs green, build passes):
+
+1. **`changelogs.md`** — add a brief dated entry summarizing what changed, with filenames. One entry per logical change group (multiple related fixes can share one entry).
+2. **`README.md`** — update the Status table if the change adds or removes a feature. Add a row or mark an existing one as ✅.
+3. **`ROADMAP.md`** — move completed items from "Remaining" to the appropriate "Completed" section. Close resolved items.
+4. **Reference docs in `docs/`** — if a change updates a design decision, bug postmortem, or plan, update the corresponding doc. Keep cross-references consistent.
+5. **Skip if** the change is purely cosmetic (comment fix, whitespace) or a revert of an unshipped change.
