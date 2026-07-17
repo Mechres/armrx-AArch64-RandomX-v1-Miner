@@ -79,6 +79,7 @@ int main(int argc, char** argv) {
     std::string pool_wallet;
     std::string pool_password = "x";
     bool pool_tls = false;
+    bool pool_tls_verify = true;
     bool use_tui = false;
     bool use_mlock = false;
     bool use_rt_priority = false;
@@ -197,6 +198,10 @@ int main(int argc, char** argv) {
             pool_tls = false;
             continue;
         }
+        if (argument == "--no-verify-tls") {
+            pool_tls_verify = false;
+            continue;
+        }
         if (argument == "--tui") {
             use_tui = true;
             continue;
@@ -232,6 +237,7 @@ int main(int argc, char** argv) {
                 << "  --wallet=<address>         Monero wallet address (worker login)\n"
                 << "  --password=<pw>            Worker password (default: x)\n"
                 << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
+                << "  --no-verify-tls          Skip TLS certificate verification (default: verify)\n"
                 << "  --config=<path>           Config file path (default: ~/.config/armrx/config.json)\n"
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
@@ -402,6 +408,7 @@ int main(int argc, char** argv) {
         };
 
         stratum->enable_tls(pool_tls);
+        stratum->set_tls_verify_peer(pool_tls_verify);
 
         // Job callback: push new jobs from pool into the mining engine
         stratum->set_job_callback([&](const armrx::Job& job) {
@@ -424,6 +431,7 @@ int main(int argc, char** argv) {
             stratum = std::make_unique<armrx::StratumClient>(
                 pool_list[idx].first, pool_list[idx].second, pool_wallet, pool_password);
             stratum->enable_tls(pool_tls);
+            stratum->set_tls_verify_peer(pool_tls_verify);
             stratum->set_job_callback([&](const armrx::Job& job) {
                 engine.set_job(job);
             });

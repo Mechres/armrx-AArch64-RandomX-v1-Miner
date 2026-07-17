@@ -147,6 +147,7 @@ void StratumClient::connect() {
 #ifdef ARMRX_HAVE_TLS
         if (tls_enabled_) {
             tls_ = std::make_unique<TlsClient>();
+            tls_->set_verify_peer(tls_verify_peer_);
             if (!tls_->connect(fd, host_)) {
                 ::close(fd);
                 sockfd_ = -1;
@@ -258,8 +259,8 @@ void StratumClient::set_reconnect_config(unsigned max_retries, unsigned base_del
 // ─────────────────────────────────────────────────────────────────────────────
 
 std::string StratumClient::build_subscribe_msg() const {
-    const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
-    const_cast<StratumClient*>(this)->handshake_req_id_ = id;
+    const auto id = request_id_.fetch_add(1);
+    handshake_req_id_ = id;
     static const char* formats[] = {
         "[\"armrx/1.0\"]",
         "[\"armrx/1.0\",\"monero\"]",
@@ -273,13 +274,13 @@ std::string StratumClient::build_subscribe_msg() const {
         "mining.subscribe",
     };
     unsigned num_formats = 4;
-    unsigned idx = const_cast<StratumClient*>(this)->subscribe_try_ % num_formats;
+    unsigned idx = subscribe_try_ % num_formats;
     return armrx::json::rpc_envelope(id, methods[idx], formats[idx]);
 }
 
 std::string StratumClient::build_login_msg() const {
-    const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
-    const_cast<StratumClient*>(this)->handshake_req_id_ = id;
+    const auto id = request_id_.fetch_add(1);
+    handshake_req_id_ = id;
     return "{\"id\":" + std::to_string(id) +
            ",\"jsonrpc\":\"2.0\"" +
            ",\"method\":\"login\"" +
@@ -293,15 +294,15 @@ std::string StratumClient::build_login_msg() const {
 }
 
 std::string StratumClient::build_authorize_msg() const {
-    const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
-    const_cast<StratumClient*>(this)->authorize_req_id_ = id;
+    const auto id = request_id_.fetch_add(1);
+    authorize_req_id_ = id;
     return armrx::json::rpc_envelope(id, "mining.authorize",
                     "[\"" + armrx::json::escape(wallet_) + "\",\"" + armrx::json::escape(password_) + "\"]");
 }
 
 std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                                             const std::array<std::byte, 32>& hash) const {
-    const auto id = const_cast<StratumClient*>(this)->request_id_.fetch_add(1);
+    const auto id = request_id_.fetch_add(1);
     const std::string nonce_hex = nonce_to_hex(nonce, 4);
 
     if (protocol_ == StratumProtocol::CRYPTONOTE) {

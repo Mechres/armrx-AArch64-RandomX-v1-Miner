@@ -85,6 +85,7 @@ public:
      * Must be called before connect(). Requires OpenSSL at build time.
      */
     void enable_tls(bool enabled) { tls_enabled_ = enabled; }
+    void set_tls_verify_peer(bool v) { tls_verify_peer_ = v; }
 
     /**
      * Configure automatic reconnection on disconnect.
@@ -157,7 +158,7 @@ private:
     std::size_t extra_nonce2_size_{4}; // Extra nonce 2 length in bytes
 
     mutable std::mutex send_mutex_;
-    std::atomic<std::uint64_t> request_id_{1};
+    mutable std::atomic<std::uint64_t> request_id_{1};
 
     // Current target (updated by mining.set_target or mining.set_difficulty)
     mutable std::mutex target_mutex_;
@@ -174,7 +175,7 @@ private:
     // Handshake synchronization
     std::promise<bool> subscribe_done_;
     bool subscribe_ok_{false};
-    unsigned subscribe_try_{0};  // which subscribe format to try next
+    mutable unsigned subscribe_try_{0};  // which subscribe format to try next
 
     // Reconnect configuration
     unsigned max_retries_{10};
@@ -185,14 +186,15 @@ private:
 
     // TLS
     bool tls_enabled_{false};
+    bool tls_verify_peer_{true};
 #ifdef ARMRX_HAVE_TLS
     std::unique_ptr<TlsClient> tls_;
 #endif
 
     // CryptoNote and fallback tracking
     StratumProtocol protocol_{StratumProtocol::AUTO};
-    std::uint64_t handshake_req_id_{0};
-    std::uint64_t authorize_req_id_{0};
+    mutable std::uint64_t handshake_req_id_{0};
+    mutable std::uint64_t authorize_req_id_{0};
     std::thread keepalive_thread_;
     std::atomic<bool> fallback_in_progress_{false};
     std::atomic<bool> handshake_in_progress_{false};

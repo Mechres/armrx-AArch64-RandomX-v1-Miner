@@ -31,6 +31,9 @@ public:
     /** Wrap an existing TCP socket fd with TLS and perform the handshake. */
     bool connect(int fd, const std::string& host);
 
+    /** Enable/disable peer certificate verification (default: enabled). */
+    void set_verify_peer(bool v) { verify_peer_ = v; }
+
     /** SSL_read wrapper. Returns bytes read, or <= 0 on error/closed. */
     int read(void* buf, std::size_t len);
 
@@ -46,6 +49,7 @@ public:
 private:
     std::unique_ptr<ssl_ctx_st, void(*)(ssl_ctx_st*)> ctx_;
     std::unique_ptr<ssl_st, void(*)(ssl_st*)> ssl_;
+    bool verify_peer_ = true;
 };
 
 } // namespace armrx

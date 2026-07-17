@@ -27,9 +27,10 @@ TlsClient::TlsClient()
         throw std::runtime_error("TlsClient: failed to create SSL_CTX");
     }
 
-    // Don't verify the pool server certificate (Monero pools typically use
-    // self-signed or public-CA certs; strict verification would block most).
-    SSL_CTX_set_verify(ctx_.get(), SSL_VERIFY_NONE, nullptr);
+    // Verify peer certificate by default. Pools overwhelmingly use trusted CA
+    // certs (Let's Encrypt). Opt out with set_verify_peer(false) for self-signed.
+    SSL_CTX_set_verify(ctx_.get(), verify_peer_ ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
+    SSL_CTX_set_min_proto_version(ctx_.get(), TLS1_2_VERSION);
 
     // Use default system CA paths if available (harmless if absent)
     SSL_CTX_set_default_verify_paths(ctx_.get());

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-17 (TLS verification, dead code cleanup, const_cast fix)
+
+### Security
+- **S6 — TLS peer verification enabled by default** (`src/tls_client.cpp`, `include/armrx/tls_client.hpp`): Changed default certificate verification from `SSL_VERIFY_NONE` to `SSL_VERIFY_PEER` and set minimum TLS protocol to 1.2. Added `--no-verify-tls` CLI flag as opt-out for pools using self-signed certificates. Wired `set_verify_peer()` through `StratumClient` → `TlsClient` in `src/main.cpp` and `src/stratum_client.cpp`.
+
+### Cleanup
+- **Dead code removal** (`include/armrx/jit_compiler.hpp`): Removed `CodeBuffer` (~60 lines) and `CompilerState` structs — never referenced anywhere in the codebase. These were upstream RandomX scaffolding unused by the aarch64 JIT compiler.
+- **`const_cast` abuse eliminated** (`include/armrx/stratum_client.hpp`, `src/stratum_client.cpp`): Marked `request_id_`, `handshake_req_id_`, `authorize_req_id_`, and `subscribe_try_` as `mutable`. Removed all 8 `const_cast<StratumClient*>(this)->` expressions from the message builder methods.
+
+### Fixes
+- **JSON `id` field parsing** (`src/stratum_client.cpp`): Changed `get_string(line, "id")` to `get_raw(line, "id")` in `handle_reply`. The `"id"` field in Stratum JSON is numeric (`"id":1`), not quoted, so `get_string` returned empty and the handshake response was never matched to `handshake_req_id_`. Caused "handshake timed out" even after successful login.
+- **Race condition on protocol fallback** (`src/stratum_client.cpp`): Set `handshake_in_progress_` flag in `connect()` via RAII guard. Reader thread now only spawns a reconnect thread when the handshake is not in progress, preventing concurrent `connect()` calls from racing on `sockfd_`.
+
+### Verification
+- CTest: 100% passed (2/2).
+- Pool connection to tr.monero.herominers.com verified working: login → job dispatch → mining at ~24 H/s.
+
 ## 2026-07-16 (Phase 2 — VM refactor + JSON module)
 
 ### Architecture

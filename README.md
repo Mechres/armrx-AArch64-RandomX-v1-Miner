@@ -137,6 +137,11 @@ TCP connection to any Monero-compatible pool with:
 | **VM refactor: `run()` split** | ✅ |
 | **VM refactor: dispatch table** | ✅ |
 | **`armrx::json` module** | ✅ |
+| **TLS peer verification** | ✅ |
+| **`--no-verify-tls` flag** | ✅ |
+| **Dead code cleanup** | ✅ |
+| **const_cast elimination** | ✅ |
+| **Pool connection fixed** | ✅ |
 
 ### Performance
 
