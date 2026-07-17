@@ -745,7 +745,7 @@ void VirtualMachine::execute_bytecode() {
                 break;
             case InstructionType::CFROUND: {
                 std::uint64_t isrc = rotr(*ibc.isrc, ibc.imm);
-                rx_set_rounding_mode(isrc % 4);
+                rx_set_rounding_mode(static_cast<std::uint32_t>(isrc % 4));
                 break;
             }
             case InstructionType::ISTORE:
