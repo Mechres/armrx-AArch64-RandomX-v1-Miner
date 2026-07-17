@@ -150,6 +150,8 @@ TCP connection to any Monero-compatible pool with:
 | **handle_notify scanner cleanup** | ✅ |
 | **Flag constant de-duplication** | ✅ |
 | **Branchless CBRANCH (O11)** | ✅ |
+| **emit32 UB fix** | ✅ |
+| **hwloc CPU pinning** | ✅ |
 
 ### Performance
 

@@ -10,12 +10,74 @@
 #include <sched.h>
 #include <pthread.h>
 
+#ifdef ARMRX_HAVE_HWLOC
+#include <hwloc.h>
+#endif
+
 namespace armrx {
 
 namespace {
 
-// Detect CPU core ordering by max frequency. Fastest cores first.
-// For big.LITTLE systems this pins workers to big cores first.
+#ifdef ARMRX_HAVE_HWLOC
+
+// hwloc-based core ordering: discovers topology and returns core IDs
+// ordered by physical package (big.LITTLE clusters first by frequency).
+std::vector<unsigned int> detect_core_order() {
+    hwloc_topology_t topology;
+    hwloc_topology_init(&topology);
+    hwloc_topology_load(topology);
+
+    int depth = hwloc_get_type_depth(topology, HWLOC_OBJ_PU);
+    if (depth < 0) {
+        hwloc_topology_destroy(topology);
+        // Fallback
+        unsigned int n = std::thread::hardware_concurrency();
+        std::vector<unsigned int> fallback(n);
+        for (unsigned int i = 0; i < n; ++i) fallback[i] = i;
+        return fallback;
+    }
+
+    int num_pus = hwloc_get_nbobjs_by_depth(topology, depth);
+    if (num_pus <= 0) {
+        hwloc_topology_destroy(topology);
+        return {0};
+    }
+
+    // Collect (freq, os_index) pairs via cpufreq (same as before)
+    std::vector<std::pair<unsigned long, unsigned int>> freq_cores;
+    for (int i = 0; i < num_pus; ++i) {
+        hwloc_obj_t pu = hwloc_get_obj_by_depth(topology, depth, i);
+        unsigned int os_idx = static_cast<unsigned int>(pu->os_index);
+        std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(os_idx) + "/cpufreq/cpuinfo_max_freq";
+        std::ifstream file(path);
+        unsigned long freq = 0;
+        if (file >> freq) {
+            freq_cores.emplace_back(freq, os_idx);
+        }
+    }
+
+    hwloc_topology_destroy(topology);
+
+    if (freq_cores.empty()) {
+        // Fallback: sequential order
+        std::vector<unsigned int> fallback(static_cast<std::size_t>(num_pus));
+        for (int i = 0; i < num_pus; ++i) fallback[static_cast<std::size_t>(i)] = static_cast<unsigned int>(i);
+        return fallback;
+    }
+
+    std::sort(freq_cores.begin(), freq_cores.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+
+    std::vector<unsigned int> order;
+    order.reserve(freq_cores.size());
+    for (const auto& fc : freq_cores) order.push_back(fc.second);
+    return order;
+}
+
+#else // !ARMRX_HAVE_HWLOC
+
+// sysfs-based core ordering (fallback when hwloc is not available).
+// Reads cpuinfo_max_freq from sysfs and sorts by frequency descending.
 std::vector<unsigned int> detect_core_order() {
     unsigned int num_cpus = std::thread::hardware_concurrency();
     if (num_cpus == 0) return {0};
@@ -31,13 +93,11 @@ std::vector<unsigned int> detect_core_order() {
     }
 
     if (freq_cores.empty()) {
-        // Fallback: no cpufreq info — use sequential order
         std::vector<unsigned int> fallback(num_cpus);
         for (unsigned int i = 0; i < num_cpus; ++i) fallback[i] = i;
         return fallback;
     }
 
-    // Sort by frequency descending (big cores first)
     std::sort(freq_cores.begin(), freq_cores.end(),
               [](const auto& a, const auto& b) { return a.first > b.first; });
 
@@ -46,6 +106,8 @@ std::vector<unsigned int> detect_core_order() {
     for (const auto& fc : freq_cores) order.push_back(fc.second);
     return order;
 }
+
+#endif // ARMRX_HAVE_HWLOC
 
 } // namespace
 

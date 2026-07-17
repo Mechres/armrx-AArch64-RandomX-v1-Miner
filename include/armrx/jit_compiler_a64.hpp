@@ -80,7 +80,7 @@ namespace armrx {
 
 		static void emit32(uint32_t val, uint8_t* code, uint32_t& codePos)
 		{
-			*(uint32_t*)(code + codePos) = val;
+			memcpy(code + codePos, &val, sizeof(val));
 			codePos += sizeof(val);
 		}
 
