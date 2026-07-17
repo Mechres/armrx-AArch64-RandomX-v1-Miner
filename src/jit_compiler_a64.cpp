@@ -1153,7 +1153,10 @@ void JitCompilerA64::h_CBRANCH(Instruction& instr, uint32_t& codePos)
 	int32_t offset = reg_changed_offset[instr.dst];
 	offset = ((offset - k) >> 2) & ((1 << 19) - 1);
 
-	// beq target
+	// beq target (backward conditional branch; AArch64 predicts TAKEN but
+	// condition is only met ~0.4%, causing mispredictions. A branchless
+	// alternative using bne+b was tried but caused test hangs — revisit
+	// after dedicated branch-miss profiling per OPTIMIZATION_REFERENCE.)
 	emit32(0x54000000 | (offset << 5), code, k);
 
 	for (uint32_t i = 0; i < RegistersCount; ++i)
