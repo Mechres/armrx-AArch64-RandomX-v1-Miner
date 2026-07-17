@@ -1,9 +1,12 @@
 # Changelog
 
-## 2026-07-17 (TLS verification, dead code cleanup, const_cast fix)
+## 2026-07-17 (NEON Argon2 G-function + low-effort cleanup)
+
+### Performance
+- **NEON Argon2 G-function** (`src/argon2.cpp`): Vectorized the Argon2 `blamka_add` and `gb` (G-function) using AArch64 NEON `uint64x2_t` intrinsics. Process 2 G-functions in parallel per SIMD iteration via `blamka_add_neon` (using `vmull_u32` + `vmovn_u64` for the multiply step) and dedicated `rotr*_neon` helpers (`vrev64q_u32` for rotr32, `vsriq_n_u64` for rotr24/16/63). Reduces the 128 `gb` calls per `argon2_compress` to 64 SIMD calls. Scalar fallback retained for x86_64.
 
 ### Security
-- **S6 — TLS peer verification enabled by default** (`src/tls_client.cpp`, `include/armrx/tls_client.hpp`): Changed default certificate verification from `SSL_VERIFY_NONE` to `SSL_VERIFY_PEER` and set minimum TLS protocol to 1.2. Added `--no-verify-tls` CLI flag as opt-out for pools using self-signed certificates. Wired `set_verify_peer()` through `StratumClient` → `TlsClient` in `src/main.cpp` and `src/stratum_client.cpp`.
+- **S6 — TLS peer verification enabled by default** (`src/tls_client.cpp`, `include/armrx/tls_client.hpp`): Changed default certificate verification from `SSL_VERIFY_NONE` to `SSL_VERIFY_PEER` and set minimum TLS protocol to 1.2. Added `--no-verify-tls` CLI flag as opt-out for pools using self-signed certificates.
 
 ### Cleanup
 - **Dead code removal** (`include/armrx/jit_compiler.hpp`): Removed `CodeBuffer` (~60 lines) and `CompilerState` structs — never referenced anywhere in the codebase. These were upstream RandomX scaffolding unused by the aarch64 JIT compiler.

@@ -6,6 +6,10 @@
 
 #include <algorithm>
 #include <cstdint>
+
+#if defined(__aarch64__) && defined(__ARM_NEON)
+#include <arm_neon.h>
+#endif
 #include <bit>
 #include <stdexcept>
 #include <vector>
@@ -91,7 +95,112 @@ void permute_16(std::uint64_t* words) {
     gb(words[3], words[4], words[9], words[14]);
 }
 
+#if defined(__aarch64__) && defined(__ARM_NEON)
+
+// NEON: process two Argon2 G-functions in parallel using uint64x2_t lanes.
+// Lane 0 holds values for G-function A, lane 1 for G-function B.
+static inline uint64x2_t blamka_add_neon(uint64x2_t a, uint64x2_t b) {
+    // low32(a) * low32(b) → 64-bit product
+    uint64x2_t prod = vmull_u32(vmovn_u64(a), vmovn_u64(b));
+    // a + b + 2*prod
+    return vaddq_u64(vaddq_u64(a, b), vshlq_n_u64(prod, 1));
+}
+
+static inline uint64x2_t rotr32_neon(uint64x2_t x) {
+    return vreinterpretq_u64_u32(vrev64q_u32(vreinterpretq_u32_u64(x)));
+}
+
+static inline uint64x2_t rotr24_neon(uint64x2_t x) {
+    return vsriq_n_u64(vshlq_n_u64(x, 40), x, 24);
+}
+
+static inline uint64x2_t rotr16_neon(uint64x2_t x) {
+    return vsriq_n_u64(vshlq_n_u64(x, 48), x, 16);
+}
+
+static inline uint64x2_t rotr63_neon(uint64x2_t x) {
+    return vsriq_n_u64(vshlq_n_u64(x, 1), x, 63);
+}
+
+// Process two G-functions (8 uint64_t values) in parallel.
+// va = { a0, a1 }, vb = { b0, b1 }, vc = { c0, c1 }, vd = { d0, d1 }
+static void gb_neon(uint64x2_t& va, uint64x2_t& vb, uint64x2_t& vc, uint64x2_t& vd) {
+    va = blamka_add_neon(va, vb);
+    vd = rotr32_neon(veorq_u64(vd, va));
+    vc = blamka_add_neon(vc, vd);
+    vb = rotr24_neon(veorq_u64(vb, vc));
+    va = blamka_add_neon(va, vb);
+    vd = rotr16_neon(veorq_u64(vd, va));
+    vc = blamka_add_neon(vc, vd);
+    vb = rotr63_neon(veorq_u64(vb, vc));
+}
+
+// NEON permute_16: processes 16 words as 8 gb_neon calls (4 column + 4 diagonal).
+// Each gb_neon processes 2 G-functions at once, so we make half the calls.
+static void permute_16_neon(uint64_t* words) {
+    auto load = [&](int i0, int i1, int i2, int i3) {
+        uint64x2_t va = vld1q_u64(words + i0);
+        uint64x2_t vb = vld1q_u64(words + i1);
+        uint64x2_t vc = vld1q_u64(words + i2);
+        uint64x2_t vd = vld1q_u64(words + i3);
+        return std::make_tuple(va, vb, vc, vd);
+    };
+    auto store = [&](int i0, int i1, int i2, int i3,
+                     uint64x2_t va, uint64x2_t vb, uint64x2_t vc, uint64x2_t vd) {
+        vst1q_u64(words + i0, va);
+        vst1q_u64(words + i1, vb);
+        vst1q_u64(words + i2, vc);
+        vst1q_u64(words + i3, vd);
+    };
+
+    // Column step (first 4 scalar gb calls → 2 NEON calls)
+    {
+        auto [va, vb, vc, vd] = load(0, 4, 8, 12);
+        gb_neon(va, vb, vc, vd);
+        store(0, 4, 8, 12, va, vb, vc, vd);
+    }
+    {
+        auto [va, vb, vc, vd] = load(2, 6, 10, 14);
+        gb_neon(va, vb, vc, vd);
+        store(2, 6, 10, 14, va, vb, vc, vd);
+    }
+
+    // Diagonal step (last 4 scalar gb calls → 2 NEON calls)
+    {
+        auto [va, vb, vc, vd] = load(0, 5, 10, 15);
+        gb_neon(va, vb, vc, vd);
+        store(0, 5, 10, 15, va, vb, vc, vd);
+    }
+    {
+        auto [va, vb, vc, vd] = load(2, 7, 8, 13);
+        gb_neon(va, vb, vc, vd);
+        store(2, 7, 8, 13, va, vb, vc, vd);
+    }
+}
+
+static void permute_block_neon(Argon2Block& block) {
+    for (unsigned row = 0; row < 8; ++row)
+        permute_16_neon(block.data() + 16U * row);
+    for (unsigned column = 0; column < 8; ++column) {
+        std::array<std::uint64_t, 16> words{};
+        for (unsigned row = 0; row < 8; ++row) {
+            words[2U * row] = block[16U * row + 2U * column];
+            words[2U * row + 1U] = block[16U * row + 2U * column + 1U];
+        }
+        permute_16_neon(words.data());
+        for (unsigned row = 0; row < 8; ++row) {
+            block[16U * row + 2U * column] = words[2U * row];
+            block[16U * row + 2U * column + 1U] = words[2U * row + 1U];
+        }
+    }
+}
+
+#endif // __aarch64__ && __ARM_NEON
+
 void permute_block(Argon2Block& block) {
+#if defined(__aarch64__) && defined(__ARM_NEON)
+    permute_block_neon(block);
+#else
     for (unsigned row = 0; row < 8; ++row) permute_16(block.data() + 16U * row);
     for (unsigned column = 0; column < 8; ++column) {
         std::array<std::uint64_t, 16> words{};
@@ -105,6 +214,7 @@ void permute_block(Argon2Block& block) {
             block[16U * row + 2U * column + 1U] = words[2U * row + 1U];
         }
     }
+#endif
 }
 
 } // namespace
