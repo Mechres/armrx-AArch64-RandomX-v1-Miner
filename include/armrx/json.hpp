@@ -33,6 +33,10 @@ namespace json {
 /// returns `{"a","b","c"}`.
 [[nodiscard]] std::vector<std::string> get_str_array(const std::string& json, std::string_view key);
 
+/// Extract a single element from an array by key and 0-based index.
+/// Returns the string content for string elements, or raw token for others.
+[[nodiscard]] std::string get_array_element(const std::string& json, std::string_view key, unsigned index);
+
 /// Extract a nested object or array by key, with correct brace/bracket matching.
 /// Returns the substring including braces/brackets.
 [[nodiscard]] std::string get_object(const std::string& json, std::string_view key);

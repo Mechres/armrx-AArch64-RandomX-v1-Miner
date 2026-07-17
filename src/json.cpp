@@ -180,6 +180,58 @@ std::vector<std::string> get_str_array(const std::string& json, std::string_view
     return result;
 }
 
+std::string get_array_element(const std::string& json, std::string_view key, unsigned index) {
+    std::size_t pos;
+    if (!find_key(json, key, pos)) return {};
+
+    skip_ws(json, pos);
+    if (pos >= json.size() || json[pos] != '[') return {};
+    ++pos;
+
+    unsigned cur = 0;
+    while (pos < json.size() && json[pos] != ']') {
+        skip_ws(json, pos);
+        if (pos >= json.size() || json[pos] == ']') break;
+        if (json[pos] == ',') { ++pos; continue; }
+
+        // Found our target element
+        if (cur == index) {
+            if (json[pos] == '"') {
+                // String value
+                ++pos;
+                std::string val;
+                while (pos < json.size() && json[pos] != '"') {
+                    if (json[pos] == '\\') { ++pos; if (pos < json.size()) val += json[pos]; }
+                    else { val += json[pos]; }
+                    ++pos;
+                }
+                return val;
+            } else {
+                // Raw token (number, bool)
+                std::size_t start = pos;
+                while (pos < json.size() && json[pos] != ',' && json[pos] != ']'
+                       && json[pos] != ' ' && json[pos] != '\t')
+                    ++pos;
+                while (pos > start && (json[pos - 1] == ' ' || json[pos - 1] == '\t'))
+                    --pos;
+                return json.substr(start, pos - start);
+            }
+        }
+
+        // Skip this element
+        if (json[pos] == '"') {
+            pos = skip_string(json, pos);
+            if (pos == std::string::npos) return {};
+        } else {
+            while (pos < json.size() && json[pos] != ',' && json[pos] != ']'
+                   && json[pos] != ' ' && json[pos] != '\t')
+                ++pos;
+        }
+        ++cur;
+    }
+    return {};
+}
+
 std::string get_object(const std::string& json, std::string_view key) {
     std::size_t pos;
     if (!find_key(json, key, pos)) return {};

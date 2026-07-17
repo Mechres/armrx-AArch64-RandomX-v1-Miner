@@ -452,53 +452,10 @@ void StratumClient::handle_line(const std::string& line) {
 }
 
 void StratumClient::handle_notify(const std::string& line) {
-    // Monero Stratum mining.notify params:
-    //  [job_id, blob_hex, target_hex, clean_jobs, seed_hash_hex, ...]
-    //
-    // We use a positional scan of the params array rather than a full parser.
-    auto extract_array_elem = [&](int idx) -> std::string {
-        auto pos = line.find("\"params\"");
-        if (pos == std::string::npos) return {};
-        auto bracket = line.find('[', pos);
-        if (bracket == std::string::npos) return {};
-        ++bracket;
-        int cur = 0;
-        while (cur < idx) {
-            // skip to next comma at top level
-            int depth = 0;
-            bool in_string = false;
-            while (bracket < line.size()) {
-                char c = line[bracket++];
-                if (c == '"' && depth == 0) { in_string = !in_string; continue; }
-                if (in_string) continue;
-                if (c == '[' || c == '{') ++depth;
-                else if (c == ']' || c == '}') {
-                    if (depth == 0) return {}; // end of array
-                    --depth;
-                }
-                else if (c == ',' && depth == 0) break;
-            }
-            ++cur;
-        }
-        // Now bracket points at the start of elem idx
-        while (bracket < line.size() && line[bracket] == ' ') ++bracket;
-        if (bracket >= line.size()) return {};
-        if (line[bracket] == '"') {
-            ++bracket;
-            std::string result;
-            while (bracket < line.size() && line[bracket] != '"') {
-                result.push_back(line[bracket++]);
-            }
-            return result;
-        }
-        auto end = line.find_first_of(",]}", bracket);
-        return line.substr(bracket, end - bracket);
-    };
-
-    const auto job_id   = extract_array_elem(0);
-    const auto blob_hex = extract_array_elem(1);
-    const auto tgt_hex  = extract_array_elem(2);
-    const auto seed_hex = extract_array_elem(4); // XMR Stratum v2 field
+    const auto job_id   = armrx::json::get_array_element(line, "params", 0);
+    const auto blob_hex = armrx::json::get_array_element(line, "params", 1);
+    const auto tgt_hex  = armrx::json::get_array_element(line, "params", 2);
+    const auto seed_hex = armrx::json::get_array_element(line, "params", 4);
 
     if (job_id.empty() || blob_hex.empty()) return;
 
