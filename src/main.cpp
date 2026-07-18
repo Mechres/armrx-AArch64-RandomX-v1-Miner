@@ -549,16 +549,25 @@ int main(int argc, char** argv) {
             }
 
             if (tui) {
-                std::string status = online ? "\033[32mmining\033[0m"
-                    : (retries > 0 ? "\033[33mreconnecting\033[0m" : "\033[31mdisconnected\033[0m");
+                armrx::TuiSnapshot snap;
+                snap.pool_name = pool_mgr->current_pool_name();
+                snap.mode = armrx::mode_name(effective_mode);
+                snap.status = online ? armrx::TuiSnapshot::Status::mining
+                    : (retries > 0 ? armrx::TuiSnapshot::Status::reconnecting
+                                   : armrx::TuiSnapshot::Status::disconnected);
+                snap.uptime_sec = elapsed_sec;
+                snap.reconnect_attempts = retries;
+                snap.total_hash_rate = speed;
+                snap.total_hashes = total;
+                snap.shares_submitted = shares;
+                snap.jit_compile_pct = compile_pct;
+                snap.jit_execute_pct = execute_pct;
+                // Collect per-worker rates
                 std::vector<double> worker_rates;
-                for (unsigned w = 0; w < workers; ++w) {
+                for (unsigned w = 0; w < workers; ++w)
                     worker_rates.push_back(engine.worker_hash_rate(w));
-                }
-                tui->render(pool_mgr->current_pool_name(), status,
-                            elapsed_sec, speed, total, shares,
-                            worker_rates, workers, armrx::mode_name(effective_mode),
-                            compile_pct, execute_pct);
+                snap.worker_rates = worker_rates;
+                tui->render(snap);
             } else {
                 std::cout << "[Pool] " << pool_mgr->current_pool_name()
                           << " Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"

@@ -20,27 +20,43 @@ Tui::~Tui() { shutdown(); }
 void Tui::shutdown() {
     if (!enabled_) return;
     enabled_ = false;
-    for (int i = 0; i < prev_lines_; ++i) std::cout << "\033[A\033[2K";
+    clear_lines(prev_lines_, std::cout);
     std::cout << "\033[?25h" << std::flush;
     prev_lines_ = 0;
 }
 
-void Tui::render(const std::string& pool_name, const std::string& status,
-                 unsigned uptime_sec, double total_hash_rate,
-                 std::uint64_t total_hashes, std::uint64_t shares,
-                 const std::vector<double>& worker_rates,
-                 unsigned workers, const std::string& mode,
-                 double jit_compile_pct, double jit_execute_pct) {
+void Tui::clear_lines(int n, std::ostream& os) {
+    if (n <= 0) return;
+    for (int i = 0; i < n; ++i)
+        os << "\033[A\033[2K";
+}
+
+void Tui::render(const TuiSnapshot& s, std::ostream& os) {
     if (!enabled_) return;
 
     char tmp[128];
-    unsigned h = uptime_sec / 3600, m = (uptime_sec % 3600) / 60, s = uptime_sec % 60;
-    std::snprintf(tmp, sizeof(tmp), "%02u:%02u:%02u", h, m, s);
+    unsigned h = s.uptime_sec / 3600, m = (s.uptime_sec % 3600) / 60, sec = s.uptime_sec % 60;
+    std::snprintf(tmp, sizeof(tmp), "%02u:%02u:%02u", h, m, sec);
     std::string uptime_str(tmp);
+
+    // Status word with color
+    const char* status_color = "";
+    const char* status_reset = "";
+    const char* status_word = "";
+    switch (s.status) {
+        case TuiSnapshot::Status::mining:
+            status_color = "\033[32m"; status_word = "MINING"; break;
+        case TuiSnapshot::Status::connecting:
+            status_color = "\033[33m"; status_word = "CONNECTING"; break;
+        case TuiSnapshot::Status::reconnecting:
+            status_color = "\033[33m"; status_word = "RECONNECTING"; break;
+        case TuiSnapshot::Status::disconnected:
+            status_color = "\033[31m"; status_word = "DISCONNECTED"; break;
+    }
 
     // Find max rate for bar scaling
     double max_rate = 0.1;
-    for (auto r : worker_rates)
+    for (auto r : s.worker_rates)
         if (r > max_rate) max_rate = r;
 
     // Build frame
@@ -48,13 +64,17 @@ void Tui::render(const std::string& pool_name, const std::string& status,
     const int bar_w = 20;
 
     // Header
-    frame << "armrx  " << pool_name << "  [" << mode << "]  "
-          << "Up: " << uptime_str << "  " << status << "\n";
+    frame << "armrx  " << s.pool_name << "  [" << s.mode << "]  "
+          << "Up: " << uptime_str << "  "
+          << status_color << status_word << status_reset;
+    if (s.reconnect_attempts > 0)
+        frame << " (attempt " << s.reconnect_attempts << ")";
+    frame << "\n";
 
     // Per-worker bars (max 8)
-    unsigned n = std::min(static_cast<unsigned>(worker_rates.size()), 8u);
+    unsigned n = std::min(static_cast<unsigned>(s.worker_rates.size()), 8u);
     for (unsigned i = 0; i < n; ++i) {
-        double rate = worker_rates[i];
+        double rate = s.worker_rates[i];
         int filled = static_cast<int>((rate / max_rate) * bar_w);
         if (filled < 0) filled = 0;
         if (filled > bar_w) filled = bar_w;
@@ -63,27 +83,28 @@ void Tui::render(const std::string& pool_name, const std::string& status,
             frame << (b < filled ? '#' : '-');
         frame << " " << rate << " H/s\n";
     }
-    for (unsigned i = n; i < workers && i < 8; ++i)
+    for (unsigned i = n; i < 8; ++i)
         frame << "  W" << i << " -------------------- 0.00 H/s\n";
 
-    // Summary
-    frame << "  Total: " << total_hash_rate << " H/s"
-          << "  Shares: " << shares
-          << "  Hashes: " << total_hashes << "\n";
+    // Summary line
+    frame << "  Total: " << s.total_hash_rate << " H/s"
+          << "  Shares: " << s.shares_submitted
+          << " (acc: " << s.shares_accepted
+          << " rej: " << s.shares_rejected << ")"
+          << "  Hashes: " << s.total_hashes << "\n";
 
-    int new_lines = 1 + std::min(workers, 8u) + 1;
+    int new_lines = 1 + 8 + 1; // header + 8 worker bars + summary
 
-    if (jit_compile_pct >= 0.0 && jit_execute_pct >= 0.0) {
-        frame << "  JIT Profile: Compile " << std::fixed << std::setprecision(1) << jit_compile_pct << "%"
-              << " | Execute " << std::fixed << std::setprecision(1) << jit_execute_pct << "%\n";
+    if (s.jit_compile_pct >= 0.0 && s.jit_execute_pct >= 0.0) {
+        frame << "  JIT Profile: Compile " << std::fixed << std::setprecision(1) << s.jit_compile_pct << "%"
+              << " | Execute " << std::fixed << std::setprecision(1) << s.jit_execute_pct << "%\n";
         new_lines += 1;
     }
 
     // Move cursor up, clear, print new frame
-    for (int i = 0; i < prev_lines_; ++i)
-        std::cout << "\033[A";
-    std::cout << "\033[J";  // clear from cursor to bottom
-    std::cout << frame.str() << std::flush;
+    clear_lines(prev_lines_, os);
+    os << "\033[J";  // clear from cursor to bottom
+    os << frame.str() << std::flush;
 
     prev_lines_ = new_lines;
 }
