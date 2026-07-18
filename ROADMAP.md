@@ -1,12 +1,12 @@
-# armrx — Master Roadmap (Consolidated Final Plan)
+# armrx — Status Tracker
 
-> **Current phase: Phase 2/3 — structured logger deployed, memory tier upgrades complete.**
-> Phase 1 stabilization is complete. Peephole JIT tooling (--jit-dump, bench_opcodes,
-> determinism/encoding tests) is delivered. Structured logger (log.hpp) replaces all
-> raw std::cerr/cout across cross-thread log sites. Memory tier upgrades
-> (MAP_HUGETLB + MADV_POPULATE_WRITE) deployed. Next: per-hash hot-path reductions,
-> Prometheus endpoint, or PGO unblock.
-> See [changelogs.md](changelogs.md) for the chronological record.
+> **Status tracker for completed and remaining work.**
+> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
+> For the chronological record, see [`changelogs.md`](changelogs.md).
+
+> **Current status:** Post-parity on 8× Cortex-A53 (~28.9 H/s). Focus is on
+> Newton-Raphson FDIV/FSQRT unblocking, worker phase staggering, and TUI redesign.
+> See [`PLAN.md`](PLAN.md) for the ranked priority list.
 
 ## Baseline
 
