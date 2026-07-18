@@ -1,6 +1,19 @@
 # Changelog
 
-## 2026-07-17 (Phase 1 completion — stabilization & security hardening)
+## 2026-07-17 (Peephole JIT tooling + memory tier upgrades)
+
+### JIT introspection tooling
+- **`--jit-dump` flag** (`src/main.cpp`, `jit_compiler_a64.hpp/cpp`, `vm.hpp`): New CLI flag that compiles one RandomX program and dumps the emitted JIT code as hex with opcode boundary markers. Each instruction's (opcode, byte offset, emitted size) is recorded by instrumenting the dispatch loops in `generateProgram`/`generateProgramLight`. Opcode names are derived from frequency weights matching the `engine[256]` dispatch table.
+- **`bench_opcodes` frequency analyzer** (`tests/bench_opcodes.cpp`): Runs N random seeds, collects per-opcode frequency and byte-cost histograms via the JIT dump API. First 20-seed run confirmed distribution matches expected weights. Key findings: FDIV_M (35.2 avg bytes, 1.5%), FADD_M/FSUB_M (~31 avg bytes, ~2% each), all high-frequency opcodes already at minimum 4 bytes on AArch64.
+- **Per-opcode audit** completed: Most handlers are already optimal. The 33% instruction gap vs XMRig is distributed codegen (armrx CPI 1.22 vs XMRig 1.56 despite 33% more instructions). No single optimization target found.
+- **CBRANCH encoding unit test** (`tests/test_jit_encodings.cpp`): Verifies all CBRANCH entries have valid emitted sizes across 5 random seeds.
+- **JIT determinism test** (`tests/test_jit_determinism.cpp`): Same seed compiled twice produces byte-identical JIT dump and identical hash.
+
+### Memory tier upgrades
+- **Dataset (2 GiB)** (`include/armrx/mining_engine.hpp`): `MappedMemory` now calls `allocLargePagesMemory` (MAP_HUGETLB | MAP_POPULATE) first, falls back to plain mmap + MADV_HUGEPAGE. Eliminates THP dependency for the largest allocation.
+- **Cache (256 MiB)** (`src/argon2.cpp`): Argon2dCache uses same try-allocLargePagesMemory-first pattern with fallback.
+- **VM scratchpad (2 MiB per VM)** (`src/vm.cpp`): Same hugely-page pattern (exactly one 2 MiB huge page). Adds `MADV_POPULATE_WRITE` warmup (Linux 5.14+) to prefault pages and avoid cold-start TLB misses, with `memset` fallback for older kernels.
+- **Virtual memory include** (`src/vm.cpp`, `src/argon2.cpp`): Added `#include "armrx/virtual_memory.h"` to access the `allocLargePagesMemory` function that was previously unused by all callers.
 
 ### Security
 - **`read_buf_` cap at 1 MiB** (`src/stratum_client.cpp:391`): Prevents OOM from a malicious pool streaming data without newline terminators. Connection is dropped on overflow.

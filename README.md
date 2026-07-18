@@ -166,6 +166,12 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **Concurrency atomics** (`reconnect_attempts_`, `handshake_req_id_`, etc.) | ✅ |
 | **Rounding mode per-instance** | ✅ |
 | **TSAN CMake option** | ✅ |
+| **`--jit-dump` flag** | ✅ |
+| **`bench_opcodes` frequency analyzer** | ✅ |
+| **JIT determinism test** | ✅ |
+| **CBRANCH encoding unit test** | ✅ |
+| **MAP_HUGETLB for dataset + cache** | ✅ |
+| **MADV_POPULATE_WRITE scratchpad warmup** | ✅ |
 | **Peephole JIT plan** | 📄 [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
 | **CBRANCH postmortem** | 📄 [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
 

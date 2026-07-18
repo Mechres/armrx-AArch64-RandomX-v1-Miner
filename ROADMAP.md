@@ -1,8 +1,12 @@
 # armrx — Master Roadmap (Consolidated Final Plan)
 
-> **Current phase: Phase 1 stabilization complete — moving to Phase 2 (peephole JIT).**
-> All Phase 1 security, concurrency, parser, and debt items have been closed.
-> Phase 2 begins with the peephole JIT program per [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md).
+> **Current phase: Phase 2/3 overlap — JIT tooling + memory tier upgrades complete.**
+> Phase 1 stabilization is complete. Peephole JIT tooling (--jit-dump, bench_opcodes,
+> determinism/encoding tests) is delivered. The per-opcode audit confirmed most handlers
+> are already at minimum AArch64 instructions — the 33% gap requires XMRig disassembly
+> comparison. Memory tier upgrades (MAP_HUGETLB + MADV_POPULATE_WRITE) deployed across
+> dataset, cache, and scratchpad. Next: structured logger, per-hash hot-path reductions,
+> or PGO unblock.
 > See [changelogs.md](changelogs.md) for the chronological record.
 
 ## Baseline
@@ -85,6 +89,14 @@
 | — | `reg_.a` init gated behind `if (!jit_)` | ✅ |
 | — | `[DEBUG]` log line removed from `main.cpp` | ✅ |
 | — | `main.cpp` SIGTERM handler | ✅ |
+| — | `--jit-dump` flag with opcode boundary markers | ✅ |
+| — | `bench_opcodes` frequency/byte-cost analyzer | ✅ |
+| — | JIT determinism test (`test_jit_determinism`) | ✅ |
+| — | CBRANCH encoding unit test (`test_jit_encodings`) | ✅ |
+| — | Per-opcode audit (all 30 handlers reviewed) | ✅ |
+| — | MAP_HUGETLB for dataset (MappedMemory) | ✅ |
+| — | MAP_HUGETLB for cache (Argon2dCache) | ✅ |
+| — | MAP_HUGETLB + MADV_POPULATE_WRITE for scratchpad | ✅ |
 
 ### Docs
 | Doc | Description |
