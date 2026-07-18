@@ -1,6 +1,9 @@
 # Changelog
 
-## 2026-07-18 (Structured logger + hot-path reductions + memory tier upgrades)
+## 2026-07-18 (Structured logger + hot-path reductions + memory tier upgrades + new optimization plan)
+
+### Documentation
+- **Created `docs/beyond-parity.md`**: Outlined the roadmap to go beyond XMRig performance parity on AArch64. Key pillars include worker thread phase staggering, Newton-Raphson division/sqrt JIT debugging/simplification, Superscalar JIT instruction scheduling, and test suite expansion.
 
 ### Structured logger
 - **`include/armrx/log.hpp`**: New header-only leveled logging module (`trace`/`debug`/`info`/`warn`/`error`) with mutex-guarded sink, TUI-mode ring buffer, and zero-overhead gating macros (`ARMRX_LOG_INFO`, `ARMRX_LOG_WARN`, etc.). Writes to stdout for info/debug, stderr for warn/error. In TUI mode, suppresses console output and routes messages to a 256-entry ring buffer the TUI can read.

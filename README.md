@@ -175,8 +175,9 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **Structured logger (`armrx::log`)** | ✅ |
 | **Per-hash template copy eliminated** | ✅ |
 | **Superscalar heap churn eliminated** | ✅ |
-| **Peephole JIT plan** | 📄 [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
-| **CBRANCH postmortem** | 📄 [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
+| **Peephole JIT plan** | 📄 [docs/peephole-jit-plan.md](docs/peephole-jit-plan.md) |
+| **Beyond-parity plan** | 📄 [docs/new_plan.md](docs/beyond-parity.md) |
+| **CBRANCH postmortem** | 📄 [docs/branchless-cbranch.md](docs/branchless-cbranch.md) |
 
 ### Performance
 
