@@ -1,12 +1,11 @@
 # armrx — Master Roadmap (Consolidated Final Plan)
 
-> **Current phase: Phase 2/3 overlap — JIT tooling + memory tier upgrades complete.**
+> **Current phase: Phase 2/3 — structured logger deployed, memory tier upgrades complete.**
 > Phase 1 stabilization is complete. Peephole JIT tooling (--jit-dump, bench_opcodes,
-> determinism/encoding tests) is delivered. The per-opcode audit confirmed most handlers
-> are already at minimum AArch64 instructions — the 33% gap requires XMRig disassembly
-> comparison. Memory tier upgrades (MAP_HUGETLB + MADV_POPULATE_WRITE) deployed across
-> dataset, cache, and scratchpad. Next: structured logger, per-hash hot-path reductions,
-> or PGO unblock.
+> determinism/encoding tests) is delivered. Structured logger (log.hpp) replaces all
+> raw std::cerr/cout across cross-thread log sites. Memory tier upgrades
+> (MAP_HUGETLB + MADV_POPULATE_WRITE) deployed. Next: per-hash hot-path reductions,
+> Prometheus endpoint, or PGO unblock.
 > See [changelogs.md](changelogs.md) for the chronological record.
 
 ## Baseline
@@ -97,6 +96,8 @@
 | — | MAP_HUGETLB for dataset (MappedMemory) | ✅ |
 | — | MAP_HUGETLB for cache (Argon2dCache) | ✅ |
 | — | MAP_HUGETLB + MADV_POPULATE_WRITE for scratchpad | ✅ |
+| — | Structured logger (`include/armrx/log.hpp`) | ✅ |
+| — | Cross-thread log sites migrated to logger | ✅ |
 
 ### Docs
 | Doc | Description |

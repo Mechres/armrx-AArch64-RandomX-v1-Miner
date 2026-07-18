@@ -1,6 +1,12 @@
 # Changelog
 
-## 2026-07-17 (Peephole JIT tooling + memory tier upgrades)
+## 2026-07-18 (Structured logger + memory tier upgrades)
+
+### Structured logger
+- **`include/armrx/log.hpp`**: New header-only leveled logging module (`trace`/`debug`/`info`/`warn`/`error`) with mutex-guarded sink, TUI-mode ring buffer, and zero-overhead gating macros (`ARMRX_LOG_INFO`, `ARMRX_LOG_WARN`, etc.). Writes to stdout for info/debug, stderr for warn/error. In TUI mode, suppresses console output and routes messages to a 256-entry ring buffer the TUI can read.
+- **Replaced all raw `std::cerr`/`std::cout` in cross-thread log sites** (`src/stratum_client.cpp`, `src/pool_manager.cpp`, `src/tls_client.cpp`, `src/mining_engine.cpp`): These were racing with the main-thread TUI writes, causing layout corruption under `--tui`. Protocol dump messages (`>>`/`<<`) demoted to DEBUG level.
+
+### Memory tier upgrades
 
 ### JIT introspection tooling
 - **`--jit-dump` flag** (`src/main.cpp`, `jit_compiler_a64.hpp/cpp`, `vm.hpp`): New CLI flag that compiles one RandomX program and dumps the emitted JIT code as hex with opcode boundary markers. Each instruction's (opcode, byte offset, emitted size) is recorded by instrumenting the dispatch loops in `generateProgram`/`generateProgramLight`. Opcode names are derived from frequency weights matching the `engine[256]` dispatch table.
