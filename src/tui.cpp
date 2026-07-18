@@ -3,25 +3,52 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <vector>
 #include <iomanip>
+#include <unistd.h>
+#include <sys/ioctl.h>
 
 namespace armrx {
 
-Tui::Tui() {
-    std::cout << "\033[?25l"; // hide cursor
+bool Tui::detect_color() {
+    // NO_COLOR standard: if env var is set (even to empty), disable color
+    const char* nocolor = std::getenv("NO_COLOR");
+    if (nocolor && nocolor[0] != '\0') return false;
+    // Also check TERM=dumb
+    const char* term = std::getenv("TERM");
+    if (term && (std::string(term) == "dumb" || term[0] == '\0')) return false;
+    // Default: color on if stdout is a tty
+    return isatty(STDOUT_FILENO) != 0;
+}
+
+unsigned Tui::term_width() {
+    struct winsize ws{};
+    if (::ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        return ws.ws_col;
+    return 80;
+}
+
+Tui::Tui(bool use_color)
+    : use_color_(use_color)
+{
+    if (use_color_) std::cout << "\033[?25l"; // hide cursor
     enabled_ = true;
 }
 
 Tui::~Tui() { shutdown(); }
 
+void Tui::ansi(const char* code, std::ostream& os) const {
+    if (use_color_) os << code;
+}
+
 void Tui::shutdown() {
     if (!enabled_) return;
     enabled_ = false;
     clear_lines(prev_lines_, std::cout);
-    std::cout << "\033[?25h" << std::flush;
+    if (use_color_) std::cout << "\033[?25h" << std::flush;
     prev_lines_ = 0;
 }
 
@@ -34,6 +61,18 @@ void Tui::clear_lines(int n, std::ostream& os) {
 void Tui::render(const TuiSnapshot& s, std::ostream& os) {
     if (!enabled_) return;
 
+    // Terminal-width aware: truncate pool_name, scale bar width
+    unsigned tw = term_width();
+    const int bar_w = std::min(20, static_cast<int>(tw) / 3);
+
+    // Build pool_name display (truncate with ellipsis if needed)
+    std::string pool_display(s.pool_name);
+    unsigned max_pool_len = tw > 50 ? tw - 40 : 10;
+    if (pool_display.size() > max_pool_len && max_pool_len > 3) {
+        pool_display.resize(max_pool_len - 1);
+        pool_display += "\xe2\x80\xa6"; // UTF-8 ellipsis
+    }
+
     char tmp[128];
     unsigned h = s.uptime_sec / 3600, m = (s.uptime_sec % 3600) / 60, sec = s.uptime_sec % 60;
     std::snprintf(tmp, sizeof(tmp), "%02u:%02u:%02u", h, m, sec);
@@ -41,7 +80,6 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
 
     // Status word with color
     const char* status_color = "";
-    const char* status_reset = "";
     const char* status_word = "";
     switch (s.status) {
         case TuiSnapshot::Status::mining:
@@ -61,12 +99,13 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
 
     // Build frame
     std::stringstream frame;
-    const int bar_w = 20;
 
     // Header
-    frame << "armrx  " << s.pool_name << "  [" << s.mode << "]  "
-          << "Up: " << uptime_str << "  "
-          << status_color << status_word << status_reset;
+    frame << "armrx  " << pool_display << "  [" << s.mode << "]  "
+          << "Up: " << uptime_str << "  ";
+    ansi(status_color, frame);
+    frame << status_word;
+    ansi("\033[0m", frame);
     if (s.reconnect_attempts > 0)
         frame << " (attempt " << s.reconnect_attempts << ")";
     frame << "\n";
@@ -84,7 +123,8 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
         frame << " " << rate << " H/s\n";
     }
     for (unsigned i = n; i < 8; ++i)
-        frame << "  W" << i << " -------------------- 0.00 H/s\n";
+        frame << "  W" << i << " " << std::string(static_cast<std::size_t>(bar_w), '-')
+              << " 0.00 H/s\n";
 
     // Summary line
     frame << "  Total: " << s.total_hash_rate << " H/s"

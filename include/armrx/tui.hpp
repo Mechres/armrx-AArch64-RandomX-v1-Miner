@@ -6,8 +6,6 @@
 #include <iostream>
 #include <ostream>
 #include <span>
-#include <ostream>
-#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -51,7 +49,12 @@ struct TuiSnapshot {
  */
 class Tui {
 public:
-    Tui();
+    /**
+     * @param use_color  true to emit ANSI color codes, false for plain text.
+     *                   If omitted, checks NO_COLOR env var and isatty().
+     */
+    explicit Tui(bool use_color = detect_color());
+
     ~Tui();
 
     /** Render one frame. Call at ~1 Hz. Output goes to the given stream. */
@@ -60,9 +63,23 @@ public:
     /** Hide cursor and clear on exit. */
     void shutdown();
 
+    /** Override color policy after construction. */
+    void set_color(bool c) { use_color_ = c; }
+
+    /** Detect whether color should be used by default (checks NO_COLOR, TERM, isatty). */
+    static bool detect_color();
+
 private:
     bool enabled_ = false;
+    bool use_color_ = true;
     int prev_lines_ = 0;
+
+    /** Query terminal width via ioctl, default 80. */
+    static unsigned term_width();
+
+    /** Emit ANSI color code if use_color_ is true. */
+    void ansi(const char* code, std::ostream& os) const;
+
     void clear_lines(int n, std::ostream& os);
 };
 

@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
     bool pool_tls = false;
     bool pool_tls_verify = true;
     bool use_tui = false;
+    int tui_color = -1;  // -1 = auto-detect, 0 = no-color, 1 = color
     bool use_mlock = false;
     bool use_rt_priority = false;
     unsigned stagger_ms = 0;
@@ -266,6 +267,14 @@ int main(int argc, char** argv) {
             use_rt_priority = true;
             continue;
         }
+        if (argument == "--no-color") {
+            tui_color = false;
+            continue;
+        }
+        if (argument == "--color") {
+            tui_color = true;
+            continue;
+        }
         if (argument.rfind("--stagger-ms=", 0) == 0) {
             try {
                 stagger_ms = static_cast<unsigned>(std::stoul(std::string{argument.substr(13)}));
@@ -297,6 +306,8 @@ int main(int argc, char** argv) {
                 << "  --no-verify-tls          Skip TLS certificate verification (default: verify)\n"
                 << "  --config=<path>           Config file path (default: ~/.config/armrx/config.json)\n"
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
+                << "  --no-color                Disable ANSI color in TUI output\n"
+                << "  --color                   Force ANSI color even when piped\n"
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
                 << "  --stagger-ms=<ms>         Startup stagger per worker (ms) to reduce memory contention\n"
@@ -516,7 +527,10 @@ int main(int argc, char** argv) {
 
         // Optional TUI dashboard
         std::unique_ptr<armrx::Tui> tui;
-        if (use_tui) tui = std::make_unique<armrx::Tui>();
+        if (use_tui) {
+            bool color = (tui_color >= 0) ? static_cast<bool>(tui_color) : armrx::Tui::detect_color();
+            tui = std::make_unique<armrx::Tui>(color);
+        }
 
         if (!use_tui) {
             std::cout << "Pool mining started. Press Ctrl+C to stop.\n";
