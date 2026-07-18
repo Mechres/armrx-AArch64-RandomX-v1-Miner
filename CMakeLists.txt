@@ -163,6 +163,15 @@ if(ARMRX_BUILD_TESTS)
     add_executable(bench_opcodes tests/bench_opcodes.cpp)
     target_link_libraries(bench_opcodes PRIVATE armrx_core)
     add_test(NAME bench_opcodes COMMAND bench_opcodes)
+
+    # JIT encoding and determinism tests
+    add_executable(test_jit_encodings tests/test_jit_encodings.cpp)
+    target_link_libraries(test_jit_encodings PRIVATE armrx_core)
+    add_test(NAME test_jit_encodings COMMAND test_jit_encodings)
+
+    add_executable(test_jit_determinism tests/test_jit_determinism.cpp)
+    target_link_libraries(test_jit_determinism PRIVATE armrx_core)
+    add_test(NAME test_jit_determinism COMMAND test_jit_determinism)
 endif()
 
 # Enable Interprocedural Optimization (LTO) if supported
@@ -177,6 +186,8 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
         set_property(TARGET test_mining PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET bench_armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET bench_opcodes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET test_jit_determinism PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 elseif(NOT ipo_supported)
     message(STATUS "LTO/IPO is not supported: ${ipo_error}")
