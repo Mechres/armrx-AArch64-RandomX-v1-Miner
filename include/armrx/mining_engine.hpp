@@ -87,6 +87,7 @@ public:
     void stop();
 
     void set_rt_priority(bool enable) { rt_priority_ = enable; }
+    void set_stagger_ms(unsigned ms) { stagger_ms_ = ms; }
 
     void set_job(const Job& job);
 
@@ -131,6 +132,7 @@ private:
     std::atomic<std::uint64_t> job_generation_{0};
     bool has_job_{false};
     bool rt_priority_ = false;
+    unsigned stagger_ms_ = 0;
 
     // Shared Cache and Dataset
     std::shared_ptr<Argon2dCache> shared_cache_;

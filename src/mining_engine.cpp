@@ -239,6 +239,13 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         }
     }
 
+    // Optional startup stagger: delay each worker thread by thread_id * stagger_ms
+    // to desynchronize memory-intensive phases across cores.
+    if (stagger_ms_ > 0 && thread_id > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            static_cast<uint64_t>(thread_id) * stagger_ms_));
+    }
+
     // On AArch64 with crypto extensions, hardware AES is always available
     std::uint32_t flags = kRandOMXFlagHardAes;
     if (mode_ == RandomXMode::fast) flags |= kRandOMXFlagFullMem;

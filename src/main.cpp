@@ -88,6 +88,7 @@ int main(int argc, char** argv) {
     bool use_tui = false;
     bool use_mlock = false;
     bool use_rt_priority = false;
+    unsigned stagger_ms = 0;
     unsigned int current_pool_idx = 0;
 
     // Load config from file (CLI overrides below)
@@ -265,6 +266,15 @@ int main(int argc, char** argv) {
             use_rt_priority = true;
             continue;
         }
+        if (argument.rfind("--stagger-ms=", 0) == 0) {
+            try {
+                stagger_ms = static_cast<unsigned>(std::stoul(std::string{argument.substr(13)}));
+            } catch (...) {
+                std::cerr << "Invalid --stagger-ms value: " << argument.substr(13) << '\n';
+                return 64;
+            }
+            continue;
+        }
 
         if (argument == "--help" || argument == "-h") {
             std::cout
@@ -289,6 +299,7 @@ int main(int argc, char** argv) {
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
+                << "  --stagger-ms=<ms>         Startup stagger per worker (ms) to reduce memory contention\n"
                 << "  --log-level=<level>       Log verbosity: trace, debug, info, warn, error (default: info)\n"
                 << "\n"
                 << "  --help, -h               Display this help menu\n"
@@ -400,6 +411,7 @@ int main(int argc, char** argv) {
 
         armrx::MiningEngine engine(effective_mode, workers);
         engine.set_rt_priority(use_rt_priority);
+        engine.set_stagger_ms(stagger_ms);
         engine.set_job(job);
 
         std::atomic<std::uint64_t> shares_found{0};
@@ -474,6 +486,7 @@ int main(int argc, char** argv) {
 
         armrx::MiningEngine engine(effective_mode, workers);
         engine.set_rt_priority(use_rt_priority);
+        engine.set_stagger_ms(stagger_ms);
 
         std::atomic<std::uint64_t> shares_submitted{0};
         std::atomic<std::uint64_t> total_hashes_snapshot{0};
