@@ -45,6 +45,7 @@ Native `fdiv` (~23 cycles) and `fsqrt` (~29 cycles) instructions are expensive o
         1. **Static template conflict:** The static prologue in `jit_compiler_a64_static.S` uses x29 as a literal base pointer; the NR sequence writes to the code buffer at positions that may overlap the static template's x29 literal load.
         2. **Literal-pool load displacement:** The `LDR_LITERAL` instruction emitted for IMUL_RCP (when `literal_id >= 12`) computes a PC-relative offset. If the NR path shifts code positions, this offset could become misaligned.
         3. **ADR/ADRP misalignment:** Similar to the CBRANCH `imm19=1` vs `imm19=2` bug — an off-by-one in a branch or literal displacement caused by the NR path's larger instruction footprint.
+    *   **Diagnostic status (2026-07-18):** The crash was confirmed reproducible on Cortex-A53 with GCC 15.2/musl. With `ARMRX_ENABLE_JIT_FAST_DIV_SQRT=ON`, the test suite crashes with a segfault and produces wrong dataset items (even in code paths that don't use FDIV/FSQRT). GDB shows x29/x30 corrupted with garbage values and FPU exception flags set (IOC/DZC/UFC/IXC). **Root cause unclear** — the `ARMRX_JIT_FAST_DIV_SQRT` compile definition propagates as PUBLIC and causes incorrect behavior in unrelated C++ code (SuperscalarHash execution), suggesting either a cmake/build system issue, a GCC 15 + LTO interaction, or a compiler optimization bug. Deferred until the build toolchain interaction is understood.
 2.  **Newton-Raphson Simplification (realistic target):**
     *   RandomX does not require IEEE-754 correctly-rounded results, but NR precision *does* matter: floating-point errors accumulate across 2048 program iterations, and the final hash must match pool expectations.
     *   Dropping to 0 iterations (raw `frecpe` only) gives ~2.5 bits of precision — insufficient.
@@ -83,7 +84,7 @@ Based on the measured 30% scaling drop and current codebase state, the levers ra
 
 | # | Lever | Realistic gain | Risk | Why |
 |---|---|---|---|---|
-| **1** | **Newton-Raphson FDIV/FSQRT postmortem + simplification** | **+5–8%** | Medium | A53 `fdiv` is ~23 cycles; 1-iteration NR is ~12 cycles. Already written (gated behind `ARMRX_ENABLE_JIT_FAST_DIV_SQRT`). Debug the x29 crash first. |
+| **1** | **Newton-Raphson FDIV/FSQRT postmortem + simplification** | **+5–8%** | **High (blocked)** | A53 `fdiv` is ~23 cycles; 1-iteration NR is ~12 cycles. Code exists behind `ARMRX_ENABLE_JIT_FAST_DIV_SQRT` but the flag causes wrong dataset items in unrelated C++ code — possibly a GCC 15 + LTO bug. Deferred. See diagnostic note in §B.1. |
 | **2** | **Worker phase staggering (bandwidth contention)** | **+10–15% pool-side** | Low | Closing the 3.6→5.16 H/s/thread gap. Re-measure with MAP_HUGETLB first. Intra-loop staggering > startup staggering. |
 | **3** | **Peephole JIT coalescing (existing `peephole-jit-plan.md`)** | **+5–10%** | Medium | Phase 1 tooling already delivered (--jit-dump, bench_opcodes). Requires disassembly comparison with XMRig. |
 | **4** | **SuperscalarHash JIT output scheduling** | **+3–5%** | Medium | Requires AArch64-level hazard analysis, not Superscalar DAG changes. Measure NEON saturation first. |

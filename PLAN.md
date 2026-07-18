@@ -38,7 +38,7 @@ See [`ROADMAP.md`](ROADMAP.md) for the detailed completed/remaining checklist.
 
 | # | Priority | Est. gain | Phase | Detail doc |
 |---|----------|-----------|-------|------------|
-| **1** | **Newton-Raphson FDIV/FSQRT postmortem** — debug x29 crash on existing NR code, then simplify to 1 iteration + lightweight Markstein | **+5–8%** | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
+| **1** | **Newton-Raphson FDIV/FSQRT postmortem** — debug x29 crash on existing NR code, then simplify | **+5–8% (BLOCKED)** | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
 | **2** | **Worker phase staggering** — re-measure scaling with MAP_HUGETLB, implement intra-loop staggering to desync memory-bandwidth phases | **+10–15% pool-side** | Beyond-parity A | [`beyond-parity.md`](docs/beyond-parity.md#pillar-a-worker-phase-staggering-bandwidth-mitigation) |
 | **3** | **Peephole JIT coalescing** — disassembly comparison with XMRig on identical seed programs, diff per-opcode emitted sequences | **+5–10%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
 | **4** | **TUI redesign** — `TuiSnapshot` struct, terminal-width awareness, NO_COLOR, share accept/reject, signal-safe teardown | UX | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
