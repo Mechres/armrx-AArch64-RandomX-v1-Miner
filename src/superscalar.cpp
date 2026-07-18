@@ -257,18 +257,18 @@ const SuperscalarInstructionInfo* slot_8[] = { &SuperscalarInstructionInfo::IXOR
 const SuperscalarInstructionInfo* slot_9[] = { &SuperscalarInstructionInfo::IXOR_C9, &SuperscalarInstructionInfo::IADD_C9 };
 const SuperscalarInstructionInfo* slot_10   = &SuperscalarInstructionInfo::IMUL_RCP;
 
-static bool selectRegister(std::vector<int>& availableRegisters, Blake2Generator& gen, int& reg) {
-    if (availableRegisters.empty())
+static bool selectRegister(int* availableRegisters, int numAvailable, Blake2Generator& gen, int& reg) {
+    if (numAvailable == 0)
         return false;
 
     int index;
-    if (availableRegisters.size() > 1) {
-        index = static_cast<int>(gen.get_uint32() % availableRegisters.size());
+    if (numAvailable > 1) {
+        index = static_cast<int>(gen.get_uint32() % numAvailable);
     }
     else {
         index = 0;
     }
-    reg = availableRegisters[static_cast<std::size_t>(index)];
+    reg = availableRegisters[index];
     return true;
 }
 
@@ -425,31 +425,33 @@ public:
     }
 
     bool selectDestination(int cycle, bool allowChainedMul, RegisterInfo (&registers)[8], Blake2Generator& gen) {
-        std::vector<int> availableRegisters;
+        int availableRegisters[8];
+        int numAvailable = 0;
         for (int i = 0; i < 8; ++i) {
             if (registers[i].latency <= cycle && (canReuse_ || i != src_) &&
                 (allowChainedMul || opGroup_ != SuperscalarInstructionType::IMUL_R || registers[i].lastOpGroup != SuperscalarInstructionType::IMUL_R) &&
                 (registers[i].lastOpGroup != opGroup_ || registers[i].lastOpPar != opGroupPar_) &&
                 (info_->getType() != SuperscalarInstructionType::IADD_RS || i != RegisterNeedsDisplacement)) {
-                availableRegisters.push_back(i);
+                availableRegisters[numAvailable++] = i;
             }
         }
-        return selectRegister(availableRegisters, gen, dst_);
+        return selectRegister(availableRegisters, numAvailable, gen, dst_);
     }
 
     bool selectSource(int cycle, RegisterInfo(&registers)[8], Blake2Generator& gen) {
-        std::vector<int> availableRegisters;
+        int availableRegisters[8];
+        int numAvailable = 0;
         for (int i = 0; i < 8; ++i) {
             if (registers[i].latency <= cycle)
-                availableRegisters.push_back(i);
+                availableRegisters[numAvailable++] = i;
         }
-        if (availableRegisters.size() == 2 && info_->getType() == SuperscalarInstructionType::IADD_RS) {
+        if (numAvailable == 2 && info_->getType() == SuperscalarInstructionType::IADD_RS) {
             if (availableRegisters[0] == RegisterNeedsDisplacement || availableRegisters[1] == RegisterNeedsDisplacement) {
                 opGroupPar_ = src_ = RegisterNeedsDisplacement;
                 return true;
             }
         }
-        if (selectRegister(availableRegisters, gen, src_)) {
+        if (selectRegister(availableRegisters, numAvailable, gen, src_)) {
             if (groupParIsSource_)
                 opGroupPar_ = src_;
             return true;

@@ -273,6 +273,9 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 active_dataset = shared_dataset_;
                 active = true;
 
+                // Copy block template to per-worker buffer (only on job change)
+                block_input = local_job.block_template;
+
                 vm.set_cache(active_cache.get());
                 if (mode_ == RandomXMode::fast && active_dataset) {
                     if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {
@@ -294,7 +297,6 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         local_nonce += num_threads_;
 
         // Copy template to per-worker buffer (only actually reallocates on job change)
-        block_input = local_job.block_template;
         if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
             ARMRX_LOG_ERROR << "Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
                       << " size=" << local_job.nonce_size << " in job, deactivating";
