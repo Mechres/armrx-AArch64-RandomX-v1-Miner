@@ -13,6 +13,12 @@
 
 namespace armrx {
 
+void Tui::atexit_show_cursor() {
+    // Async-signal-safe: write() is safe, no allocations
+    const char seq[] = "\033[?25h";
+    write(STDOUT_FILENO, seq, sizeof(seq) - 1);
+}
+
 bool Tui::detect_color() {
     // NO_COLOR standard: if env var is set (even to empty), disable color
     const char* nocolor = std::getenv("NO_COLOR");
@@ -36,6 +42,7 @@ Tui::Tui(bool use_color)
 {
     if (use_color_) std::cout << "\033[?25l"; // hide cursor
     enabled_ = true;
+    std::atexit(atexit_show_cursor); // belt-and-suspenders: show cursor even if destructor doesn't run
 }
 
 Tui::~Tui() { shutdown(); }
@@ -92,10 +99,12 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
             status_color = "\033[31m"; status_word = "DISCONNECTED"; break;
     }
 
-    // Find max rate for bar scaling
-    double max_rate = 0.1;
+    // Find max rate for bar scaling — use EMA baseline to smooth jitter
+    double frame_max = 0.1;
     for (auto r : s.worker_rates)
-        if (r > max_rate) max_rate = r;
+        if (r > frame_max) frame_max = r;
+    bar_baseline_ema_ += kEmaAlpha * (frame_max - bar_baseline_ema_);
+    double max_rate = bar_baseline_ema_;
 
     // Build frame
     std::stringstream frame;

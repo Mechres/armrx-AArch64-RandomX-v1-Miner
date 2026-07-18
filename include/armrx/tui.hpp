@@ -73,6 +73,11 @@ private:
     bool enabled_ = false;
     bool use_color_ = true;
     int prev_lines_ = 0;
+    double bar_baseline_ema_ = 0.0;
+    static constexpr double kEmaAlpha = 0.2;
+
+    /** atexit callback: always show cursor on exit. */
+    static void atexit_show_cursor();
 
     /** Query terminal width via ioctl, default 80. */
     static unsigned term_width();
