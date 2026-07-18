@@ -98,6 +98,8 @@
 | — | MAP_HUGETLB + MADV_POPULATE_WRITE for scratchpad | ✅ |
 | — | Structured logger (`include/armrx/log.hpp`) | ✅ |
 | — | Cross-thread log sites migrated to logger | ✅ |
+| — | Template copy per-hash eliminated (P2.5) | ✅ |
+| — | Superscalar heap churn eliminated (P2.5) | ✅ |
 
 ### Docs
 | Doc | Description |

@@ -173,6 +173,8 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **MAP_HUGETLB for dataset + cache** | ✅ |
 | **MADV_POPULATE_WRITE scratchpad warmup** | ✅ |
 | **Structured logger (`armrx::log`)** | ✅ |
+| **Per-hash template copy eliminated** | ✅ |
+| **Superscalar heap churn eliminated** | ✅ |
 | **Peephole JIT plan** | 📄 [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
 | **CBRANCH postmortem** | 📄 [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
 

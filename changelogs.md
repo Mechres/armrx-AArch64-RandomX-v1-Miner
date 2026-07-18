@@ -1,10 +1,14 @@
 # Changelog
 
-## 2026-07-18 (Structured logger + memory tier upgrades)
+## 2026-07-18 (Structured logger + hot-path reductions + memory tier upgrades)
 
 ### Structured logger
 - **`include/armrx/log.hpp`**: New header-only leveled logging module (`trace`/`debug`/`info`/`warn`/`error`) with mutex-guarded sink, TUI-mode ring buffer, and zero-overhead gating macros (`ARMRX_LOG_INFO`, `ARMRX_LOG_WARN`, etc.). Writes to stdout for info/debug, stderr for warn/error. In TUI mode, suppresses console output and routes messages to a 256-entry ring buffer the TUI can read.
 - **Replaced all raw `std::cerr`/`std::cout` in cross-thread log sites** (`src/stratum_client.cpp`, `src/pool_manager.cpp`, `src/tls_client.cpp`, `src/mining_engine.cpp`): These were racing with the main-thread TUI writes, causing layout corruption under `--tui`. Protocol dump messages (`>>`/`<<`) demoted to DEBUG level.
+
+### Per-hash hot-path reductions (P2.5)
+- **Template copy eliminated from per-hash path** (`src/mining_engine.cpp`): Moved `block_input = local_job.block_template` (full block copy, ~76 bytes) from the per-hash worker loop into the job-change guard block. Only nonce bytes are patched per hash via `update_nonce_in_template()`.
+- **Superscalar heap churn eliminated** (`src/superscalar.cpp`): Replaced heap-allocating `std::vector<int>` with stack-based `int[8]` + size counter in `selectDestination()` and `selectSource()`. These are called multiple times per SuperscalarHash program generation — eliminates dozens of malloc/free pairs during cache init and dataset item derivation.
 
 ### Memory tier upgrades
 
