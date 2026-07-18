@@ -33,6 +33,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vector>
 #include <stdexcept>
 #include <array>
+#include <iostream>
+#include <iomanip>
+#include <cstring>
 #include "armrx/randomx_config.hpp"
 #include "armrx/program.hpp"
 #include "armrx/superscalar.hpp"
@@ -131,5 +134,20 @@ namespace armrx {
 		void h_NOP(Instruction&, uint32_t&);
 
 		static void emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_t codePos);
+
+		// ── JIT dump infrastructure (--jit-dump) ─────────────────────
+	public:
+		struct JitDumpEntry {
+			uint32_t opcode;
+			uint32_t offset;   // byte offset in code buffer
+			uint32_t size;     // bytes emitted by this instruction's handler
+		};
+
+		void enableJitDump() { jit_dump_enabled_ = true; jit_dump_.clear(); }
+		void dumpJitCode() const;
+		const std::vector<JitDumpEntry>& getJitDump() const { return jit_dump_; }
+	private:
+		bool jit_dump_enabled_ = false;
+		std::vector<JitDumpEntry> jit_dump_;
 	};
 }

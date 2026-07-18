@@ -25,6 +25,8 @@
 namespace {
 
 std::atomic<bool> keep_running{true};
+bool jit_dump_mode = false;
+std::string jit_dump_key = "test key 000";
 void signal_handler(int) {
     keep_running = false;
 }
@@ -232,6 +234,15 @@ int main(int argc, char** argv) {
             use_tui = false;
             continue;
         }
+        if (argument == "--jit-dump") {
+            jit_dump_mode = true;
+            continue;
+        }
+        if (argument.rfind("--jit-dump=", 0) == 0) {
+            jit_dump_mode = true;
+            jit_dump_key = std::string{argument.substr(11)};
+            continue;
+        }
         if (argument == "--mlock") {
             use_mlock = true;
             continue;
@@ -265,7 +276,10 @@ int main(int argc, char** argv) {
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
                 << "\n"
-                << "  -h, --help                 Display this help menu\n";
+                << "  --help, -h               Display this help menu\n"
+                << "\n"
+                << "JIT introspection:\n"
+                << "  --jit-dump[=<seed>]      Compile one program and dump JIT code with opcode boundaries\n";
             return 0;
         }
 
@@ -320,6 +334,40 @@ int main(int argc, char** argv) {
         cache.initialize(key_bytes);
         const auto elapsed = std::chrono::duration<double>{std::chrono::steady_clock::now() - started};
         std::cout << "Cache initialized in " << elapsed.count() << " seconds.\n";
+    }
+
+    // ── JIT dump mode ─────────────────────────────────────────────────────
+    if (jit_dump_mode) {
+        std::vector<std::byte> key_bytes;
+        key_bytes.reserve(jit_dump_key.size());
+        for (const auto c : jit_dump_key) {
+            key_bytes.push_back(static_cast<std::byte>(c));
+        }
+
+        // Light mode VM with JIT enabled
+        const uint32_t vm_flags = armrx::kRandOMXFlagJit | armrx::kRandOMXFlagHardAes;
+        armrx::VirtualMachine vm(vm_flags);
+        vm.setJitDumpEnabled();
+
+        armrx::Argon2dCache cache;
+        cache.initialize(key_bytes);
+        vm.set_cache(&cache);
+
+        // Run one hash with the dump enabled
+        alignas(16) std::array<std::byte, 32> hash{};
+        const char* input = "JIT dump test input";
+        armrx::randomx_calculate_hash(&vm, input, std::strlen(input), hash.data());
+
+        // Dump the JIT code with boundary markers
+        vm.dumpJitCode();
+
+        std::cout << "\nHash: ";
+        for (auto b : hash) {
+            std::cout << std::hex << std::setw(2) << std::setfill('0')
+                      << static_cast<int>(b);
+        }
+        std::cout << std::dec << '\n';
+        return 0;
     }
 
     // ── Local benchmark ──────────────────────────────────────────────────────

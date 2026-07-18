@@ -98,6 +98,20 @@ public:
     void reset_jit_timers() {}
 #endif
 
+#ifdef ARMRX_HAVE_JIT
+    void setJitDumpEnabled() {
+        if (jit_) jit_->enableJitDump();
+    }
+    void dumpJitCode() const {
+        if (jit_) jit_->dumpJitCode();
+    }
+    using JitDumpEntry = JitCompilerA64::JitDumpEntry;
+    const std::vector<JitDumpEntry>& getJitDump() const {
+        static const std::vector<JitDumpEntry> empty;
+        return jit_ ? jit_->getJitDump() : empty;
+    }
+#endif
+
 private:
     void initialize_vm_state();
     void compile_program();

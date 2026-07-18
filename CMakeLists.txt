@@ -158,6 +158,11 @@ if(ARMRX_BUILD_TESTS)
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
     add_test(NAME bench_armrx COMMAND bench_armrx)
+
+    # Opcode frequency benchmark (not part of regular CTest; invoke manually)
+    add_executable(bench_opcodes tests/bench_opcodes.cpp)
+    target_link_libraries(bench_opcodes PRIVATE armrx_core)
+    add_test(NAME bench_opcodes COMMAND bench_opcodes)
 endif()
 
 # Enable Interprocedural Optimization (LTO) if supported
@@ -171,6 +176,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
         set_property(TARGET armrx_tests PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET test_mining PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET bench_armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET bench_opcodes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     endif()
 elseif(NOT ipo_supported)
     message(STATUS "LTO/IPO is not supported: ${ipo_error}")

@@ -30,6 +30,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "armrx/jit_compiler_a64.hpp"
 #include "armrx/assert.hpp"
 #include "configuration.h"
+#include "instruction_weights.hpp"
 
 // Verify the JIT code buffer layout: the .fill directive in static.S reserves
 // RANDOMX_PROGRAM_MAX_SIZE * 16 * 4 bytes (6144 AArch64 instruction slots).
@@ -203,7 +204,11 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 		instr.src %= RegistersCount;
 		instr.dst %= RegistersCount;
 		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode");
+		const uint32_t pos_before = codePos;
 		(this->*engine[instr.opcode])(instr, codePos);
+		if (jit_dump_enabled_) {
+			jit_dump_.push_back({instr.opcode, pos_before, codePos - pos_before});
+		}
 	}
 
 	// Update spMix2
@@ -268,7 +273,11 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		instr.src %= RegistersCount;
 		instr.dst %= RegistersCount;
 		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode in generateProgramLight");
+		const uint32_t pos_before = codePos;
 		(this->*engine[instr.opcode])(instr, codePos);
+		if (jit_dump_enabled_) {
+			jit_dump_.push_back({instr.opcode, pos_before, codePos - pos_before});
+		}
 	}
 
 	// Update spMix2
@@ -322,6 +331,76 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 #ifdef __GNUC__
 	__builtin___clear_cache(reinterpret_cast<char*>(code + MainLoopBegin), reinterpret_cast<char*>(code + codePos));
 #endif
+}
+
+void JitCompilerA64::dumpJitCode() const {
+	// Build opcode-to-name mapping from frequency weights.
+	// engine[256] maps raw opcode bytes to handlers; the weight table
+	// determines which slot range each handler occupies.
+	static constexpr const char* kHandlerNames[] = {
+		"IADD_RS",   "IADD_M",   "ISUB_R",   "ISUB_M",
+		"IMUL_R",    "IMUL_M",   "IMULH_R",  "IMULH_M",
+		"ISMULH_R",  "ISMULH_M", "IMUL_RCP", "INEG_R",
+		"IXOR_R",    "IXOR_M",   "IROR_R",   "IROL_R",
+		"ISWAP_R",   "FSWAP_R",  "FADD_R",   "FADD_M",
+		"FSUB_R",    "FSUB_M",   "FSCAL_R",  "FMUL_R",
+		"FDIV_M",    "FSQRT_R",  "CBRANCH",  "CFROUND",
+		"ISTORE",    "NOP",
+	};
+	static constexpr uint32_t kWeights[] = {
+		WT(IADD_RS),  WT(IADD_M),   WT(ISUB_R),   WT(ISUB_M),
+		WT(IMUL_R),   WT(IMUL_M),   WT(IMULH_R),  WT(IMULH_M),
+		WT(ISMULH_R), WT(ISMULH_M), WT(IMUL_RCP), WT(INEG_R),
+		WT(IXOR_R),   WT(IXOR_M),   WT(IROR_R),   WT(IROL_R),
+		WT(ISWAP_R),  WT(FSWAP_R),  WT(FADD_R),   WT(FADD_M),
+		WT(FSUB_R),   WT(FSUB_M),   WT(FSCAL_R),  WT(FMUL_R),
+		WT(FDIV_M),   WT(FSQRT_R),  WT(CBRANCH),  WT(CFROUND),
+		WT(ISTORE),   WT(NOP),
+	};
+	static constexpr auto kNumHandlers = sizeof(kHandlerNames) / sizeof(kHandlerNames[0]);
+
+	// Precompute: for each raw opcode byte (0..255), which handler name?
+	static const char* sOpcodeName[256] = {};
+	if (!sOpcodeName[0]) {
+		uint32_t slot = 0;
+		for (uint32_t h = 0; h < kNumHandlers; ++h) {
+			for (uint32_t w = 0; w < kWeights[h]; ++w) {
+				if (slot < 256) sOpcodeName[slot++] = kHandlerNames[h];
+			}
+		}
+		// Fill remaining slots (should only be NOP weight 0, so all 256 filled)
+		while (slot < 256) sOpcodeName[slot++] = "NOP";
+	}
+
+	std::cout << "--- JIT code dump ---\n";
+	std::cout << "Total code size: " << jit_dump_.back().offset + jit_dump_.back().size << " bytes\n";
+
+	// Print raw hex, 16 bytes per line
+	const uint32_t total_bytes = jit_dump_.back().offset + jit_dump_.back().size;
+	std::cout << "\n--- Raw bytes ---\n";
+	for (uint32_t i = 0; i < total_bytes; i += 16) {
+		std::cout << std::hex << std::setw(6) << std::setfill('0') << i << ": ";
+		for (uint32_t j = i; j < i + 16 && j < total_bytes; ++j) {
+			std::cout << std::hex << std::setw(2) << std::setfill('0')
+			          << static_cast<int>(code[j]) << ' ';
+		}
+		std::cout << std::dec << '\n';
+	}
+
+	// Print boundary table
+	std::cout << "\n--- Opcode boundary table ---\n";
+	std::cout << "  #  | opcode_id | name        | offset  | size\n";
+	std::cout << "-----|-----------|-------------|---------|------\n";
+	for (size_t i = 0; i < jit_dump_.size(); ++i) {
+		const auto& e = jit_dump_[i];
+		const char* name = sOpcodeName[e.opcode];
+		std::cout << std::dec << std::setw(4) << i << " | "
+		          << std::setw(9) << e.opcode << " | "
+		          << std::setw(11) << name << " | "
+		          << std::hex << std::setw(6) << std::setfill('0') << e.offset << " | "
+		          << std::dec << std::setw(4) << std::setfill(' ') << e.size << '\n';
+	}
+	std::cout << std::flush;
 }
 
 void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& programs, const std::vector<uint64_t>& reciprocalCache)
