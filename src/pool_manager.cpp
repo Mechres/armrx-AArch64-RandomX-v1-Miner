@@ -42,6 +42,16 @@ unsigned PoolManager::reconnect_attempts() const {
     return stratum_ ? stratum_->reconnect_attempts() : 0;
 }
 
+std::uint64_t PoolManager::shares_accepted() const {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
+    return stratum_ ? stratum_->shares_accepted() : 0;
+}
+
+std::uint64_t PoolManager::shares_rejected() const {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
+    return stratum_ ? stratum_->shares_rejected() : 0;
+}
+
 bool PoolManager::is_connected() const {
     // Caller should hold stratum_mutex_ if concurrent failover may occur.
     return stratum_ && stratum_->is_connected();

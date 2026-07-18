@@ -50,6 +50,12 @@ public:
     /// Number of reconnect attempts on the current pool.
     unsigned reconnect_attempts() const;
 
+    /// Number of shares accepted by the pool.
+    std::uint64_t shares_accepted() const;
+
+    /// Number of shares rejected by the pool.
+    std::uint64_t shares_rejected() const;
+
     /// Submit a found share to the current pool.
     void submit_share(const Job& job, std::uint64_t nonce,
                       const std::array<std::byte, 32>& hash);

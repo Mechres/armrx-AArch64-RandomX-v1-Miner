@@ -574,6 +574,8 @@ int main(int argc, char** argv) {
                 snap.total_hash_rate = speed;
                 snap.total_hashes = total;
                 snap.shares_submitted = shares;
+                snap.shares_accepted = pool_mgr->shares_accepted();
+                snap.shares_rejected = pool_mgr->shares_rejected();
                 snap.jit_compile_pct = compile_pct;
                 snap.jit_execute_pct = execute_pct;
                 // Collect per-worker rates

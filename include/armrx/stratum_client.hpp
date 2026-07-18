@@ -86,6 +86,8 @@ public:
      */
     void enable_tls(bool enabled) { tls_enabled_ = enabled; }
     void set_tls_verify_peer(bool v) { tls_verify_peer_ = v; }
+    [[nodiscard]] std::uint64_t shares_accepted() const { return shares_accepted_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t shares_rejected() const { return shares_rejected_.load(std::memory_order_relaxed); }
 
     /**
      * Configure automatic reconnection on disconnect.
@@ -183,6 +185,10 @@ private:
     std::atomic<unsigned> reconnect_attempts_{0};
     std::atomic<bool> reconnect_enabled_{true};
     std::thread reconnect_thread_;
+
+    // Share result counters (written by reader thread, read by main thread)
+    std::atomic<std::uint64_t> shares_accepted_{0};
+    std::atomic<std::uint64_t> shares_rejected_{0};
 
     // TLS
     bool tls_enabled_{false};

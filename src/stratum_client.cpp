@@ -625,8 +625,10 @@ void StratumClient::handle_reply(const std::string& line) {
                           line.find("\"status\":\"OK\"") != std::string::npos;
     if (share_ok) {
         ARMRX_LOG_INFO << "Share accepted!";
+        shares_accepted_.fetch_add(1, std::memory_order_relaxed);
     } else if (!result.empty() && result != "null") {
         ARMRX_LOG_WARN << "Share rejected: " << result;
+        shares_rejected_.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
