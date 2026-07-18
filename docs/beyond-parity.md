@@ -85,7 +85,7 @@ Based on the measured 30% scaling drop and current codebase state, the levers ra
 | # | Lever | Realistic gain | Risk | Why |
 |---|---|---|---|---|
 | **1** | **Newton-Raphson FDIV/FSQRT postmortem + simplification** | **+5–8%** | **High (blocked)** | A53 `fdiv` is ~23 cycles; 1-iteration NR is ~12 cycles. Code exists behind `ARMRX_ENABLE_JIT_FAST_DIV_SQRT` but the flag causes wrong dataset items in unrelated C++ code — possibly a GCC 15 + LTO bug. Deferred. See diagnostic note in §B.1. |
-| **2** | **Worker phase staggering (bandwidth contention)** | **+10–15% pool-side** | Low | Closing the 3.6→5.16 H/s/thread gap. Re-measure with MAP_HUGETLB first. Intra-loop staggering > startup staggering. |
+| **2** | **Worker phase staggering (bandwidth contention)** | **+0% (tested, ineffective)** | Low | **Tested empirically with 5/20/100/1000ms startup stagger on Cortex-A53. No measurable improvement.** The 32% per-thread drop is caused by continuous scratchpad memory accesses (2 MiB random access × 2048 iterations × 8 workers), which saturates the single-channel LPDDR3 bus regardless of phase alignment. This is a hardware ceiling. |
 | **3** | **Peephole JIT coalescing (existing `peephole-jit-plan.md`)** | **+5–10%** | Medium | Phase 1 tooling already delivered (--jit-dump, bench_opcodes). Requires disassembly comparison with XMRig. |
 | **4** | **SuperscalarHash JIT output scheduling** | **+3–5%** | Medium | Requires AArch64-level hazard analysis, not Superscalar DAG changes. Measure NEON saturation first. |
 | **5** | **DVFS / thermal pinning** | **+0–5%** | Low | Check `/sys/class/thermal/thermal_zone*/temp` during long pool runs. May already be throttled. |
@@ -94,8 +94,7 @@ Based on the measured 30% scaling drop and current codebase state, the levers ra
 
 | Phase | Description | Files Affected | Estimated Gain | Risk | Prerequisites |
 |---|---|---|---|---|---|
-| **Phase 0** | Re-measure scaling with MAP_HUGETLB (1–8 threads) | — | — | Low | Memory tier upgrades deployed |
-| **Phase A** | Worker Scaling Harness & Phase Staggering | [mining_engine.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/mining_engine.cpp) | +10–15% pool-side | Low | Phase 0 (re-measured baseline) |
-| **Phase B** | Debug `x29` and implement simplified Newton-Raphson | [jit_compiler_a64.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/jit_compiler_a64.cpp) | +5–8% | Medium | Device debugging session |
+**Removed:** Phase 0 (MEASURED — 32% drop unchanged with MAP_HUGETLB), Phase A (TESTED — no benefit, hardware bandwidth ceiling).|
+| **Phase B** | Debug `x29` and implement simplified Newton-Raphson | [jit_compiler_a64.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/jit_compiler_a64.cpp) | +5–8% (BLOCKED) | High | Need to root-cause GCC 15 + LTO interaction |
 | **Phase C** | Superscalar JIT Output Scheduling | [superscalar.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/superscalar.cpp), [jit_compiler_a64.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/jit_compiler_a64.cpp) | +3–5% | Medium | Phase 1.2 (opcode frequency data from bench_opcodes) |
 | **Phase D** | Handshake/TLS Tests & Prometheus Exporter | [mining_engine.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/mining_engine.cpp), `tests/` | Observability | Low | Structured logger deployed (already done) |

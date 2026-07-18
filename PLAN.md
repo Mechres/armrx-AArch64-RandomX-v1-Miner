@@ -39,9 +39,9 @@ See [`ROADMAP.md`](ROADMAP.md) for the detailed completed/remaining checklist.
 | # | Priority | Est. gain | Phase | Detail doc |
 |---|----------|-----------|-------|------------|
 | **1** | **Newton-Raphson FDIV/FSQRT postmortem** — debug x29 crash on existing NR code, then simplify | **+5–8% (BLOCKED)** | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
-| **2** | **Worker phase staggering** — re-measure scaling with MAP_HUGETLB, implement intra-loop staggering to desync memory-bandwidth phases | **+10–15% pool-side** | Beyond-parity A | [`beyond-parity.md`](docs/beyond-parity.md#pillar-a-worker-phase-staggering-bandwidth-mitigation) |
-| **3** | **Peephole JIT coalescing** — disassembly comparison with XMRig on identical seed programs, diff per-opcode emitted sequences | **+5–10%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
-| **4** | **TUI redesign** — `TuiSnapshot` struct, terminal-width awareness, NO_COLOR, share accept/reject, signal-safe teardown | UX | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
+| **2** | **Worker phase staggering** — tested, no benefit on Cortex-A53. Hardware bandwidth ceiling. | **+0%** | Beyond-parity A | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
+| **3** | **Peephole JIT coalescing** — disassembly comparison with XMRig on identical seed programs | **+5–10%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
+| **4** | **TUI redesign** — `TuiSnapshot` struct, terminal-width awareness, NO_COLOR, share tracking | UX | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
 | **5** | **SuperscalarHash JIT output scheduling** — AArch64-level hazard analysis on emitted JIT buffer, reorder within SuperscalarHash programs | **+3–5%** | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
 | **6** | **CLI/config consolidation** — `--version`, `--check-config`, delete dead `apply_cli_overrides`, document `--config` | UX | TUI U3 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u3--telemetry-and-cli) |
 | **7** | **Prometheus metrics endpoint** — HTTP `/metrics` on localhost, per-worker H/s, share counters, pool status | Ops | Beyond-parity D | [`beyond-parity.md`](docs/beyond-parity.md#pillar-d-testing--observability-expansion) |
