@@ -244,6 +244,19 @@ int main(int argc, char** argv) {
             jit_dump_key = std::string{argument.substr(11)};
             continue;
         }
+        if (argument.rfind("--log-level=", 0) == 0) {
+            std::string lv{argument.substr(12)};
+            if (lv == "trace") armrx::log::set_level(armrx::log::Level::trace);
+            else if (lv == "debug") armrx::log::set_level(armrx::log::Level::debug);
+            else if (lv == "info")  armrx::log::set_level(armrx::log::Level::info);
+            else if (lv == "warn")  armrx::log::set_level(armrx::log::Level::warn);
+            else if (lv == "error") armrx::log::set_level(armrx::log::Level::error);
+            else {
+                std::cerr << "Invalid --log-level: " << lv << " (choose: trace, debug, info, warn, error)\n";
+                return 64;
+            }
+            continue;
+        }
         if (argument == "--mlock") {
             use_mlock = true;
             continue;
@@ -276,6 +289,7 @@ int main(int argc, char** argv) {
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
+                << "  --log-level=<level>       Log verbosity: trace, debug, info, warn, error (default: info)\n"
                 << "\n"
                 << "  --help, -h               Display this help menu\n"
                 << "\n"
