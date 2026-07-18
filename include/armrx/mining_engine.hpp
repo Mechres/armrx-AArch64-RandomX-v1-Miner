@@ -97,7 +97,7 @@ public:
 
 private:
     void worker_loop(unsigned int thread_id);
-    void update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size);
+    bool update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size);
 
     RandomXMode mode_;
     unsigned int num_threads_;

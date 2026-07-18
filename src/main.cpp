@@ -58,6 +58,7 @@ std::string hash_to_hex(const std::array<std::byte, 32>& hash) {
 
 int main(int argc, char** argv) {
     std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
 #ifdef SIGPIPE
     std::signal(SIGPIPE, SIG_IGN);
 #endif
@@ -133,7 +134,12 @@ int main(int argc, char** argv) {
         }
 
         if (argument.rfind("--workers=", 0) == 0) {
-            workers = std::max(1U, static_cast<unsigned>(std::stoul(std::string{argument.substr(10)})));
+            try {
+                workers = std::max(1U, static_cast<unsigned>(std::stoul(std::string{argument.substr(10)})));
+            } catch (...) {
+                std::cerr << "Invalid --workers value: " << argument.substr(10) << '\n';
+                return 64;
+            }
             continue;
         }
 
@@ -153,12 +159,22 @@ int main(int argc, char** argv) {
         }
 
         if (argument.rfind("--difficulty=", 0) == 0) {
-            difficulty = std::stoull(std::string{argument.substr(13)});
+            try {
+                difficulty = std::stoull(std::string{argument.substr(13)});
+            } catch (...) {
+                std::cerr << "Invalid --difficulty value: " << argument.substr(13) << '\n';
+                return 64;
+            }
             continue;
         }
 
         if (argument.rfind("--seconds=", 0) == 0) {
-            runtime_seconds = static_cast<unsigned>(std::stoul(std::string{argument.substr(10)}));
+            try {
+                runtime_seconds = static_cast<unsigned>(std::stoul(std::string{argument.substr(10)}));
+            } catch (...) {
+                std::cerr << "Invalid --seconds value: " << argument.substr(10) << '\n';
+                return 64;
+            }
             continue;
         }
 
@@ -173,7 +189,12 @@ int main(int argc, char** argv) {
             std::uint16_t port = 3333;
             if (colon != std::string::npos) {
                 host = addr.substr(0, colon);
-                port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
+                try {
+                    port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
+                } catch (...) {
+                    std::cerr << "Invalid --pool port: " << addr.substr(colon + 1) << '\n';
+                    return 64;
+                }
             } else {
                 host = std::move(addr);
             }
@@ -376,8 +397,8 @@ int main(int argc, char** argv) {
             std::cerr << "Pool mining requires --pool=<host>[:port]\n";
             return 64;
         }
-        std::cerr << "[DEBUG] Connecting to pool: " << pool_list[0].first << ":" << pool_list[0].second
-                  << " wallet=" << pool_wallet.substr(0, 10) << "... tls=" << pool_tls << "\n";
+
+        // Connecting to pool (handled by PoolManager::connect)
 
         // Build PoolConfig vector from the flat pool_list
         std::vector<armrx::PoolConfig> pool_configs;

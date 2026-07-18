@@ -9,6 +9,7 @@ option(ARMRX_ENABLE_JIT_FAST_DIV_SQRT "Enable fast Newton-Raphson JIT FDIV and F
 option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OFF)
 option(ARMRX_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ARMRX_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
+option(ARMRX_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
 set(ARMRX_PGO "OFF" CACHE STRING "Profile-Guided Optimization: OFF, GENERATE, or USE")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -133,6 +134,12 @@ if(ARMRX_ENABLE_UBSAN)
     target_compile_options(armrx_core PRIVATE -fsanitize=undefined)
     target_link_options(armrx_core PRIVATE -fsanitize=undefined)
     message(STATUS "UndefinedBehaviorSanitizer enabled")
+endif()
+
+if(ARMRX_ENABLE_TSAN)
+    target_compile_options(armrx_core PRIVATE -fsanitize=thread)
+    target_link_options(armrx_core PRIVATE -fsanitize=thread)
+    message(STATUS "ThreadSanitizer enabled")
 endif()
 
 add_executable(armrx src/main.cpp)

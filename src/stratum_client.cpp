@@ -388,6 +388,13 @@ bool StratumClient::read_line(std::string& out) {
             }
             return false;
         }
+        // Cap read buffer at 1 MiB to prevent OOM from a malicious pool
+        // streaming without newline terminators.
+        static constexpr std::size_t kMaxBuf = 1UL << 20; // 1 MiB
+        if (read_buf_.size() + static_cast<std::size_t>(n) > kMaxBuf) {
+            read_buf_.clear();
+            return false;
+        }
         read_buf_.append(tmp, static_cast<std::size_t>(n));
     }
 }

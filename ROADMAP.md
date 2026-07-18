@@ -1,7 +1,8 @@
 # armrx — Master Roadmap (Consolidated Final Plan)
 
-> **Current phase: Phase 3 (peephole JIT coalescing).** Phase 0–2 are substantially
-> complete. Completed items are marked ✅ — remaining items are the live action list.
+> **Current phase: Phase 1 stabilization complete — moving to Phase 2 (peephole JIT).**
+> All Phase 1 security, concurrency, parser, and debt items have been closed.
+> Phase 2 begins with the peephole JIT program per [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md).
 > See [changelogs.md](changelogs.md) for the chronological record.
 
 ## Baseline
@@ -25,8 +26,8 @@
 | 0.6 — JIT dispatch null guard | ✅ |
 | 0.7 — `.gitignore` hygiene | ✅ |
 | S6 — TLS peer verification (`SSL_VERIFY_PEER`, `--no-verify-tls`) | ✅ |
-| S7 — `emit32` UB (mitigation deferred, low priority) | ⏸️ |
-| S8 — Dangling pointer contract (docs deferred) | ⏸️ |
+| S7 — `emit32` UB (memcpy fix) | ✅ |
+| S8 — Dangling pointer contract | ➡️ Moved to Phase 3 (JIT encapsulation) |
 
 ## ✅ Completed — Phase 1 (Performance & Tooling)
 
@@ -62,14 +63,35 @@
 | O11 | Branchless CBRANCH (`bne .Lskip; b target` — fixes 99.6% mispredict rate) | ✅ |
 | — | `emit32` UB fix (pointer cast → `memcpy`) | ✅ |
 | — | hwloc CPU pinning (optional, v2.12.2) | ✅ |
+| — | TLS hostname verification | ✅ |
+| — | `stratum_` mutex (use-after-free fix) | ✅ |
+| — | `session_id_` escape (submit + keepalive) | ✅ |
+| — | `get_array_first` dead-code fix (512-byte truncation) | ✅ |
+| — | `find_key` scope fix (matches inside string values) | ✅ |
+| — | `generateProgram`/`generateProgramLight` dedup (v2 AES-tweak) | ✅ |
+| — | `read_buf_` cap at 1 MiB (OOM prevention) | ✅ |
+| — | `setPagesRW`/`setPagesRX` return `int` (error propagation) | ✅ |
+| — | `mining_engine` silent-swallow fix (log + deactivate) | ✅ |
+| — | `json::escape` handles all U+0000–U+001F control chars | ✅ |
+| — | CLI numeric arg validation (`try`/`catch` wrappers) | ✅ |
+| — | SIGTERM handler (graceful shutdown) | ✅ |
+| — | `reconnect_attempts_` → `std::atomic<unsigned>` | ✅ |
+| — | `handshake_req_id_` / `authorize_req_id_` → `std::atomic` | ✅ |
+| — | `rx_set_rounding_mode` static → per-instance member | ✅ |
+| — | `ARMRX_ENABLE_TSAN` CMake option | ✅ |
+| — | `vm.hpp` comments (flag divergence, `register_usage_` note) | ✅ |
+| — | `jit_compiler_a64_static.S` stale comment fix (12→17) | ✅ |
+| — | `ceil_*` constants deleted, `allocate()` comment fixed | ✅ |
+| — | `reg_.a` init gated behind `if (!jit_)` | ✅ |
+| — | `[DEBUG]` log line removed from `main.cpp` | ✅ |
+| — | `main.cpp` SIGTERM handler | ✅ |
 
 ### Docs
 | Doc | Description |
 |-----|-------------|
 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
-| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed plan for Phase 3 (frequency data, allocation spot-check, per-opcode audit, hashrate veto) |
-| — | Pool connection fixed (handshake race, JSON `"id"` parsing) | ✅ |
-| — | KATs in both JIT + interpreted mode | ✅ |
+| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
+| [`docs/next_phase_v2.md`](docs/next_phase_v2.md) | Comprehensive next-phase improvement plan (post-review v2) |
 
 ---
 
@@ -80,6 +102,7 @@
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
 | **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+15–20% | 🔴 Major | 4-phase plan: tooling → frequency-informed opcode audit → cross-opcode → hashrate veto. The only path to close the 33% instruction-count gap. |
+| PGO | Profile-Guided Optimization | CMake option (`ARMRX_PGO=GENERATE/USE`) | ~+5–10% | 🟡 Medium | Blocked: GCC 15 + musl `__gcov_*` linker crash. See `OPTIMIZATION_REFERENCE.md:47`. |
 
 ### Features
 

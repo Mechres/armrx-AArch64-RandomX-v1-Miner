@@ -1,6 +1,29 @@
 # Changelog
 
-## 2026-07-17 (TLS hostname verification + stratum mutex + parser fixes + JIT dedup)
+## 2026-07-17 (Phase 1 completion — stabilization & security hardening)
+
+### Security
+- **`read_buf_` cap at 1 MiB** (`src/stratum_client.cpp:391`): Prevents OOM from a malicious pool streaming data without newline terminators. Connection is dropped on overflow.
+- **`setPagesRW`/`setPagesRX` return `int`** (`include/armrx/virtual_memory.h:40-41`, `src/virtual_memory.c:172-199`): mprotect errors are now propagated instead of silently swallowed. JIT call sites (`jit_compiler_a64.cpp:159-169`, `vm.cpp:163-166,799-807`) throw `std::runtime_error` on failure.
+- **CLI numeric arg validation** (`src/main.cpp:136,156,161,176`): `std::stoul`/`std::stoull` calls now wrapped in `try`/`catch` with friendly error messages instead of `std::terminate`.
+- **SIGTERM handler** (`src/main.cpp:60`): Added alongside the existing SIGINT handler for graceful shutdown.
+- **`mining_engine` silent-swallow fix** (`src/mining_engine.cpp:297-302`, `include/armrx/mining_engine.hpp:100`): `update_nonce_in_template` now returns `bool`; call site logs the error and deactivates the worker on bad nonce offset.
+- **`json::escape` control character coverage** (`src/json.cpp:43-57`): Now escapes all U+0000–U+001F characters via `\u00xx`, not just `\`, `"`, `\n`, `\r`, `\t`.
+
+### Concurrency
+- **`reconnect_attempts_` → `std::atomic<unsigned>`** (`include/armrx/stratum_client.hpp:183`): Eliminates torn reads when `PoolManager::tick` reads the counter from the main thread while the reconnect thread writes it.
+- **`handshake_req_id_` / `authorize_req_id_` → `std::atomic<std::uint64_t>`** (`include/armrx/stratum_client.hpp:196-197`): Cross-thread reads from reader thread, writes from main thread during connect.
+- **`subscribe_ok_` → `std::atomic<bool>`** (`include/armrx/stratum_client.hpp:177`): Reader thread writes, main thread reads.
+- **`rx_set_rounding_mode` static cache → per-instance** (`include/armrx/vm.hpp:174`, `src/vm.cpp:69-73,735`): Moved the `last_mode` cache from a `static` variable (shared across all VMs/threads) to a `last_rounding_mode_` member of `VirtualMachine`.
+- **`ARMRX_ENABLE_TSAN` CMake option** (`CMakeLists.txt:11,137-141`): Mirrors the existing ASan/UBSan options. Use `-DARMRX_ENABLE_TSAN=ON` for thread sanitizer builds.
+
+### Maintainability
+- **`vm.hpp` comments** (`include/armrx/vm.hpp:53-57,175`): Documented the `kRandOMXFlag*` value divergence from upstream RandomX (Jit=4 vs upstream FULL_MEM=4), and noted the `register_usage_` initializer is moot (`compile_program` `std::fill`s all 8 before use).
+- **Stale JIT comment fix** (`src/jit_compiler_a64_static.S:273`): FDIV_M instruction count corrected from 12 to 17.
+- **`ceil_*` constants deleted** (`src/vm.cpp:109-141`): Dead opcode-frequency ceiling constants that were unused after the dispatch-table refactor.
+- **`allocate()` comment fixed** (`src/vm.cpp:179`): Corrected from stale `std::vector` to `mmap`.
+- **`reg_.a` init gated** (`src/vm.cpp:199-225`): Skipped under JIT mode since `run_jit()` overwrites `reg_.a` with `config.eMask`.
+- **`[DEBUG]` log removed** (`src/main.cpp:377-378`): Production noise removed now that `PoolManager::connect` handles connection logging.
 
 ### Security
 - **TLS hostname verification** (`src/tls_client.cpp:59-67`): Added `X509_VERIFY_PARAM_set1_host()` call before `SSL_connect()`. Previously only SNI was set — any CA-signed cert for any domain would pass. `--tls` now authenticates the server.

@@ -174,13 +174,13 @@ private:
 
     // Handshake synchronization
     std::promise<bool> subscribe_done_;
-    bool subscribe_ok_{false};
+    std::atomic<bool> subscribe_ok_{false};
     mutable unsigned subscribe_try_{0};  // which subscribe format to try next
 
     // Reconnect configuration
     unsigned max_retries_{10};
     unsigned base_delay_ms_{1000};
-    unsigned reconnect_attempts_{0};
+    std::atomic<unsigned> reconnect_attempts_{0};
     std::atomic<bool> reconnect_enabled_{true};
     std::thread reconnect_thread_;
 
@@ -193,8 +193,8 @@ private:
 
     // CryptoNote and fallback tracking
     StratumProtocol protocol_{StratumProtocol::AUTO};
-    mutable std::uint64_t handshake_req_id_{0};
-    mutable std::uint64_t authorize_req_id_{0};
+    mutable std::atomic<std::uint64_t> handshake_req_id_{0};
+    mutable std::atomic<std::uint64_t> authorize_req_id_{0};
     std::thread keepalive_thread_;
     std::atomic<bool> fallback_in_progress_{false};
     std::atomic<bool> handshake_in_progress_{false};

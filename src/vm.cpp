@@ -66,8 +66,7 @@ static inline std::int64_t smulh(std::int64_t a, std::int64_t b) {
     return static_cast<std::int64_t>((static_cast<__int128>(a) * static_cast<__int128>(b)) >> 64);
 }
 
-static inline void rx_set_rounding_mode(std::uint32_t mode) {
-    static std::uint32_t last_mode = 0xFF; // invalid sentinel
+static inline void rx_set_rounding_mode(std::uint32_t mode, std::uint32_t& last_mode) {
     mode &= 3;
     if (mode == last_mode) return;
     last_mode = mode;
@@ -108,38 +107,6 @@ static inline std::byte* getScratchpadAddress(const InstructionByteCode& ibc, st
     std::uint32_t addr = (static_cast<std::uint32_t>(*ibc.isrc) + static_cast<std::uint32_t>(ibc.imm)) & ibc.memMask;
     return scratchpad + addr;
 }
-
-// Opcode cumulative frequencies ceiling
-constexpr int ceil_IADD_RS = 16;
-constexpr int ceil_IADD_M = 23;
-constexpr int ceil_ISUB_R = 39;
-constexpr int ceil_ISUB_M = 46;
-constexpr int ceil_IMUL_R = 62;
-constexpr int ceil_IMUL_M = 66;
-constexpr int ceil_IMULH_R = 70;
-constexpr int ceil_IMULH_M = 71;
-constexpr int ceil_ISMULH_R = 75;
-constexpr int ceil_ISMULH_M = 76;
-constexpr int ceil_IMUL_RCP = 84;
-constexpr int ceil_INEG_R = 86;
-constexpr int ceil_IXOR_R = 101;
-constexpr int ceil_IXOR_M = 106;
-constexpr int ceil_IROR_R = 114;
-constexpr int ceil_IROL_R = 116;
-constexpr int ceil_ISWAP_R = 120;
-constexpr int ceil_FSWAP_R = 124;
-constexpr int ceil_FADD_R = 140;
-constexpr int ceil_FADD_M = 145;
-constexpr int ceil_FSUB_R = 161;
-constexpr int ceil_FSUB_M = 166;
-constexpr int ceil_FSCAL_R = 172;
-constexpr int ceil_FMUL_R = 204;
-constexpr int ceil_FDIV_M = 208;
-constexpr int ceil_FSQRT_R = 214;
-constexpr int ceil_CBRANCH = 239;
-constexpr int ceil_CFROUND = 240;
-constexpr int ceil_ISTORE = 256;
-constexpr int ceil_NOP = 256;
 
 static inline bool isZeroOrPowerOf2(std::uint64_t x) {
     return (x & (x - 1)) == 0;
@@ -192,9 +159,13 @@ void VirtualMachine::set_cache(const Argon2dCache* cache) {
     cache_ = cache;
 #ifdef ARMRX_HAVE_JIT
     if (jit_ && cache) {
-        jit_->enableWriting();
+        if (!jit_->enableWriting()) {
+            throw std::runtime_error("JIT: enableWriting (set cache) failed");
+        }
         jit_->generateSuperscalarHash(cache->programs(), cache->reciprocal_cache());
-        jit_->enableExecution();
+        if (!jit_->enableExecution()) {
+            throw std::runtime_error("JIT: enableExecution (set cache) failed");
+        }
     }
 #endif
 }
@@ -208,7 +179,7 @@ bool VirtualMachine::set_dataset(std::span<const std::byte> dataset) {
 }
 
 void VirtualMachine::allocate() {
-    // Scratchpad is already allocated via std::vector resizing in constructor
+    // Scratchpad is already allocated via mmap in the constructor (vm.cpp:173-176)
 }
 
 void VirtualMachine::init_scratchpad(void* seed) {
@@ -231,6 +202,9 @@ void VirtualMachine::initialize_vm_state() {
     std::uint64_t a3_lo = getSmallPositiveFloatBits(entropy_[6]);
     std::uint64_t a3_hi = getSmallPositiveFloatBits(entropy_[7]);
 
+    // In JIT mode, run_jit() overwrites reg_.a with config.eMask (vm.cpp:840).
+    // Skip this init to avoid redundant work.
+#ifndef ARMRX_HAVE_JIT
     std::memcpy(&reg_.a[0].lo, &a0_lo, 8);
     std::memcpy(&reg_.a[0].hi, &a0_hi, 8);
     std::memcpy(&reg_.a[1].lo, &a1_lo, 8);
@@ -239,6 +213,19 @@ void VirtualMachine::initialize_vm_state() {
     std::memcpy(&reg_.a[2].hi, &a2_hi, 8);
     std::memcpy(&reg_.a[3].lo, &a3_lo, 8);
     std::memcpy(&reg_.a[3].hi, &a3_hi, 8);
+#else
+    // JIT: only init reg_.a[0..3] if not overwritten by run_jit()
+    if (!jit_) {
+        std::memcpy(&reg_.a[0].lo, &a0_lo, 8);
+        std::memcpy(&reg_.a[0].hi, &a0_hi, 8);
+        std::memcpy(&reg_.a[1].lo, &a1_lo, 8);
+        std::memcpy(&reg_.a[1].hi, &a1_hi, 8);
+        std::memcpy(&reg_.a[2].lo, &a2_lo, 8);
+        std::memcpy(&reg_.a[2].hi, &a2_hi, 8);
+        std::memcpy(&reg_.a[3].lo, &a3_lo, 8);
+        std::memcpy(&reg_.a[3].hi, &a3_hi, 8);
+    }
+#endif
 
     ma_ = static_cast<std::uint32_t>(entropy_[8] & 0x7fffffc0ULL);
     mx_ = static_cast<std::uint32_t>(entropy_[10]);
@@ -745,7 +732,7 @@ void VirtualMachine::execute_bytecode() {
                 break;
             case InstructionType::CFROUND: {
                 std::uint64_t isrc = rotr(*ibc.isrc, ibc.imm);
-                rx_set_rounding_mode(static_cast<std::uint32_t>(isrc % 4));
+                rx_set_rounding_mode(static_cast<std::uint32_t>(isrc % 4), last_rounding_mode_);
                 break;
             }
             case InstructionType::ISTORE:
@@ -812,7 +799,9 @@ void VirtualMachine::run_jit() {
 #ifdef ARMRX_JIT_PROFILE
     auto t0 = std::chrono::high_resolution_clock::now();
 #endif
-    jit_->enableWriting();
+    if (!jit_->enableWriting()) {
+        throw std::runtime_error("JIT: enableWriting (run) failed");
+    }
     if (!is_fast_mode()) {
         // Light mode: JIT compiler generates inline dataset item derivation
         jit_->generateProgramLight(program_, config, dataset_offset_);
@@ -820,7 +809,9 @@ void VirtualMachine::run_jit() {
         // Fast mode: JIT compiler reads directly from pre-computed dataset
         jit_->generateProgram(program_, config);
     }
-    jit_->enableExecution();
+    if (!jit_->enableExecution()) {
+        throw std::runtime_error("JIT: enableExecution (run) failed");
+    }
 #ifdef ARMRX_JIT_PROFILE
     auto t1 = std::chrono::high_resolution_clock::now();
 #endif

@@ -156,16 +156,16 @@ JitCompilerA64::~JitCompilerA64()
 	freePagedMemory(code, CodeSize + CalcDatasetItemSize);
 }
 
-void JitCompilerA64::enableWriting()
+bool JitCompilerA64::enableWriting()
 {
-	if (rwx_) return;
-	setPagesRW(code, CodeSize + CalcDatasetItemSize);
+	if (rwx_) return true;
+	return setPagesRW(code, CodeSize + CalcDatasetItemSize) == 0;
 }
 
-void JitCompilerA64::enableExecution()
+bool JitCompilerA64::enableExecution()
 {
-	if (rwx_) return;
-	setPagesRX(code, CodeSize + CalcDatasetItemSize);
+	if (rwx_) return true;
+	return setPagesRX(code, CodeSize + CalcDatasetItemSize) == 0;
 }
 
 // Shared helper: emit the v2 AES tweak block (identical in fast and light paths).

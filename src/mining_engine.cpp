@@ -294,7 +294,12 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
         // Copy template to per-worker buffer (only actually reallocates on job change)
         block_input = local_job.block_template;
-        update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size);
+        if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
+            std::cerr << "[ERROR] Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
+                      << " size=" << local_job.nonce_size << " in job, deactivating\n";
+            active = false;
+            return;
+        }
 
         alignas(16) std::array<std::byte, 32> hash{};
         randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
@@ -334,13 +339,14 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 #endif
 }
 
-void MiningEngine::update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size) {
+bool MiningEngine::update_nonce_in_template(std::vector<std::byte>& block, std::uint64_t nonce, std::size_t offset, std::size_t size) {
     if (offset + size > block.size()) {
-        return;
+        return false;
     }
     for (std::size_t i = 0; i < size; ++i) {
         block[offset + i] = static_cast<std::byte>((nonce >> (8 * i)) & 0xff);
     }
+    return true;
 }
 
 } // namespace armrx

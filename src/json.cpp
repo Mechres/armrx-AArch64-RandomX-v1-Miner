@@ -50,7 +50,17 @@ std::string escape(std::string_view s) {
             case '\n': out += "\\n";  break;
             case '\r': out += "\\r";  break;
             case '\t': out += "\\t";  break;
-            default:   out += c;      break;
+            default:
+                // JSON requires all control characters U+0000–U+001F to be escaped
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    static constexpr const char* hex = "0123456789abcdef";
+                    out += "\\u00";
+                    out += hex[(static_cast<unsigned char>(c) >> 4) & 0xf];
+                    out += hex[static_cast<unsigned char>(c) & 0xf];
+                } else {
+                    out += c;
+                }
+                break;
         }
     }
     return out;

@@ -49,7 +49,11 @@ struct InstructionByteCode {
     std::uint32_t memMask;
 };
 
-// Flags matching the RandomX VM features
+// Flags matching the RandomX VM features.
+// NOTE: The numeric values here diverge from upstream RandomX constants:
+//       upstream defines RANDOMX_FLAG_JIT=8, RANDOMX_FLAG_FULL_MEM=4,
+//       but armrx uses kRandOMXFlagJit=4, kRandOMXFlagFullMem=32.
+//       The flag mapping is handled by map_to_randomx_flags() in vm.cpp.
 inline constexpr std::uint32_t kRandOMXFlagDefault = 0U;
 inline constexpr std::uint32_t kRandOMXFlagFullMem = 32U;
 inline constexpr std::uint32_t kRandOMXFlagHardAes = 16U;
@@ -167,8 +171,9 @@ private:
     // Compiled Bytecode & Program
     Program program_{};
     std::array<std::uint64_t, 16> entropy_{};
+    std::uint32_t last_rounding_mode_ = 0xFF; // invalid sentinel; cached to avoid redundant fesetround
     std::array<InstructionByteCode, 256> bytecode_{};
-    int register_usage_[8] = {-1};
+    int register_usage_[8] = {-1};  // initializer is moot — compile_program std::fills all 8 before use
 
     // Scratchpad (2 MiB) — mmap-allocated with huge page hint
     std::byte* scratchpad_data_ = nullptr;

@@ -64,8 +64,8 @@ namespace armrx {
 		uint8_t* getCode() { return code; }
 		size_t getCodeSize();
 
-		void enableWriting();
-		void enableExecution();
+		bool enableWriting();
+		bool enableExecution();
 
 		void setFlags(randomx_flags f) { flags = f; }
 	private:
