@@ -1,4 +1,5 @@
 #include "armrx/pool_manager.hpp"
+#include "armrx/log.hpp"
 
 #include <cstdint>
 #include <iostream>
@@ -67,7 +68,7 @@ void PoolManager::connect_to_current() {
     try {
         stratum_->connect();
     } catch (const std::exception& ex) {
-        std::cerr << "[Pool] " << current_pool_name() << ": " << ex.what() << '\n';
+        ARMRX_LOG_ERROR << current_pool_name() << ": " << ex.what();
     }
 }
 
@@ -102,7 +103,7 @@ void PoolManager::tick() {
             // Failover to next pool
             current_idx_ = (current_idx_ + 1) % pools_.size();
             failover_cooldown_ = 2;
-            std::cerr << "[Pool] Failing over to " << current_pool_name() << '\n';
+            ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
         }
     }
 

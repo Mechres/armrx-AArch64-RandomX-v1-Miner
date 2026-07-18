@@ -11,8 +11,8 @@
  */
 
 #include "armrx/stratum_client.hpp"
-
 #include "armrx/json.hpp"
+#include "armrx/log.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -154,7 +154,7 @@ void StratumClient::connect() {
                 throw std::runtime_error(
                     std::string("StratumClient: TLS handshake failed for ") + host_);
             }
-            std::cout << "[Stratum] TLS enabled\n";
+            ARMRX_LOG_INFO << "TLS enabled";
         }
 #endif
 
@@ -176,7 +176,7 @@ void StratumClient::connect() {
             msg = build_login_msg();
         }
 
-        std::cout << "[Stratum] >> " << msg.substr(0, msg.size() - 1) << '\n';
+        ARMRX_LOG_DEBUG << ">> " << msg.substr(0, msg.size() - 1);
         {
             std::lock_guard lock(send_mutex_);
             send_line(msg);
@@ -191,7 +191,7 @@ void StratumClient::connect() {
 
         if (!subscribe_ok_) {
             if (protocol_ == StratumProtocol::AUTO) {
-                std::cerr << "[Stratum] Handshake failed with CryptoNote. Falling back to Stratum V1 protocol...\n";
+                ARMRX_LOG_WARN << "Handshake failed with CryptoNote, falling back to Stratum V1";
                 protocol_ = StratumProtocol::STRATUM_V1;
                 close_connection();
                 connected_.store(false);
@@ -329,7 +329,7 @@ void StratumClient::send_line(const std::string& json_line) {
     std::string line = json_line;
     if (line.empty() || line.back() != '\n') line.push_back('\n');
     if (!write_all(line.c_str(), line.size())) {
-        std::cerr << "[Stratum] send_line failed: " << std::strerror(errno) << '\n';
+        ARMRX_LOG_ERROR << "send_line failed: " << std::strerror(errno);
     }
 }
 
@@ -431,7 +431,7 @@ void StratumClient::reader_thread_fn() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 void StratumClient::handle_line(const std::string& line) {
-    std::cout << "[Stratum] << " << line << '\n';
+    ARMRX_LOG_DEBUG << "<< " << line;
     // Distinguish notifications (have "method") from replies (have "result")
     const bool has_method = line.find("\"method\"") != std::string::npos;
     if (has_method) {
@@ -490,8 +490,8 @@ void StratumClient::handle_notify(const std::string& line) {
         job.target = current_target_;
     }
 
-    std::cout << "[Stratum] New job: " << job_id
-              << " blob=" << blob_hex.size() / 2 << " bytes\n";
+    ARMRX_LOG_INFO << "New job: " << job_id
+              << " blob=" << blob_hex.size() / 2 << " bytes";
 
     if (job_callback_) job_callback_(job);
 }
@@ -509,7 +509,7 @@ void StratumClient::handle_set_target(const std::string& line) {
         std::lock_guard lock(target_mutex_);
         current_target_ = t;
     }
-    std::cout << "[Stratum] Target updated (set_target)\n";
+    ARMRX_LOG_DEBUG << "Target updated (set_target)";
 }
 
 void StratumClient::handle_set_difficulty(const std::string& line) {
@@ -521,7 +521,7 @@ void StratumClient::handle_set_difficulty(const std::string& line) {
         const Target t = difficulty_to_target(diff);
         std::lock_guard lock(target_mutex_);
         current_target_ = t;
-        std::cout << "[Stratum] Difficulty updated to " << diff << '\n';
+        ARMRX_LOG_INFO << "Difficulty updated to " << diff;
     } catch (...) {}
 }
 
@@ -537,16 +537,16 @@ void StratumClient::handle_reply(const std::string& line) {
     if (id_str == std::to_string(handshake_req_id_)) {
         if (is_cryptonote_reply) {
             if (!error.empty() && error != "null") {
-                std::cerr << "[Stratum] Login failed: " << error << '\n';
+                ARMRX_LOG_ERROR << "Login failed: " << error;
                 subscribe_ok_ = false;
                 subscribe_done_.set_value(false);
                 return;
             }
             session_id_ = armrx::json::get_string(result, "id");
             if (session_id_.empty()) {
-                std::cerr << "[Stratum] Warning: session ID is empty in login reply\n";
+                ARMRX_LOG_WARN << "session ID is empty in login reply";
             }
-            std::cout << "[Stratum] Login successful, session ID: " << session_id_ << "\n";
+            ARMRX_LOG_INFO << "Login successful, session ID: " << session_id_;
             
             subscribe_ok_ = true;
             subscribe_done_.set_value(true);
@@ -563,7 +563,7 @@ void StratumClient::handle_reply(const std::string& line) {
         } else {
             // Subscribe reply — check for success or error
             if (!error.empty() && error != "null") {
-                std::cerr << "[Stratum] Subscribe rejected: " << error << '\n';
+                ARMRX_LOG_ERROR << "Subscribe rejected: " << error;
                 subscribe_ok_ = false;
                 subscribe_done_.set_value(false);
                 return;
@@ -590,7 +590,7 @@ void StratumClient::handle_reply(const std::string& line) {
                                 }
                                 if (!en1.empty()) {
                                     extra_nonce1_ = en1;
-                                    std::cout << "[Stratum] Subscribe OK; extra_nonce1=" << en1 << '\n';
+                                    ARMRX_LOG_INFO << "Subscribe OK; extra_nonce1=" << en1;
                                 }
                             }
                         }
@@ -604,11 +604,11 @@ void StratumClient::handle_reply(const std::string& line) {
 
     if (id_str == std::to_string(authorize_req_id_)) {
         if (!error.empty() && error != "null") {
-            std::cerr << "[Stratum] Authorize failed: " << error << '\n';
+            ARMRX_LOG_ERROR << "Authorize failed: " << error;
         } else {
             const bool ok = line.find("\"result\":true") != std::string::npos ||
                             line.find("\"result\":\"true\"") != std::string::npos;
-            std::cout << "[Stratum] Authorize " << (ok ? "OK" : "FAILED") << '\n';
+            ARMRX_LOG_INFO << "Authorize " << (ok ? "OK" : "FAILED");
         }
         return;
     }
@@ -624,9 +624,9 @@ void StratumClient::handle_reply(const std::string& line) {
                           line.find("\"result\":\"true\"") != std::string::npos ||
                           line.find("\"status\":\"OK\"") != std::string::npos;
     if (share_ok) {
-        std::cout << "[Stratum] Share accepted!\n";
+        ARMRX_LOG_INFO << "Share accepted!";
     } else if (!result.empty() && result != "null") {
-        std::cerr << "[Stratum] Share rejected: " << result << '\n';
+        ARMRX_LOG_WARN << "Share rejected: " << result;
     }
 }
 
@@ -668,8 +668,8 @@ void StratumClient::process_cryptonote_job(const std::string& job_id,
         current_target_ = job.target;
     }
 
-    std::cout << "[Stratum] New job (CryptoNote): " << job_id
-              << " blob=" << job.block_template.size() << " bytes\n";
+    ARMRX_LOG_INFO << "New job (CryptoNote): " << job_id
+              << " blob=" << job.block_template.size() << " bytes";
 
     if (job_callback_) job_callback_(job);
 }
@@ -715,17 +715,17 @@ void StratumClient::reconnect_loop() {
             break;
         }
 
-        std::cerr << "[Stratum] Reconnecting (attempt " << reconnect_attempts_
-                  << ", delay " << delay << " ms)...\n";
+        ARMRX_LOG_WARN << "Reconnecting (attempt " << reconnect_attempts_.load()
+                  << ", delay " << delay << " ms)...";
 
         try {
             connect();
             // Success — reset state and exit
             reconnect_attempts_ = 0;
-            std::cerr << "[Stratum] Reconnected successfully\n";
+            ARMRX_LOG_INFO << "Reconnected successfully";
             return;
         } catch (const std::exception& ex) {
-            std::cerr << "[Stratum] Reconnect failed: " << ex.what() << '\n';
+            ARMRX_LOG_ERROR << "Reconnect failed: " << ex.what();
         }
 
         // Exponential backoff (doubles each attempt)

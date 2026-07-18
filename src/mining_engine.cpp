@@ -9,6 +9,7 @@
 #include <mutex>
 #include <sched.h>
 #include <pthread.h>
+#include "armrx/log.hpp"
 
 #ifdef ARMRX_HAVE_HWLOC
 #include <hwloc.h>
@@ -156,14 +157,14 @@ void MiningEngine::set_job(const Job& job) {
 
     bool key_changed = current_seed_key_ != job.seed_key;
     if (key_changed || !shared_cache_) {
-        std::cout << "[MiningEngine] New seed key detected. Initializing cache...\n";
+        ARMRX_LOG_INFO << "New seed key detected. Initializing cache...";
         auto new_cache = std::make_shared<Argon2dCache>();
         new_cache->initialize(job.seed_key);
         shared_cache_ = new_cache;
 
         if (mode_ == RandomXMode::fast) {
             auto dataset_bytes = randomx_dataset_item_count() * 64;
-            std::cout << "[MiningEngine] Initializing " << dataset_bytes / (1024U * 1024U) << " MiB dataset...\n";
+            ARMRX_LOG_INFO << "Initializing " << dataset_bytes / (1024U * 1024U) << " MiB dataset...";
             auto new_dataset = std::make_shared<MappedMemory>(dataset_bytes);
 
             // Parallelize dataset initialization
@@ -183,7 +184,7 @@ void MiningEngine::set_job(const Job& job) {
                 t.join();
             }
             shared_dataset_ = new_dataset;
-            std::cout << "[MiningEngine] Dataset initialization complete.\n";
+            ARMRX_LOG_INFO << "Dataset initialization complete.";
         }
         current_seed_key_ = job.seed_key;
     }
@@ -233,7 +234,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
             static std::once_flag warn_flag;
             std::call_once(warn_flag, []{
-                std::cerr << "[Warning] --rt-priority requires CAP_SYS_NICE; falling back to default scheduler.\n";
+                ARMRX_LOG_WARN << "--rt-priority requires CAP_SYS_NICE; falling back to default scheduler.";
             });
         }
     }
@@ -295,8 +296,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         // Copy template to per-worker buffer (only actually reallocates on job change)
         block_input = local_job.block_template;
         if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
-            std::cerr << "[ERROR] Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
-                      << " size=" << local_job.nonce_size << " in job, deactivating\n";
+            ARMRX_LOG_ERROR << "Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
+                      << " size=" << local_job.nonce_size << " in job, deactivating";
             active = false;
             return;
         }

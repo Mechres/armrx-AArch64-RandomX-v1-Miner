@@ -7,6 +7,7 @@
 #include "armrx/config.hpp"
 #include "armrx/tui.hpp"
 #include "armrx/pool_manager.hpp"
+#include "armrx/log.hpp"
 
 #include <algorithm>
 #include <atomic>

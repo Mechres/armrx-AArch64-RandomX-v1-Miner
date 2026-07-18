@@ -1,4 +1,5 @@
 #include "armrx/tls_client.hpp"
+#include "armrx/log.hpp"
 
 #include <algorithm>
 #include <cerrno>
@@ -49,7 +50,7 @@ bool TlsClient::connect(int fd, const std::string& host) {
 
     ssl_.reset(SSL_new(ctx_.get()));
     if (!ssl_) {
-        std::cerr << "[TLS] SSL_new failed\n";
+        ARMRX_LOG_ERROR << "SSL_new failed";
         return false;
     }
 
@@ -75,12 +76,12 @@ bool TlsClient::connect(int fd, const std::string& host) {
         } else {
             reason = "SSL_error=" + std::to_string(ssl_err);
         }
-        std::cerr << "[TLS] Handshake failed: " << reason << '\n';
+        ARMRX_LOG_ERROR << "Handshake failed: " << reason;
         ssl_.reset();
         return false;
     }
 
-    std::cout << "[TLS] Connected to " << host
+    ARMRX_LOG_INFO << "Connected to " << host
               << " (" << SSL_get_cipher(ssl_.get()) << ")\n";
     return true;
 }
