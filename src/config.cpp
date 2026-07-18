@@ -104,35 +104,8 @@ AppConfig load_default_config() {
     return {};
 }
 
-AppConfig apply_cli_overrides(AppConfig cfg, int argc, char** argv) {
-    for (int i = 1; i < argc; ++i) {
-        std::string arg(argv[i]);
+// CLI argument parsing is handled in main.cpp. If extending flags, edit
+// the parser there (src/main.cpp, argument loop) -- not this file.
 
-        if (arg.rfind("--pool=", 0) == 0) {
-            cfg.pools.push_back(parse_pool_str(arg.substr(7)));
-        } else if (arg.rfind("--wallet=", 0) == 0) {
-            cfg.wallet = arg.substr(9);
-        } else if (arg.rfind("--password=", 0) == 0) {
-            cfg.password = arg.substr(11);
-        } else if (arg == "--tls") {
-            cfg.pool_tls = true;
-        } else if (arg == "--no-tls") {
-            cfg.pool_tls = false;
-        } else if (arg.rfind("--mode=", 0) == 0) {
-            cfg.mode = arg.substr(7);
-        } else if (arg.rfind("--workers=", 0) == 0) {
-            cfg.workers = static_cast<unsigned>(std::stoul(arg.substr(10)));
-        } else if (arg.rfind("--difficulty=", 0) == 0) {
-            cfg.difficulty = std::stoull(arg.substr(13));
-        } else if (arg.rfind("--seconds=", 0) == 0) {
-            cfg.seconds = static_cast<unsigned>(std::stoul(arg.substr(10)));
-        } else if (arg == "--tui") {
-            cfg.tui = true;
-        } else if (arg == "--no-tui") {
-            cfg.tui = false;
-        }
-    }
-    return cfg;
-}
 
 } // namespace armrx

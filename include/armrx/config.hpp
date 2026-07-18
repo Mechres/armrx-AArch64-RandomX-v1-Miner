@@ -34,6 +34,6 @@ AppConfig load_default_config();
 AppConfig load_config_with_fallback(const std::string& explicit_path);
 
 /** Parse --key=value CLI args and override config fields. Returns modified config. */
-AppConfig apply_cli_overrides(AppConfig cfg, int argc, char** argv);
+// CLI argument parsing is handled in main.cpp (argument loop in main() body).
 
 } // namespace armrx
