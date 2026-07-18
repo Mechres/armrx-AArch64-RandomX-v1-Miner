@@ -1,0 +1,94 @@
+#pragma once
+
+#include <arpa/inet.h>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <iostream>
+#include <netinet/in.h>
+#include <string>
+#include <thread>
+#include <unistd.h>
+
+namespace armrx {
+
+/// Lightweight Prometheus metrics HTTP endpoint.
+/// Listens on localhost:{port}, serves GET /metrics with Prometheus text format.
+/// Header-only implementation — no .cpp file needed.
+class MetricsExporter {
+public:
+    using MetricProvider = std::function<std::string()>;
+
+    /// Start the HTTP server on localhost:port.
+    /// provider is called on each request to produce the metrics body.
+    MetricsExporter(std::uint16_t port, MetricProvider provider)
+        : running_(true)
+    {
+        thread_ = std::thread([this, port, prov = std::move(provider)]() {
+            int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+            if (fd < 0) { return; }
+            int opt = 1;
+            ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+            struct sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_port = ::htons(port);
+            addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+            if (::bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+                std::cerr << "[Metrics] bind(" << port << ") failed\n";
+                ::close(fd); running_ = false; return;
+            }
+            if (::listen(fd, 5) < 0) {
+                std::cerr << "[Metrics] listen() failed\n";
+                ::close(fd); running_ = false; return;
+            }
+            server_fd_ = fd;
+            std::cerr << "[Metrics] listening on http://127.0.0.1:" << port << "/metrics\n";
+            while (running_) {
+                struct sockaddr_in client{};
+                socklen_t client_len = sizeof(client);
+                int cfd = ::accept(fd, (struct sockaddr*)&client, &client_len);
+                if (cfd < 0) { if (running_) break; break; }
+                char req[1024];
+                ssize_t n = ::read(cfd, req, sizeof(req) - 1);
+                if (n > 0) {
+                    req[n] = '\0';
+                    std::string r(req);
+                    bool ok = r.find("GET /metrics ") == 0;
+                    if (ok) {
+                        std::string body = prov();
+                        std::string resp =
+                            "HTTP/1.0 200 OK\r\n"
+                            "Content-Type: text/plain\r\n"
+                            "Content-Length: " + std::to_string(body.size()) + "\r\n"
+                            "Connection: close\r\n\r\n";
+                        ::write(cfd, resp.data(), resp.size());
+                        ::write(cfd, body.data(), body.size());
+                    } else {
+                        const char* nf = "HTTP/1.0 404 Not Found\r\nConnection: close\r\n\r\n";
+                        ::write(cfd, nf, std::strlen(nf));
+                    }
+                }
+                ::close(cfd);
+            }
+            ::close(fd);
+            server_fd_ = -1;
+        });
+        thread_.detach();
+    }
+
+    ~MetricsExporter() {
+        running_ = false;
+        if (server_fd_ >= 0) ::shutdown(server_fd_, SHUT_RDWR);
+    }
+
+    MetricsExporter(const MetricsExporter&) = delete;
+    MetricsExporter& operator=(const MetricsExporter&) = delete;
+
+private:
+    std::atomic<bool> running_{false};
+    int server_fd_ = -1;
+    std::thread thread_;
+};
+
+} // namespace armrx

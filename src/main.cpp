@@ -8,6 +8,7 @@
 #include "armrx/tui.hpp"
 #include "armrx/pool_manager.hpp"
 #include "armrx/log.hpp"
+#include "armrx/metrics.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -90,6 +91,7 @@ int main(int argc, char** argv) {
     bool use_mlock = false;
     bool use_rt_priority = false;
     unsigned stagger_ms = 0;
+    std::uint16_t metrics_port = 0;  // 0 = disabled
     unsigned int current_pool_idx = 0;
 
     // Load config from file (CLI overrides below)
@@ -267,6 +269,15 @@ int main(int argc, char** argv) {
             use_rt_priority = true;
             continue;
         }
+        if (argument.rfind("--metrics-port=", 0) == 0) {
+            try {
+                metrics_port = static_cast<std::uint16_t>(std::stoul(std::string{argument.substr(15)}));
+            } catch (...) {
+                std::cerr << "Invalid --metrics-port value: " << argument.substr(15) << '\n';
+                return 64;
+            }
+            continue;
+        }
         if (argument == "--no-color") {
             tui_color = false;
             continue;
@@ -332,6 +343,7 @@ int main(int argc, char** argv) {
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
                 << "  --stagger-ms=<ms>         Startup stagger per worker (ms) to reduce memory contention\n"
+                << "  --metrics-port=<port>     Prometheus HTTP metrics endpoint (default: disabled)\n"
                 << "  --log-level=<level>       Log verbosity: trace, debug, info, warn, error (default: info)\n"
                 << "\n"
                 << "  --help, -h               Display this help menu\n"
@@ -458,6 +470,29 @@ int main(int argc, char** argv) {
         engine.start(share_callback);
         std::cout << "Mining started. Press Ctrl+C to stop.\n";
 
+        // Optional Prometheus metrics endpoint for benchmark mode
+        std::unique_ptr<armrx::MetricsExporter> bench_metrics;
+        if (metrics_port > 0) {
+            bench_metrics = std::make_unique<armrx::MetricsExporter>(metrics_port,
+                [&engine, &shares_found]() -> std::string {
+                    std::string out;
+                    out += "# HELP armrx_hashrate_total Current total hashrate H/s\n"
+                           "# TYPE armrx_hashrate_total gauge\n"
+                           "armrx_hashrate_total " +
+                           std::to_string(engine.hash_rate()) + "\n";
+                    out += "# HELP armrx_hashes_total Total hashes computed\n"
+                           "# TYPE armrx_hashes_total counter\n"
+                           "armrx_hashes_total " +
+                           std::to_string(engine.total_hashes()) + "\n";
+                    out += "# HELP armrx_shares_found Shares found (local)\n"
+                           "# TYPE armrx_shares_found counter\n"
+                           "armrx_shares_found " +
+                           std::to_string(shares_found.load()) + "\n";
+                    out += "# EOF\n";
+                    return out;
+                });
+        }
+
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
 
@@ -525,6 +560,54 @@ int main(int argc, char** argv) {
 
         auto pool_mgr = std::make_unique<armrx::PoolManager>(
             pool_configs, pool_wallet, pool_password, pool_tls, pool_tls_verify);
+
+        // Optional Prometheus metrics endpoint
+        std::unique_ptr<armrx::MetricsExporter> metrics;
+        if (metrics_port > 0) {
+            metrics = std::make_unique<armrx::MetricsExporter>(metrics_port,
+                [&engine, &pool_mgr, &shares_submitted]() -> std::string {
+                    std::string out;
+                    // Hashrate
+                    out += "# HELP armrx_hashrate_total Current total hashrate H/s\n"
+                           "# TYPE armrx_hashrate_total gauge\n"
+                           "armrx_hashrate_total " +
+                           std::to_string(engine.hash_rate()) + "\n";
+                    // Total hashes
+                    out += "# HELP armrx_hashes_total Total hashes computed\n"
+                           "# TYPE armrx_hashes_total counter\n"
+                           "armrx_hashes_total " +
+                           std::to_string(engine.total_hashes()) + "\n";
+                    // Shares
+                    out += "# HELP armrx_shares_total Shares submitted\n"
+                           "# TYPE armrx_shares_total counter\n"
+                           "armrx_shares_submitted " +
+                           std::to_string(shares_submitted.load()) + "\n"
+                           "armrx_shares_accepted " +
+                           std::to_string(pool_mgr->shares_accepted()) + "\n"
+                           "armrx_shares_rejected " +
+                           std::to_string(pool_mgr->shares_rejected()) + "\n";
+                    // Pool status
+                    out += "# HELP armrx_pool_connected Pool connection status\n"
+                           "# TYPE armrx_pool_connected gauge\n"
+                           "armrx_pool_connected " +
+                           std::string(pool_mgr->is_connected() ? "1" : "0") + "\n";
+                    // JIT profile (optional)
+#ifdef ARMRX_JIT_PROFILE
+                    auto tc = engine.total_jit_compile_time_ns();
+                    auto te = engine.total_jit_execute_time_ns();
+                    out += "# HELP armrx_jit_compile_seconds_total JIT compile time\n"
+                           "# TYPE armrx_jit_compile_seconds_total counter\n"
+                           "armrx_jit_compile_seconds_total " +
+                           std::to_string(static_cast<double>(tc) / 1e9) + "\n"
+                           "# HELP armrx_jit_execute_seconds_total JIT execute time\n"
+                           "# TYPE armrx_jit_execute_seconds_total counter\n"
+                           "armrx_jit_execute_seconds_total " +
+                           std::to_string(static_cast<double>(te) / 1e9) + "\n";
+#endif
+                    out += "# EOF\n";
+                    return out;
+                });
+        }
 
         pool_mgr->set_job_callback([&](const armrx::Job& job) {
             engine.set_job(job);
