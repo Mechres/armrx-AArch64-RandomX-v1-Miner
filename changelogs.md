@@ -1,6 +1,25 @@
 # Changelog
 
-## 2026-07-18 (Structured logger + hot-path reductions + memory tier upgrades + new optimization plan)
+## 2026-07-18 (TUI redesign, CLI consolidation, Prometheus endpoint)
+
+### TUI redesign (Phase U1)
+- **`TuiSnapshot` struct** (`include/armrx/tui.hpp`): Replaced the 11-parameter `render()` function with a `const TuiSnapshot&` value type. Status enum replaces raw ANSI strings. Adding a new field is now a 2-site edit instead of 4.
+- **Injectable output stream** (`include/armrx/tui.hpp`, `src/tui.cpp`): `render()` takes an optional `std::ostream&` (default `std::cout`). Enables unit testing by passing a `std::ostringstream`.
+- **Terminal-width awareness** (`src/tui.cpp`): Queries `ioctl(TIOCGWINSZ)` each frame. Truncates pool name with ellipsis, scales bar width to terminal columns. Fixes scrollback corruption bug (U2) — no line wrapping means `prev_lines_` cursor math stays correct.
+- **`NO_COLOR` policy** (`src/tui.cpp`, `src/main.cpp`): Honors `NO_COLOR` env var and `TERM=dumb`. `--no-color` / `--color` CLI flags force override. All ANSI escape codes gated behind `use_color_` flag. Cursor hide/show also gated.
+- **Worker-bar EMA baseline** (`src/tui.cpp`): Added `bar_baseline_ema_` with `kEmaAlpha=0.2` (~5s time constant) to smooth per-frame bar jitter.
+- **`atexit` cursor restore** (`src/tui.cpp`): Registers `atexit(atexit_show_cursor)` in constructor — async-signal-safe `write()` call ensures cursor is restored even if `SIGTERM` kills the process before `~Tui()` runs.
+
+### Pool share tracking (U3.1)
+- **Share accept/reject counters** (`include/armrx/stratum_client.hpp`, `src/stratum_client.cpp`, `src/pool_manager.cpp`, `src/main.cpp`): `StratumClient` now tracks `shares_accepted_` and `shares_rejected_` atomically, incremented in `handle_reply` when the pool responds. `PoolManager` exposes them with mutex guard. `TuiSnapshot` populated with real accept/reject counts. TUI now shows "Shares: N (acc: M rej: K)" instead of just total submitted.
+
+### CLI consolidation (U3.5, U3.7)
+- **`--version` flag** (`src/main.cpp`, `CMakeLists.txt`): Prints version (`0.2.0`), git SHA, build date, JIT/TLS capability lines. Version info embedded via `.git_sha` file written by sync process.
+- **Dead code deleted** (`src/config.cpp`, `include/armrx/config.hpp`): Removed `apply_cli_overrides()` function — 31 lines of dead code not called since `PoolManager` extraction. CLI parsing lives only in `main.cpp`.
+
+### Prometheus metrics endpoint
+- **`include/armrx/metrics.hpp`**: Header-only `MetricsExporter` class. Listens on `localhost:port`, serves `GET /metrics` in Prometheus text format. Exports hashrate, total hashes, shares (submitted/accepted/rejected), pool connection status, and optional JIT profile counters. No external dependencies — pure POSIX sockets. Detached background thread, clean shutdown via atomic flag.
+- **`--metrics-port=N` flag** (`src/main.cpp`): Enables the endpoint in both benchmark and pool mining modes. Binds to loopback only for security.
 
 ### Documentation
 - **Created `docs/beyond-parity.md`**: Outlined the roadmap to go beyond XMRig performance parity on AArch64. Key pillars include worker thread phase staggering, Newton-Raphson division/sqrt JIT debugging/simplification, Superscalar JIT instruction scheduling, and test suite expansion.

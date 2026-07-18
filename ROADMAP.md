@@ -100,6 +100,13 @@
 | — | Cross-thread log sites migrated to logger | ✅ |
 | — | Template copy per-hash eliminated (P2.5) | ✅ |
 | — | Superscalar heap churn eliminated (P2.5) | ✅ |
+| — | TUI: TuiSnapshot + injectable ostream (U1.1-1.2) | ✅ |
+| — | TUI: terminal-width + NO_COLOR (U1.3-1.4) | ✅ |
+| — | TUI: EMA baseline + atexit cursor (U1.5-1.6) | ✅ |
+| — | Share accept/reject counters (U3.1) | ✅ |
+| — | `--version` flag with git SHA (U3.5) | ✅ |
+| — | Dead config parser removed (U3.7) | ✅ |
+| — | Prometheus metrics endpoint | ✅ |
 
 ### Docs
 | Doc | Description |

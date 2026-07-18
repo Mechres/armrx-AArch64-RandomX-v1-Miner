@@ -175,6 +175,13 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **Structured logger (`armrx::log`)** | ✅ |
 | **Per-hash template copy eliminated** | ✅ |
 | **Superscalar heap churn eliminated** | ✅ |
+| **TUI: TuiSnapshot + injectable ostream** | ✅ |
+| **TUI: terminal-width awareness + NO_COLOR** | ✅ |
+| **TUI: EMA bar baseline + atexit cursor restore** | ✅ |
+| **Share accept/reject tracking** | ✅ |
+| **`--version` flag with git SHA** | ✅ |
+| **Dead config parser removed** | ✅ |
+| **Prometheus metrics endpoint** | ✅ |
 | **Peephole JIT plan** | 📄 [docs/peephole-jit-plan.md](docs/peephole-jit-plan.md) |
 | **Beyond-parity plan** | 📄 [docs/new_plan.md](docs/beyond-parity.md) |
 | **CBRANCH postmortem** | 📄 [docs/branchless-cbranch.md](docs/branchless-cbranch.md) |
