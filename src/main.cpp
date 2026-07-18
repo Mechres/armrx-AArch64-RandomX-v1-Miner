@@ -285,6 +285,26 @@ int main(int argc, char** argv) {
             continue;
         }
 
+        if (argument == "--version" || argument == "-V") {
+            std::cout << "armrx " << ARMRX_VERSION
+                      << " (" << ARMRX_GIT_SHA << ", built " << ARMRX_BUILD_DATE << ")\n"
+                      << "  AArch64 JIT: "
+#ifdef ARMRX_HAVE_JIT
+                      << "enabled"
+#else
+                      << "disabled (interpreted VM only)"
+#endif
+                      << "\n"
+                      << "  TLS: "
+#ifdef ARMRX_HAVE_TLS
+                      << "enabled"
+#else
+                      << "disabled"
+#endif
+                      << "\n";
+            return 0;
+        }
+
         if (argument == "--help" || argument == "-h") {
             std::cout
                 << "Usage: armrx [options]\n"
@@ -308,6 +328,7 @@ int main(int argc, char** argv) {
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "  --no-color                Disable ANSI color in TUI output\n"
                 << "  --color                   Force ANSI color even when piped\n"
+                << "  --version, -V             Print version and build info\n"
                 << "  --mlock                   Lock all pages into RAM (prevents swapping)\n"
                 << "  --rt-priority             Set SCHED_FIFO real-time priority for workers\n"
                 << "  --stagger-ms=<ms>         Startup stagger per worker (ms) to reduce memory contention\n"

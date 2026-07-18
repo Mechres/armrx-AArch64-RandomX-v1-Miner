@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(armrx VERSION 0.1.0 LANGUAGES C CXX ASM)
+project(armrx VERSION 0.2.0 LANGUAGES C CXX ASM)
+
+# Embed git SHA and build date for --version flag
+# .git_sha is written by devbox_sync or the build host
+file(READ .git_sha ARMRX_GIT_SHA)
+string(STRIP "${ARMRX_GIT_SHA}" ARMRX_GIT_SHA)
+if(ARMRX_GIT_SHA STREQUAL "")
+    set(ARMRX_GIT_SHA "unknown")
+endif()
+string(TIMESTAMP ARMRX_BUILD_DATE "%Y-%m-%d" UTC)
+add_compile_definitions(ARMRX_VERSION="${PROJECT_VERSION}"
+    ARMRX_GIT_SHA="${ARMRX_GIT_SHA}"
+    ARMRX_BUILD_DATE="${ARMRX_BUILD_DATE}")
 
 option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
