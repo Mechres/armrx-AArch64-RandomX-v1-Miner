@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <chrono>
+#include "armrx/virtual_memory.h"
 
 namespace armrx {
 namespace {
@@ -131,14 +132,27 @@ static std::uint32_t map_to_randomx_flags(std::uint32_t flags) {
 VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
     // Allocate 2 MiB scratchpad via mmap for direct huge-page control
     const std::size_t sp_size = 2097152U;
-    scratchpad_data_ = static_cast<std::byte*>(
-        ::mmap(nullptr, sp_size, PROT_READ | PROT_WRITE,
-               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
-    if (scratchpad_data_ == MAP_FAILED) {
-        throw std::bad_alloc();
+    // Try MAP_HUGETLB first (2 MiB is exactly one huge page)
+    scratchpad_data_ = static_cast<std::byte*>(allocLargePagesMemory(sp_size));
+    if (!scratchpad_data_) {
+        // Fallback: plain anonymous + MADV_HUGEPAGE
+        scratchpad_data_ = static_cast<std::byte*>(
+            ::mmap(nullptr, sp_size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+        if (scratchpad_data_ == MAP_FAILED) {
+            throw std::bad_alloc();
+        }
+        ::madvise(scratchpad_data_, sp_size, MADV_HUGEPAGE);
     }
     scratchpad_size_ = sp_size;
-    ::madvise(scratchpad_data_, sp_size, MADV_HUGEPAGE);
+    // Warm up the scratchpad to avoid cold-start page faults on the first hash.
+    // MADV_POPULATE_WRITE (Linux 5.14+) prefaults writable pages without memset.
+#if defined(MADV_POPULATE_WRITE)
+    ::madvise(scratchpad_data_, sp_size, MADV_POPULATE_WRITE);
+#else
+    // Fallback: touch every page to fault them in
+    std::memset(scratchpad_data_, 0, sp_size);
+#endif
 #ifdef ARMRX_HAVE_JIT
     if (flags_ & kRandOMXFlagJit) {
         jit_ = std::make_unique<JitCompilerA64>();

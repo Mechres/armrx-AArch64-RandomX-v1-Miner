@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <vector>
 #include <sys/mman.h>
+#include "armrx/virtual_memory.h"
 
 namespace armrx {
 namespace {
@@ -239,12 +240,17 @@ Argon2dCache::Argon2dCache(std::size_t memory_blocks, std::size_t passes)
     }
 
     allocated_size_ = memory_blocks * sizeof(Argon2Block);
-    void* ptr = ::mmap(nullptr, allocated_size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (ptr == MAP_FAILED) {
-        throw std::runtime_error("mmap failed for Argon2dCache allocation");
+    // Try MAP_HUGETLB first (true huge pages)
+    void* ptr = allocLargePagesMemory(allocated_size_);
+    if (!ptr) {
+        // Fallback: plain anonymous + MADV_HUGEPAGE (relies on THP)
+        ptr = ::mmap(nullptr, allocated_size_, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (ptr == MAP_FAILED) {
+            throw std::runtime_error("mmap failed for Argon2dCache allocation");
+        }
+        ::madvise(ptr, allocated_size_, MADV_HUGEPAGE);
     }
     blocks_ = static_cast<Argon2Block*>(ptr);
-    ::madvise(blocks_, allocated_size_, MADV_HUGEPAGE);
 }
 
 Argon2dCache::~Argon2dCache() {

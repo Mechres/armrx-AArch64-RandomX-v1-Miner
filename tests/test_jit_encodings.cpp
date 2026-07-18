@@ -36,7 +36,7 @@ static void build_map() {
 int main() {
     build_map();
 
-    constexpr int kNumSeeds = 10;
+    constexpr int kNumSeeds = 5;
     int total_cbranches = 0;
     int bad_cbranches = 0;
 

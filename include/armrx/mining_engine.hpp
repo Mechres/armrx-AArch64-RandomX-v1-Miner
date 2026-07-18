@@ -14,6 +14,7 @@
 #include <cstring>
 #include <stdexcept>
 #include <sys/mman.h>
+#include "armrx/virtual_memory.h"
 
 namespace armrx {
 
@@ -25,8 +26,16 @@ public:
 
     explicit MappedMemory(std::size_t bytes) {
         if (bytes == 0) return;
-        void* ptr = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
-                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        // Try MAP_HUGETLB first (true huge pages, no THP dependency)
+        void* ptr = allocLargePagesMemory(bytes);
+        if (ptr) {
+            data_ = static_cast<std::byte*>(ptr);
+            size_ = bytes;
+            return;
+        }
+        // Fallback: plain anonymous + MADV_HUGEPAGE (relies on THP)
+        ptr = ::mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
         if (ptr == MAP_FAILED) throw std::bad_alloc();
         ::madvise(ptr, bytes, MADV_HUGEPAGE);
         data_ = static_cast<std::byte*>(ptr);
