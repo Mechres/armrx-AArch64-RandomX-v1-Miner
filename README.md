@@ -154,6 +154,18 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **Branchless CBRANCH (O11)** | ✅ |
 | **emit32 UB fix** | ✅ |
 | **hwloc CPU pinning** | ✅ |
+| **TLS hostname verification** | ✅ |
+| **`stratum_` mutex (UAF fix)** | ✅ |
+| **`session_id_` escape** | ✅ |
+| **JSON parser fixes** | ✅ |
+| **JIT generateProgram dedup** | ✅ |
+| **`read_buf_` cap (OOM protection)** | ✅ |
+| **`setPagesRW`/`setPagesRX` error propagation** | ✅ |
+| **CLI numeric validation** | ✅ |
+| **SIGTERM handler** | ✅ |
+| **Concurrency atomics** (`reconnect_attempts_`, `handshake_req_id_`, etc.) | ✅ |
+| **Rounding mode per-instance** | ✅ |
+| **TSAN CMake option** | ✅ |
 | **Peephole JIT plan** | 📄 [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
 | **CBRANCH postmortem** | 📄 [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
 
