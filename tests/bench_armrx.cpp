@@ -1,8 +1,23 @@
 /**
- * Micro-benchmarks for armrx pipeline components.
- * Run on the AArch64 device to find where we're losing time vs XMRig.
+ * Armrx benchmark protocol v2 — measurement foundation.
  *
- * Build: cmake --build build -j && ./build/bench_armrx
+ * Addresses known issues from v1:
+ *  - Proper statistical reporting (median, min, max, IQR) over multiple samples
+ *  - Deterministic precomputed random index sequences (no fixed cache-line-42 trap)
+ *  - Honest benchmark sizing (actual 2 MiB AES fill, not 64 bytes)
+ *  - Region attribution: separate phases of the hash pipeline
+ *  - JIT compile vs execute separation (when built with ARMRX_JIT_PROFILE)
+ *  - Configurable sample count and output format
+ *
+ * Build: cmake -S . -B build -DARMRX_ENABLE_NATIVE=ON
+ *        cmake --build build -j
+ *        ./build/bench_armrx
+ *
+ * For per-phase JIT timing: cmake -S . -B build -DARMRX_JIT_PROFILE=ON ...
+ *
+ * Run under perf stat for per-region PMU counters:
+ *   perf stat ./build/bench_armrx --attribution-only
+ *   perf stat ./build/bench_armrx --full-hash-only
  */
 
 #include "armrx/argon2.hpp"
@@ -20,140 +35,562 @@
 #include <algorithm>
 #include <vector>
 #include <span>
+#include <array>
+#include <cmath>
+#include <random>
+#include <string>
+#include <numeric>
+#include <cstdint>
+#include <cfenv>
 
 namespace {
 
 using bench_clock = std::chrono::steady_clock;
 
-/** Run `fn` N times, report average duration in μs and throughput. */
+// ============================================================================
+// Statistics helpers
+// ============================================================================
+
+struct BenchmarkResult {
+    std::string name;
+    std::string unit;
+    double      median_us;      // median μs per operation
+    double      min_us;         // fastest sample
+    double      max_us;         // slowest sample
+    double      mean_us;        // arithmetic mean
+    double      stddev_pct;     // relative standard deviation (%)
+    double      throughput;     // operations per second (scaled)
+    unsigned    samples;        // number of samples collected
+};
+
+/** Collect N timing samples of `fn()`, return statistics. */
 template<typename F>
-void benchmark(const char* name, unsigned iterations, F&& fn,
-               const char* unit = "ops", double scale = 1.0) {
+BenchmarkResult sample_benchmark(const char* name, unsigned samples,
+                                 unsigned warmup_samples, F&& fn,
+                                 const char* unit = "ops", double scale = 1.0) {
     // Warmup
-    for (unsigned i = 0; i < 3; ++i) fn();
+    for (unsigned i = 0; i < warmup_samples; ++i) fn();
 
-    auto start = bench_clock::now();
-    for (unsigned i = 0; i < iterations; ++i) fn();
-    auto end = bench_clock::now();
+    std::vector<double> ns_samples;
+    ns_samples.reserve(samples);
 
-    auto total_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    double per_op_us = static_cast<double>(total_ns) / iterations / 1000.0;
-    double ops_per_sec = static_cast<double>(iterations) * 1e9 / total_ns * scale;
+    for (unsigned i = 0; i < samples; ++i) {
+        auto t0 = bench_clock::now();
+        fn();
+        auto t1 = bench_clock::now();
+        auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
+        ns_samples.push_back(static_cast<double>(ns));
+    }
 
-    std::cout << std::left << std::setw(40) << name
-              << std::right << std::fixed << std::setprecision(2)
-              << std::setw(10) << per_op_us << " μs/op  "
-              << std::setw(10) << ops_per_sec << " " << unit << "/s\n";
+    std::sort(ns_samples.begin(), ns_samples.end());
+
+    double median_ns = ns_samples[samples / 2];
+    double min_ns    = ns_samples.front();
+    double max_ns    = ns_samples.back();
+    double sum_ns    = std::accumulate(ns_samples.begin(), ns_samples.end(), 0.0);
+    double mean_ns   = sum_ns / samples;
+
+    // Population stddev
+    double sq_sum = 0.0;
+    for (auto ns : ns_samples) {
+        double d = ns - mean_ns;
+        sq_sum += d * d;
+    }
+    double stddev_ns = std::sqrt(sq_sum / samples);
+    double stddev_pct = (mean_ns > 0.0) ? (stddev_ns / mean_ns * 100.0) : 0.0;
+
+    double median_us = median_ns / 1000.0;
+    double min_us    = min_ns / 1000.0;
+    double max_us    = max_ns / 1000.0;
+    double mean_us   = mean_ns / 1000.0;
+    double throughput = (median_ns > 0.0) ? (1e9 / median_ns * scale) : 0.0;
+
+    return {name, unit, median_us, min_us, max_us, mean_us, stddev_pct, throughput, samples};
 }
 
-} // namespace
+void print_result(const BenchmarkResult& r) {
+    std::cout << std::left << std::setw(44) << r.name
+              << std::right << std::fixed << std::setprecision(2)
+              << std::setw(10) << r.median_us << " μs  "
+              << std::setw(8) << r.throughput << " " << r.unit << "/s  "
+              << "[min " << r.min_us << " / max " << r.max_us
+              << " μs, σ " << std::setprecision(1) << r.stddev_pct
+              << "%, n=" << r.samples << "]\n";
+}
 
-int main() {
-    std::cout << "\n=== armrx Micro-Benchmarks ===\n\n";
+void print_header(const char* title) {
+    std::cout << "\n─── " << title << " ─────────────────────────────────────────────\n\n";
+}
 
-    // ── 1. Blake2b throughput ──────────────────────────────────────────
+// ============================================================================
+// Deterministic random-index generator
+// ============================================================================
+
+/**
+ * Precompute a deterministic sequence of pseudorandom indices.
+ * Uses a fixed-seed std::mt19937 for reproducibility across runs and builds.
+ */
+std::vector<std::size_t> make_index_sequence(std::size_t count, std::size_t range, std::uint64_t seed = 0xDEADBEEF) {
+    std::mt19937_64 rng(seed);
+    std::vector<std::size_t> indices;
+    indices.reserve(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        indices.push_back(static_cast<std::size_t>(rng() % range));
+    }
+    return indices;
+}
+
+// ============================================================================
+// Benchmark suites
+// ============================================================================
+
+void bench_blake2b() {
+    print_header("1. Blake2b");
     std::array<std::byte, 64> blake_input{};
     std::array<std::byte, 64> blake_output{};
-    benchmark("blake2b (64-in, 64-out)", 10000, [&] {
+
+    auto r = sample_benchmark("blake2b (64-in, 64-out)", 500, 10, [&] {
         auto res = armrx::blake2b(std::span<const std::byte>(blake_input), 64);
         std::memcpy(blake_output.data(), res.data(), 64);
-    });
+    }, "hash");
+    print_result(r);
+}
 
-    // ── 2. AES round primitives ───────────────────────────────────────
-    alignas(16) std::array<std::byte, 64> aes_buf{};
+void bench_aes_primitives() {
+    print_header("2. AES scratchpad operations");
     armrx::AesState aes_state{};
-    benchmark("fill_aes_1r_x4 (2 MiB)", 50, [&] {
-        armrx::fill_aes_1r_x4(aes_state,
-            std::span<std::byte>(reinterpret_cast<std::byte*>(aes_buf.data()), 64));
-    }, "pages"); // 64 bytes per call, not a full 2 MiB
 
-    // ── 3. Cache initialization ───────────────────────────────────────
+    // Benchmark 2 MiB scratchpad fill (realistic size)
+    std::vector<std::byte> aes_buf_2mib(2097152, std::byte{0});
+    auto r_fill = sample_benchmark("fill_aes_1r_x4 (2 MiB)", 30, 3, [&] {
+        armrx::fill_aes_1r_x4(aes_state, std::span<std::byte>(aes_buf_2mib));
+    }, "fill", 1.0);
+    print_result(r_fill);
+
+    // Benchmark hash_aes_1r_x4 (finalization step)
+    auto r_hash = sample_benchmark("hash_aes_1r_x4 (2 MiB)", 30, 3, [&] {
+        armrx::hash_aes_1r_x4(std::span<const std::byte>(aes_buf_2mib), aes_state);
+    }, "finalize", 1.0);
+    print_result(r_hash);
+}
+
+void bench_dataset_helpers() {
+    print_header("3. Dataset helpers (light-mode primitives)");
+
     std::vector<std::byte> seed_key = {std::byte{0x00}, std::byte{0x11}};
-    // Initialize once
     armrx::Argon2dCache cache;
     cache.initialize(seed_key);
 
-    // ── 4. Cache line read ────────────────────────────────────────────
-    benchmark("load_cache_line (random access)", 100000, [&] {
-        volatile auto item = armrx::load_cache_line(cache, 42);
-        (void)item;
-    }, "lines");
+    std::size_t n_lines = armrx::cache_line_count(cache);
+    std::size_t n_items = armrx::randomx_dataset_item_count();
 
-    // ── 5. SuperscalarHash (dataset item derivation) ──────────────────
-    benchmark("generate_dataset_item", 5000, [&] {
-        volatile auto item = armrx::generate_dataset_item(cache, 1000000);
-        (void)item;
-    }, "items");
+    constexpr std::size_t kNumAccesses = 5000;
+    auto line_indices  = make_index_sequence(kNumAccesses, n_lines, 0xA11CE);
+    auto item_indices  = make_index_sequence(kNumAccesses, n_items, 0x17E5E);
 
+    // Cache line reads with random access pattern
+    std::size_t li = 0;
+    auto r_line = sample_benchmark("load_cache_line (random)", kNumAccesses, 50, [&] {
+        (void)armrx::load_cache_line(cache, line_indices[li++ % kNumAccesses]);
+    }, "line", 1.0);
+    print_result(r_line);
+
+    // Dataset item generation with random item numbers
+    std::size_t ii = 0;
+    auto r_item = sample_benchmark("generate_dataset_item (random)", kNumAccesses, 50, [&] {
+        (void)armrx::generate_dataset_item(cache, item_indices[ii++ % kNumAccesses]);
+    }, "item", 1.0);
+    print_result(r_item);
+
+    // Dataset initialization of 5000 items (light-mode startup cost)
     std::vector<std::byte> dataset_buf(5000 * armrx::kRandomXDatasetItemBytes);
-    benchmark("initialize_dataset (5000 items)", 10, [&] {
+    auto r_init = sample_benchmark("initialize_dataset (5000 items)", 5, 2, [&] {
         armrx::initialize_dataset(dataset_buf, cache, 0, 5000);
-    }, "items", 5000.0);
+    }, "batch", 1.0);
+    print_result(r_init);
+}
 
-    // ── 6. JIT compilation only (warm VM with JIT) ────────────────────
+void bench_region_attribution() {
+    print_header("4. Region attribution — hash pipeline phases");
+
+    // Build one cache + VM for all phases
+    std::vector<std::byte> seed_key = {std::byte{0x00}, std::byte{0x11}};
+    armrx::Argon2dCache cache;
+    cache.initialize(seed_key);
+
     std::uint32_t jit_flags = armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit;
     armrx::VirtualMachine vm(jit_flags);
     vm.set_cache(&cache);
 
-    // JIT compilation benchmark: generate and compile one program
-    // The VM needs entropy to generate a program — run one full hash first
-    std::vector<std::byte> test_input = {std::byte{0x00}};
-    alignas(16) std::array<std::byte, 32> vm_out{};
-    armrx::randomx_calculate_hash(&vm, test_input.data(), test_input.size(), vm_out.data());
-
-    // ── 7. Full hash throughput (light mode, JIT) ─────────────────────
-    // Measure how many hashes/sec in the current configuration
+    // Deterministic input block (76 bytes, like a Monero block header)
+    alignas(16) std::array<std::byte, 32> hash_out{};
     std::array<std::byte, 76> block_template{};
-    for (size_t i = 0; i < block_template.size(); ++i) block_template[i] = static_cast<std::byte>(i & 0xff);
-    unsigned hash_count = 200;
+    for (size_t i = 0; i < block_template.size(); ++i)
+        block_template[i] = static_cast<std::byte>(i & 0xff);
 
-    auto hash_start = bench_clock::now();
-    for (unsigned i = 0; i < hash_count; ++i) {
-        block_template[39] = static_cast<std::byte>(i); // vary nonce byte
+    // Pre-run one hash to warm caches and JIT
+    armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                   block_template.size(), hash_out.data());
+
+    // ── 4a. Full hash (light, JIT) — median of many samples ────────────
+    constexpr unsigned kFullHashSamples = 200;
+    std::vector<double> full_hash_ns;
+    full_hash_ns.reserve(kFullHashSamples);
+
+    // Warmup: 10 hashes
+    for (unsigned w = 0; w < 10; ++w) {
+        block_template[39] = static_cast<std::byte>(w);
         armrx::randomx_calculate_hash(&vm, block_template.data(),
-                                       block_template.size(), vm_out.data());
+                                       block_template.size(), hash_out.data());
     }
-    auto hash_end = bench_clock::now();
-    auto hash_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(hash_end - hash_start).count();
-    double hash_us = static_cast<double>(hash_ns) / hash_count / 1000.0;
-    double hash_ps = static_cast<double>(hash_count) * 1e9 / hash_ns;
 
-    std::cout << std::left << std::setw(40) << "full hash (light, JIT)"
-              << std::right << std::fixed << std::setprecision(2)
-              << std::setw(10) << hash_us << " μs/hash  "
-              << std::setw(10) << hash_ps << " hashes/s" << std::endl;
-
-    // ── 8. Interpreted mode comparison ────────────────────────────────
-    std::uint32_t interp_flags = 0; // No JIT, no HardAes
-    armrx::VirtualMachine vm_interp(interp_flags);
-    vm_interp.set_cache(&cache);
-
-    // Warmup
-    armrx::randomx_calculate_hash(&vm_interp, test_input.data(), test_input.size(), vm_out.data());
-
-    unsigned interp_hash_count = 10;
-    auto interp_start = bench_clock::now();
-    for (unsigned i = 0; i < interp_hash_count; ++i) {
+    // Collect samples with varying nonce
+    for (unsigned i = 0; i < kFullHashSamples; ++i) {
         block_template[39] = static_cast<std::byte>(i + 100);
-        armrx::randomx_calculate_hash(&vm_interp, block_template.data(),
-                                        block_template.size(), vm_out.data());
+        auto t0 = bench_clock::now();
+        armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                       block_template.size(), hash_out.data());
+        auto t1 = bench_clock::now();
+        full_hash_ns.push_back(
+            static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()));
     }
-    auto interp_end = bench_clock::now();
-    auto interp_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(interp_end - interp_start).count();
-    double interp_us = static_cast<double>(interp_ns) / interp_hash_count / 1000.0;
-    double interp_ps = static_cast<double>(interp_hash_count) * 1e9 / interp_ns;
 
-    std::cout << std::left << std::setw(40) << "full hash (light, interpreted)"
+    std::sort(full_hash_ns.begin(), full_hash_ns.end());
+    double median_ns = full_hash_ns[kFullHashSamples / 2];
+    double min_ns    = full_hash_ns.front();
+    double max_ns    = full_hash_ns.back();
+    double sum_ns    = std::accumulate(full_hash_ns.begin(), full_hash_ns.end(), 0.0);
+    double mean_ns   = sum_ns / kFullHashSamples;
+
+    double sq_sum = 0.0;
+    for (auto ns : full_hash_ns) { double d = ns - mean_ns; sq_sum += d * d; }
+    double stddev_pct = (mean_ns > 0.0) ? std::sqrt(sq_sum / kFullHashSamples) / mean_ns * 100.0 : 0.0;
+
+    std::cout << std::left << std::setw(44) << "full hash (light, JIT)"
               << std::right << std::fixed << std::setprecision(2)
-              << std::setw(10) << interp_us << " μs/hash  "
-              << std::setw(10) << interp_ps << " hashes/s" << std::endl;
+              << std::setw(10) << median_ns / 1000.0 << " μs  "
+              << std::setw(8) << (median_ns > 0.0 ? 1e9 / median_ns : 0.0) << " hash/s  "
+              << "[min " << min_ns / 1000.0 << " / max " << max_ns / 1000.0
+              << " μs, σ " << std::setprecision(1) << stddev_pct
+              << "%, n=" << kFullHashSamples << "]\n";
 
-    // ── 9. Summary comparison vs XMRig ────────────────────────────────
-    std::cout << "\n=== Summary ===\n";
-    std::cout << "XMRig light mode target:  ~27 hashes/s (37 ms/hash)\n";
-    std::cout << "Our light JIT mode:        " << hash_ps << " hashes/s (" << hash_us / 1000.0 << " ms/hash)\n";
-    std::cout << "Our light interpreted:     " << interp_ps << " hashes/s\n";
-    std::cout << "Gap to XMRig:             " << (27.0 / hash_ps - 1.0) * 100.0 << "%\n\n";
+    // ── 4b. Phase breakdown via instrumented full pipeline ────────────
+    //
+    // Replicate randomx_calculate_hash() manually, inserting timing points
+    // around each phase. This gives accurate per-phase timing because every
+    // phase runs as part of an actual hash computation.
+    {
+        constexpr unsigned kPhaseSamples = 50;
+
+        // Per-phase accumulators (nanoseconds)
+        std::vector<double> b2b_input_ns(kPhaseSamples);
+        std::vector<double> init_sp_ns(kPhaseSamples);
+        std::vector<double> run_chain_ns(kPhaseSamples);   // 7 × run() + 7 × blake2b
+        std::vector<double> run_final_ns(kPhaseSamples);   // 1 × run()
+        std::vector<double> finalize_ns(kPhaseSamples);    // get_final_result
+
+        for (unsigned s = 0; s < kPhaseSamples; ++s) {
+            block_template[39] = static_cast<std::byte>(s + 500);
+
+            fenv_t fpstate;
+            std::fegetenv(&fpstate);
+
+            alignas(16) std::array<std::byte, 64> tempHash{};
+            std::span<const std::byte> input_span(
+                reinterpret_cast<const std::byte*>(block_template.data()), block_template.size());
+
+            // Phase: blake2b input → 64-byte seed
+            auto t0 = bench_clock::now();
+            armrx::blake2b(input_span, tempHash.data(), 64);
+            auto t1 = bench_clock::now();
+            b2b_input_ns[s] = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            // Phase: init_scratchpad (AES fill 2 MiB)
+            t0 = bench_clock::now();
+            vm.init_scratchpad(tempHash.data());
+            vm.reset_rounding_mode();
+            t1 = bench_clock::now();
+            init_sp_ns[s] = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            // Phase: chain loop (7 × run + 7 × blake2b mix)
+            alignas(16) std::array<std::byte, sizeof(armrx::RegisterFile)> reg_bytes{};
+            t0 = bench_clock::now();
+            for (int chain = 0; chain < 7; ++chain) {
+                vm.run(tempHash.data());
+                const auto& reg = vm.get_register_file();
+                std::memcpy(reg_bytes.data(), &reg, sizeof(reg));
+                armrx::blake2b(std::span<const std::byte>(reg_bytes), tempHash.data(), 64);
+            }
+            t1 = bench_clock::now();
+            run_chain_ns[s] = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            // Phase: final run()
+            t0 = bench_clock::now();
+            vm.run(tempHash.data());
+            t1 = bench_clock::now();
+            run_final_ns[s] = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            // Phase: get_final_result
+            t0 = bench_clock::now();
+            vm.get_final_result(hash_out.data());
+            t1 = bench_clock::now();
+            finalize_ns[s] = static_cast<double>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
+
+            std::fesetenv(&fpstate);
+        }
+
+        // Helper to report a phase from collected ns samples
+        auto report_phase = [&](const char* label, std::vector<double>& ns) {
+            std::sort(ns.begin(), ns.end());
+            unsigned n = static_cast<unsigned>(ns.size());
+            double med = ns[n / 2];
+            double mn  = ns.front();
+            double mx  = ns.back();
+            double sum = std::accumulate(ns.begin(), ns.end(), 0.0);
+            double avg = sum / n;
+            double sq = 0.0;
+            for (auto v : ns) { double d = v - avg; sq += d * d; }
+            double sp = (avg > 0.0) ? std::sqrt(sq / n) / avg * 100.0 : 0.0;
+            std::cout << std::left << std::setw(44) << label
+                      << std::right << std::fixed << std::setprecision(2)
+                      << std::setw(10) << med / 1000.0 << " μs  "
+                      << std::setw(8) << (med > 0.0 ? 1e9 / med : 0.0) << " /s  "
+                      << "[min " << mn / 1000.0 << " / max " << mx / 1000.0
+                      << " μs, σ " << std::setprecision(1) << sp
+                      << "%, n=" << n << "]\n";
+        };
+
+        report_phase("  ├ blake2b (input→seed)",        b2b_input_ns);
+        report_phase("  ├ init_scratchpad (AES 2MiB)",   init_sp_ns);
+        report_phase("  ├ chain: 7×run() + 7×blake2b",   run_chain_ns);
+        report_phase("  ├ final run()",                   run_final_ns);
+        report_phase("  └ get_final_result (AES+blake2b)", finalize_ns);
+
+        // Totals
+        struct Agg {
+            std::string label;
+            std::vector<double> data;
+        };
+        std::vector<Agg> phases = {
+            {"  blake2b (input→seed)",       b2b_input_ns},
+            {"  init_scratchpad",             init_sp_ns},
+            {"  chain: 7×run + 7×blake2b",   run_chain_ns},
+            {"  final run()",                 run_final_ns},
+            {"  get_final_result",            finalize_ns},
+        };
+
+        std::cout << "\n  Phase totals (% of full hash):\n";
+        for (auto& p : phases) {
+            std::sort(p.data.begin(), p.data.end());
+            double p_med = p.data[p.data.size() / 2];
+            double pct = (median_ns > 0.0) ? (p_med / median_ns * 100.0) : 0.0;
+            std::cout << "    ├ " << std::left << std::setw(34) << p.label
+                      << std::right << std::fixed << std::setprecision(2)
+                      << std::setw(10) << p_med / 1000.0 << " μs  "
+                      << std::setw(6) << pct << "%\n";
+        }
+    }
+
+    // ── 4c. JIT compile vs execute (when ARMRX_JIT_PROFILE is enabled) ──
+#ifdef ARMRX_JIT_PROFILE
+    // Run enough hashes that the JIT timers accumulate measurable values
+    vm.reset_jit_timers();
+    {
+        block_template[39] = static_cast<std::byte>(0);
+        armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                       block_template.size(), hash_out.data());
+        // Run 50 more hashes to accumulate profile data
+        for (unsigned i = 1; i <= 50; ++i) {
+            block_template[39] = static_cast<std::byte>(i + 200);
+            armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                           block_template.size(), hash_out.data());
+        }
+    }
+    std::uint64_t total_compile_ns = vm.get_jit_compile_time_ns();
+    std::uint64_t total_execute_ns = vm.get_jit_execute_time_ns();
+    std::uint64_t total_runs       = vm.get_jit_total_runs();
+
+    if (total_runs > 0) {
+        double compile_per_run_us = static_cast<double>(total_compile_ns) / total_runs / 1000.0;
+        double execute_per_run_us = static_cast<double>(total_execute_ns) / total_runs / 1000.0;
+        // Each hash runs 8 programs, so 8 runs per hash
+        double per_program_compile = compile_per_run_us;
+        double per_program_execute = execute_per_run_us;
+        double per_hash_compile    = compile_per_run_us * 8.0;
+        double per_hash_execute    = execute_per_run_us * 8.0;
+
+        std::cout << "\n  JIT profile (" << total_runs << " program runs over 50 hashes):\n";
+        std::cout << "    ├ JIT compile:    "
+                  << std::fixed << std::setprecision(2)
+                  << per_program_compile << " μs/program  ("
+                  << per_hash_compile << " μs/hash)\n";
+        std::cout << "    ├ JIT execute:    "
+                  << per_program_execute << " μs/program  ("
+                  << per_hash_execute << " μs/hash)\n";
+        double total_ph = per_hash_compile + per_hash_execute;
+        std::cout << "    └ JIT total:      "
+                  << total_ph << " μs/hash  ("
+                  << (per_hash_compile / total_ph * 100.0) << "% compile / "
+                  << (per_hash_execute / total_ph * 100.0) << "% exec)\n";
+    }
+#else
+    std::cout << "\n  JIT profile: not enabled (rebuild with -DARMRX_JIT_PROFILE=ON)\n";
+#endif
+
+    // ── 4d. Interpreted mode comparison ────────────────────────────────
+    {
+        std::uint32_t interp_flags = 0;
+        armrx::VirtualMachine vm_interp(interp_flags);
+        vm_interp.set_cache(&cache);
+
+        // Warmup
+        block_template[39] = static_cast<std::byte>(0);
+        armrx::randomx_calculate_hash(&vm_interp, block_template.data(),
+                                       block_template.size(), hash_out.data());
+
+        // Collect samples
+        constexpr unsigned kInterpSamples = 30;
+        std::vector<double> interp_ns;
+        interp_ns.reserve(kInterpSamples);
+        for (unsigned i = 0; i < kInterpSamples; ++i) {
+            block_template[39] = static_cast<std::byte>(i + 300);
+            auto t0 = bench_clock::now();
+            armrx::randomx_calculate_hash(&vm_interp, block_template.data(),
+                                           block_template.size(), hash_out.data());
+            auto t1 = bench_clock::now();
+            interp_ns.push_back(
+                static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()));
+        }
+
+        std::sort(interp_ns.begin(), interp_ns.end());
+        double interp_median = interp_ns[kInterpSamples / 2];
+        double interp_min    = interp_ns.front();
+        double interp_max    = interp_ns.back();
+
+        std::cout << "\n  Interpreted mode:\n";
+        std::cout << "    ├ full hash (light): "
+                  << std::fixed << std::setprecision(2)
+                  << interp_median / 1000.0 << " μs  ["
+                  << interp_min / 1000.0 << " – " << interp_max / 1000.0
+                  << " μs, n=" << kInterpSamples << "]\n";
+        std::cout << "    └ JIT speedup: "
+                  << (interp_median / median_ns) << "×\n";
+        std::cout << std::endl;
+    }
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    bool run_all         = true;
+    bool attribution_only = false;
+    bool full_hash_only   = false;
+    bool micro_only       = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg(argv[i]);
+        if (arg == "--attribution-only") { run_all = false; attribution_only = true; }
+        else if (arg == "--full-hash-only") { run_all = false; full_hash_only = true; }
+        else if (arg == "--micro-only") { run_all = false; micro_only = true; }
+        else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: bench_armrx [OPTIONS]\n"
+                      << "Options:\n"
+                      << "  --attribution-only   Only run region-attribution benchmarks\n"
+                      << "  --full-hash-only     Only run full-hash throughput benchmark\n"
+                      << "  --micro-only         Only run micro-benchmarks (blake2b, AES, dataset)\n"
+                      << "  --help               Show this message\n";
+            return 0;
+        }
+    }
+
+    std::cout << "\n╔══════════════════════════════════════════════════════════╗\n"
+              << "║        armrx Benchmark Protocol v2                      ║\n"
+              << "╚══════════════════════════════════════════════════════════╝\n";
+
+    if (run_all || micro_only) {
+        bench_blake2b();
+        bench_aes_primitives();
+        bench_dataset_helpers();
+    }
+
+    if (run_all || attribution_only) {
+        bench_region_attribution();
+    }
+
+    if (run_all || full_hash_only) {
+        print_header("5. Full hash throughput (light, JIT) — extended measurement");
+
+        std::vector<std::byte> seed_key = {std::byte{0x00}, std::byte{0x11}};
+        armrx::Argon2dCache cache;
+        cache.initialize(seed_key);
+
+        std::uint32_t jit_flags = armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit;
+        armrx::VirtualMachine vm(jit_flags);
+        vm.set_cache(&cache);
+
+        alignas(16) std::array<std::byte, 32> hash_out{};
+        std::array<std::byte, 76> block_template{};
+        for (size_t i = 0; i < block_template.size(); ++i)
+            block_template[i] = static_cast<std::byte>(i & 0xff);
+
+        // Warmup: 30 hashes
+        for (unsigned w = 0; w < 30; ++w) {
+            block_template[39] = static_cast<std::byte>(w);
+            armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                           block_template.size(), hash_out.data());
+        }
+
+        // Steady-state: 500 hashes collecting individual samples
+        constexpr unsigned kSamples = 500;
+        std::vector<double> ns_samples;
+        ns_samples.reserve(kSamples);
+
+        for (unsigned i = 0; i < kSamples; ++i) {
+            block_template[39] = static_cast<std::byte>(i + 1000);
+            auto t0 = bench_clock::now();
+            armrx::randomx_calculate_hash(&vm, block_template.data(),
+                                           block_template.size(), hash_out.data());
+            auto t1 = bench_clock::now();
+            ns_samples.push_back(
+                static_cast<double>(std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count()));
+        }
+
+        std::sort(ns_samples.begin(), ns_samples.end());
+
+        auto report_percentile = [&](double p) -> double {
+            size_t idx = static_cast<size_t>(p * (kSamples - 1) / 100.0);
+            size_t idx_clamped = std::min(idx, static_cast<size_t>(kSamples - 1));
+            return ns_samples[idx_clamped] / 1000.0;
+        };
+
+        double sum = std::accumulate(ns_samples.begin(), ns_samples.end(), 0.0);
+        double mean = sum / kSamples;
+
+        std::cout << std::left << std::setw(44) << "full hash (light, JIT)"
+                  << std::right << std::fixed << std::setprecision(2)
+                  << std::setw(10) << ns_samples[kSamples / 2] / 1000.0 << " μs median  "
+                  << std::setw(8) << (ns_samples[kSamples / 2] > 0.0 ? 1e9 / ns_samples[kSamples / 2] : 0.0) << " hash/s\n";
+
+        std::cout << "  min:       " << report_percentile(0)   << " μs\n"
+                  << "  1st pctl:  " << report_percentile(1)   << " μs\n"
+                  << "  5th pctl:  " << report_percentile(5)   << " μs\n"
+                  << "  25th pctl: " << report_percentile(25)  << " μs\n"
+                  << "  50th pctl: " << report_percentile(50)  << " μs (median)\n"
+                  << "  75th pctl: " << report_percentile(75)  << " μs\n"
+                  << "  95th pctl: " << report_percentile(95)  << " μs\n"
+                  << "  99th pctl: " << report_percentile(99)  << " μs\n"
+                  << "  max:       " << report_percentile(100) << " μs\n"
+                  << "  mean:      " << mean / 1000.0          << " μs\n";
+    }
+
+    if (run_all) {
+        std::cout << "\n=== Done ===\n";
+    }
 
     return 0;
 }

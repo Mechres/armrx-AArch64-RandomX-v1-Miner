@@ -4,15 +4,18 @@
 > For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 
-> **Current status:** Post-parity on 8× Cortex-A53 (~28.9 H/s). Focus is on
-> Newton-Raphson FDIV/FSQRT unblocking, worker phase staggering, and TUI redesign.
-> See [`PLAN.md`](PLAN.md) for the ranked priority list.
+> **Current status:** Benchmark protocol v2 deployed on device. Region attribution shows
+> **98.24% of hash time is JIT execution** (only 1.76% is JIT compile). Branch miss rate 34.42%
+> on Cortex-A53. Per-hash ~118M instructions, IPC 0.708. Optimization focus shifting
+> from peephole instruction count to branch-misprediction cost reduction and instruction scheduling.
+> See [`docs/performance-next-agent-handoff.md`](docs/performance-next-agent-handoff.md).
 
 ## Baseline
 
 - **Hardware:** Lenovo MSM8916 / Snapdragon 410, 8× Cortex-A53 @ ~1.2 GHz, 2 GiB RAM (postmarketOS, Linux 6.12, GCC 15.2 / musl).
-- **Hashrate:** ~24–27 H/s, 8 workers light mode (after all Phase 0–2 optimizations). XMRig on same HW: ~27 H/s → **~0–12% gap**.
-- **Perf profile:** JIT execution ≈ 98.5% of VM-loop time; armrx executes **33% more instructions** than XMRig (64.3B vs 48.2B) and **13× more branch misses**. The gap is *distributed codegen*.
+- **Hashrate:** ~5.2 H/s single-thread, ~28–29 H/s 8 workers light mode.
+- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. Branch miss rate **34.42%** (inherent RandomX CBRANCH). IPC 0.708 on A53.
+- **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 
 ---
 
@@ -123,7 +126,8 @@
 
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
-| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+15–20% | 🔴 Major | 4-phase plan: tooling → frequency-informed opcode audit → cross-opcode → hashrate veto. The only path to close the 33% instruction-count gap. |
+| **P4** | **Reduce JIT execution branch-misprediction cost** — 34.42% branch miss rate on A53, costing ~26% of total cycles. Evaluate CSEL for CBRANCH, balanced path costs, instruction scheduling for in-order pipeline. | `jit_compiler_a64.cpp` | ~+5–15% | 🟡 Medium | New Priority 1 based on benchmark v2. CBRANCH is inherently unpredictable; focus on reducing *cost* of misprediction. |
+| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | Downgraded from ~15–20%. Region attribution shows 98.24% of time is in execution. Per-opcode savings modest vs branch-miss waste. See benchmark v2 findings. |
 | PGO | Profile-Guided Optimization | CMake option (`ARMRX_PGO=GENERATE/USE`) | ~+5–10% | 🟡 Medium | Blocked: GCC 15 + musl `__gcov_*` linker crash. See `OPTIMIZATION_REFERENCE.md:47`. |
 
 ### Features

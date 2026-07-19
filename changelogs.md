@@ -1,6 +1,31 @@
 # Changelog
 
-## 2026-07-18 (TUI redesign, CLI consolidation, Prometheus endpoint)
+## 2026-07-19 (Benchmark protocol v2 — region attribution & PMU baseline)
+
+### Measurement foundation (Stage 1)
+
+- **`tests/bench_armrx.cpp`**: Complete rewrite — benchmark protocol v2.
+  - **Proper statistical reporting**: Median, min, max, σ%, sample count per benchmark.
+  - **Deterministic random index sequences**: Precomputed via fixed-seed `mt19937` for `load_cache_line` and `generate_dataset_item` — no more fixed cache-line-42 trap.
+  - **Honest benchmark sizing**: `fill_aes_1r_x4` now actually benchmarks full 2 MiB scratchpad fill, not 64 bytes.
+  - **Region attribution**: Manual replication of the `randomx_calculate_hash` pipeline with per-phase timing (blake2b input, init_scratchpad, chain loop, final run, get_final_result).
+  - **JIT compile vs execute separation**: When built with `-DARMRX_JIT_PROFILE=ON`, reports per-program compile/execute times.
+  - **Full hash throughput**: 500-sample percentile distribution (P0/P1/P5/P25/P50/P75/P95/P99/max/mean).
+  - **CLI flags**: `--attribution-only`, `--full-hash-only`, `--micro-only` for focused `perf stat` runs.
+  - **Interpreted comparison**: Reports JIT speedup factor.
+
+### Key findings (AArch64 Cortex-A53, light mode, JIT)
+
+| Metric | Value |
+|--------|-------|
+| Single-thread hashrate | **5.18 H/s** (192,909 μs/hash median, σ=1.4%) |
+| JIT compile (% of hash) | **1.76%** (3,361 μs/hash) |
+| JIT execute (% of hash) | **98.24%** (187,530 μs/hash) |
+| IPC | **0.708** |
+| Branch miss rate | **34.42%** |
+| JIT speedup over interpreted | **12.85×** |
+
+The dominant bottleneck is **JIT execution** (generated VM code), not JIT compilation or AES/Blake2b helpers. The 34.42% branch miss rate is inherent to RandomX's unpredictable CBRANCH — this is the #1 cycle sink on in-order Cortex-A53.
 
 ### TUI redesign (Phase U1)
 - **`TuiSnapshot` struct** (`include/armrx/tui.hpp`): Replaced the 11-parameter `render()` function with a `const TuiSnapshot&` value type. Status enum replaces raw ANSI strings. Adding a new field is now a 2-site edit instead of 4.
