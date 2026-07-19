@@ -167,6 +167,9 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_mining PRIVATE armrx_core)
     add_test(NAME test_mining COMMAND test_mining)
 
+    add_executable(debug_hash tests/debug_hash.cpp)
+    target_link_libraries(debug_hash PRIVATE armrx_core)
+
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
     add_test(NAME bench_armrx COMMAND bench_armrx)

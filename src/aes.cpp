@@ -4,8 +4,8 @@
 #include <cstring>
 
 // Global-scope AES T-tables from soft_aes.cpp
-extern const uint32_t randomx_aes_lut_enc[4][256];
-extern const uint32_t randomx_aes_lut_dec[4][256];
+extern "C" const uint32_t randomx_aes_lut_enc[4][256];
+extern "C" const uint32_t randomx_aes_lut_dec[4][256];
 
 namespace armrx {
 namespace {
@@ -17,22 +17,22 @@ namespace {
     std::memcpy(&s2, &input[8], 4);
     std::memcpy(&s3, &input[12], 4);
 
-    uint32_t t0 = randomx_aes_lut_enc[0][(s0 >> 24) & 0xff] ^
-                  randomx_aes_lut_enc[1][(s1 >> 16) & 0xff] ^
-                  randomx_aes_lut_enc[2][(s2 >>  8) & 0xff] ^
-                  randomx_aes_lut_enc[3][(s3 >>  0) & 0xff];
-    uint32_t t1 = randomx_aes_lut_enc[0][(s1 >> 24) & 0xff] ^
-                  randomx_aes_lut_enc[1][(s2 >> 16) & 0xff] ^
-                  randomx_aes_lut_enc[2][(s3 >>  8) & 0xff] ^
-                  randomx_aes_lut_enc[3][(s0 >>  0) & 0xff];
-    uint32_t t2 = randomx_aes_lut_enc[0][(s2 >> 24) & 0xff] ^
-                  randomx_aes_lut_enc[1][(s3 >> 16) & 0xff] ^
-                  randomx_aes_lut_enc[2][(s0 >>  8) & 0xff] ^
-                  randomx_aes_lut_enc[3][(s1 >>  0) & 0xff];
-    uint32_t t3 = randomx_aes_lut_enc[0][(s3 >> 24) & 0xff] ^
-                  randomx_aes_lut_enc[1][(s0 >> 16) & 0xff] ^
-                  randomx_aes_lut_enc[2][(s1 >>  8) & 0xff] ^
-                  randomx_aes_lut_enc[3][(s2 >>  0) & 0xff];
+    uint32_t t0 = randomx_aes_lut_enc[0][(s0 >>  0) & 0xff] ^
+                  randomx_aes_lut_enc[1][(s1 >>  8) & 0xff] ^
+                  randomx_aes_lut_enc[2][(s2 >> 16) & 0xff] ^
+                  randomx_aes_lut_enc[3][(s3 >> 24) & 0xff];
+    uint32_t t1 = randomx_aes_lut_enc[0][(s1 >>  0) & 0xff] ^
+                  randomx_aes_lut_enc[1][(s2 >>  8) & 0xff] ^
+                  randomx_aes_lut_enc[2][(s3 >> 16) & 0xff] ^
+                  randomx_aes_lut_enc[3][(s0 >> 24) & 0xff];
+    uint32_t t2 = randomx_aes_lut_enc[0][(s2 >>  0) & 0xff] ^
+                  randomx_aes_lut_enc[1][(s3 >>  8) & 0xff] ^
+                  randomx_aes_lut_enc[2][(s0 >> 16) & 0xff] ^
+                  randomx_aes_lut_enc[3][(s1 >> 24) & 0xff];
+    uint32_t t3 = randomx_aes_lut_enc[0][(s3 >>  0) & 0xff] ^
+                  randomx_aes_lut_enc[1][(s0 >>  8) & 0xff] ^
+                  randomx_aes_lut_enc[2][(s1 >> 16) & 0xff] ^
+                  randomx_aes_lut_enc[3][(s2 >> 24) & 0xff];
 
     AesBlock output;
     std::memcpy(&output[0],  &t0, 4);
@@ -49,22 +49,22 @@ namespace {
     std::memcpy(&s2, &input[8], 4);
     std::memcpy(&s3, &input[12], 4);
 
-    uint32_t t0 = randomx_aes_lut_dec[0][(s0 >> 24) & 0xff] ^
-                  randomx_aes_lut_dec[1][(s3 >> 16) & 0xff] ^
-                  randomx_aes_lut_dec[2][(s2 >>  8) & 0xff] ^
-                  randomx_aes_lut_dec[3][(s1 >>  0) & 0xff];
-    uint32_t t1 = randomx_aes_lut_dec[0][(s1 >> 24) & 0xff] ^
-                  randomx_aes_lut_dec[1][(s0 >> 16) & 0xff] ^
-                  randomx_aes_lut_dec[2][(s3 >>  8) & 0xff] ^
-                  randomx_aes_lut_dec[3][(s2 >>  0) & 0xff];
-    uint32_t t2 = randomx_aes_lut_dec[0][(s2 >> 24) & 0xff] ^
-                  randomx_aes_lut_dec[1][(s1 >> 16) & 0xff] ^
-                  randomx_aes_lut_dec[2][(s0 >>  8) & 0xff] ^
-                  randomx_aes_lut_dec[3][(s3 >>  0) & 0xff];
-    uint32_t t3 = randomx_aes_lut_dec[0][(s3 >> 24) & 0xff] ^
-                  randomx_aes_lut_dec[1][(s2 >> 16) & 0xff] ^
-                  randomx_aes_lut_dec[2][(s1 >>  8) & 0xff] ^
-                  randomx_aes_lut_dec[3][(s0 >>  0) & 0xff];
+    uint32_t t0 = randomx_aes_lut_dec[0][(s0 >>  0) & 0xff] ^
+                  randomx_aes_lut_dec[1][(s1 >>  8) & 0xff] ^
+                  randomx_aes_lut_dec[2][(s2 >> 16) & 0xff] ^
+                  randomx_aes_lut_dec[3][(s3 >> 24) & 0xff];
+    uint32_t t1 = randomx_aes_lut_dec[0][(s1 >>  0) & 0xff] ^
+                  randomx_aes_lut_dec[1][(s2 >>  8) & 0xff] ^
+                  randomx_aes_lut_dec[2][(s3 >> 16) & 0xff] ^
+                  randomx_aes_lut_dec[3][(s0 >> 24) & 0xff];
+    uint32_t t2 = randomx_aes_lut_dec[0][(s2 >>  0) & 0xff] ^
+                  randomx_aes_lut_dec[1][(s3 >>  8) & 0xff] ^
+                  randomx_aes_lut_dec[2][(s0 >> 16) & 0xff] ^
+                  randomx_aes_lut_dec[3][(s1 >> 24) & 0xff];
+    uint32_t t3 = randomx_aes_lut_dec[0][(s3 >>  0) & 0xff] ^
+                  randomx_aes_lut_dec[1][(s0 >>  8) & 0xff] ^
+                  randomx_aes_lut_dec[2][(s1 >> 16) & 0xff] ^
+                  randomx_aes_lut_dec[3][(s2 >> 24) & 0xff];
 
     AesBlock output;
     std::memcpy(&output[0],  &t0, 4);

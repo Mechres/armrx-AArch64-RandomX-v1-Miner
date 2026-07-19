@@ -406,6 +406,7 @@ int main(int argc, char** argv) {
         std::cout << "Cache initialized in " << elapsed.count() << " seconds.\n";
     }
 
+#ifdef ARMRX_HAVE_JIT
     // ── JIT dump mode ─────────────────────────────────────────────────────
     if (jit_dump_mode) {
         std::vector<std::byte> key_bytes;
@@ -439,6 +440,7 @@ int main(int argc, char** argv) {
         std::cout << std::dec << '\n';
         return 0;
     }
+#endif
 
     // ── Local benchmark ──────────────────────────────────────────────────────
     if (should_mine) {

@@ -219,36 +219,44 @@ DECL(randomx_program_aarch64):
 DECL(randomx_program_aarch64_main_loop):
 .Lmain_loop:
 
-	# xor integer registers with scratchpad data (spAddr0)
+	# xor integer registers with scratchpad data (spAddr0) + load FP registers
+	# Interleaved to hide FP L1D load latency behind integer ALU ops on A53's
+	# in-order pipeline. Each group: ldp (load) → eor×2 (ALU) → ldr dN (start
+	# NEON load) → sshll (NEON shift) → scvtf (NEON convert)
+
+	# Group F0 (+ int regs 4-5)
 	ldp	x20, x19, [x16]
 	eor	x4, x4, x20
 	eor	x5, x5, x19
-	ldp	x20, x19, [x16, 16]
-	eor	x6, x6, x20
-	eor	x7, x7, x19
-	ldp	x20, x19, [x16, 32]
-	eor	x12, x12, x20
-	eor	x13, x13, x19
-	ldp	x20, x19, [x16, 48]
-	eor	x14, x14, x20
-	eor	x15, x15, x19
-
-	# Load group F registers (spAddr1) — scalar NEON load + sign-extend
-	# Replaces ldpsw+ins+ins (GPR round-trip) with ldr+sshll (direct NEON path)
 	ldr	d16, [x17]
 	sshll	v16.2d, v16.2s, #0
 	scvtf	v16.2d, v16.2d
+
+	# Group F1 (+ int regs 6-7)
+	ldp	x20, x19, [x16, 16]
+	eor	x6, x6, x20
+	eor	x7, x7, x19
 	ldr	d17, [x17, #8]
 	sshll	v17.2d, v17.2s, #0
 	scvtf	v17.2d, v17.2d
+
+	# Group F2 (+ int regs 12-13)
+	ldp	x20, x19, [x16, 32]
+	eor	x12, x12, x20
+	eor	x13, x13, x19
 	ldr	d18, [x17, #16]
 	sshll	v18.2d, v18.2s, #0
 	scvtf	v18.2d, v18.2d
+
+	# Group F3 (+ int regs 14-15)
+	ldp	x20, x19, [x16, 48]
+	eor	x14, x14, x20
+	eor	x15, x15, x19
 	ldr	d19, [x17, #24]
 	sshll	v19.2d, v19.2s, #0
 	scvtf	v19.2d, v19.2d
 
-	# Load group E registers (spAddr1)
+	# Load group E registers (spAddr1) — no more integer work to pair
 	ldr	d20, [x17, #32]
 	sshll	v20.2d, v20.2s, #0
 	scvtf	v20.2d, v20.2d

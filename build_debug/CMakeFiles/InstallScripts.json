@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/mechres/Projeler/aarch64-randomx/build_debug/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

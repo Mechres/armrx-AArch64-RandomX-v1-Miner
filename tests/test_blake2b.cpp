@@ -161,7 +161,8 @@ int main() {
         std::byte{0xcb}, std::byte{0x12}, std::byte{0x8f}, std::byte{0xe4}};
     const auto encrypted = armrx::aes_encrypt_round(initial, round_key);
     assert(encrypted == expected);
-    // Note: aes_decrypt_round implements equivalent inverse round (aesdec), which is not the direct mathematical inverse of a single aes_encrypt_round.
+    // FIPS-197 AES-128 round 1 canonical output (SubBytes+ShiftRows+MixColumns+AddRoundKey)
+    // validated against upstream soft_aesenc.
 
     armrx::AesState seed{};
     armrx::AesGenerator1R single_step{seed};

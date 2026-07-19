@@ -203,6 +203,7 @@ void VirtualMachine::init_scratchpad(void* seed) {
 
 void VirtualMachine::reset_rounding_mode() {
     std::fesetround(FE_TONEAREST);
+    last_rounding_mode_ = 0; // invalidate cache so CFROUND always calls fesetround
 }
 
 void VirtualMachine::initialize_vm_state() {
@@ -216,9 +217,8 @@ void VirtualMachine::initialize_vm_state() {
     std::uint64_t a3_lo = getSmallPositiveFloatBits(entropy_[6]);
     std::uint64_t a3_hi = getSmallPositiveFloatBits(entropy_[7]);
 
-    // In JIT mode, run_jit() overwrites reg_.a with config.eMask (vm.cpp:840).
-    // Skip this init to avoid redundant work.
-#ifndef ARMRX_HAVE_JIT
+    // Note: In JIT mode, the group-A registers are loaded by the JIT prologue
+    // so we must always initialize them.
     std::memcpy(&reg_.a[0].lo, &a0_lo, 8);
     std::memcpy(&reg_.a[0].hi, &a0_hi, 8);
     std::memcpy(&reg_.a[1].lo, &a1_lo, 8);
@@ -227,19 +227,6 @@ void VirtualMachine::initialize_vm_state() {
     std::memcpy(&reg_.a[2].hi, &a2_hi, 8);
     std::memcpy(&reg_.a[3].lo, &a3_lo, 8);
     std::memcpy(&reg_.a[3].hi, &a3_hi, 8);
-#else
-    // JIT: only init reg_.a[0..3] if not overwritten by run_jit()
-    if (!jit_) {
-        std::memcpy(&reg_.a[0].lo, &a0_lo, 8);
-        std::memcpy(&reg_.a[0].hi, &a0_hi, 8);
-        std::memcpy(&reg_.a[1].lo, &a1_lo, 8);
-        std::memcpy(&reg_.a[1].hi, &a1_hi, 8);
-        std::memcpy(&reg_.a[2].lo, &a2_lo, 8);
-        std::memcpy(&reg_.a[2].hi, &a2_hi, 8);
-        std::memcpy(&reg_.a[3].lo, &a3_lo, 8);
-        std::memcpy(&reg_.a[3].hi, &a3_hi, 8);
-    }
-#endif
 
     ma_ = static_cast<std::uint32_t>(entropy_[8] & 0x7fffffc0ULL);
     mx_ = static_cast<std::uint32_t>(entropy_[10]);
@@ -841,8 +828,8 @@ void VirtualMachine::run_jit() {
         mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
     }
 
-    // Copy eMask into the top of reg_.a as the native ABI expects
-    std::memcpy(&reg_.a[0], config.eMask, sizeof(config.eMask));
+    // Copy eMask into reg_.f[0] as the JIT assembly expects (offset 64 = [x0, 64])
+    std::memcpy(&reg_.f[0], config.eMask, sizeof(config.eMask));
 
     jit_->getProgramFunc()(
         &reg_, &mem_regs,

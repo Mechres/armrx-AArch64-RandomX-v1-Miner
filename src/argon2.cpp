@@ -166,17 +166,14 @@ static void permute_16_neon(uint64_t* words) {
         store(2, 6, 10, 14, va, vb, vc, vd);
     }
 
-    // Diagonal step (last 4 scalar gb calls → 2 NEON calls)
-    {
-        auto [va, vb, vc, vd] = load(0, 5, 10, 15);
-        gb_neon(va, vb, vc, vd);
-        store(0, 5, 10, 15, va, vb, vc, vd);
-    }
-    {
-        auto [va, vb, vc, vd] = load(2, 7, 8, 13);
-        gb_neon(va, vb, vc, vd);
-        store(2, 7, 8, 13, va, vb, vc, vd);
-    }
+	// Diagonal step (last 4 scalar gb calls → 2 NEON calls)
+	// NOTE: Cannot use gb_neon here because diagonal register pairs
+	// (0,1), (5,6), (10,11), (15,12), (2,3), (7,4), (8,9), (13,14)
+	// are NOT at consecutive memory positions. Use scalar gb() instead.
+	gb(words[0], words[5], words[10], words[15]);
+	gb(words[1], words[6], words[11], words[12]);
+	gb(words[2], words[7], words[8], words[13]);
+	gb(words[3], words[4], words[9], words[14]);
 }
 
 static void permute_block_neon(Argon2Block& block) {
@@ -199,7 +196,7 @@ static void permute_block_neon(Argon2Block& block) {
 #endif // __aarch64__ && __ARM_NEON
 
 void permute_block(Argon2Block& block) {
-#if defined(__aarch64__) && defined(__ARM_NEON)
+#if 0 // defined(__aarch64__) && defined(__ARM_NEON)
     permute_block_neon(block);
 #else
     for (unsigned row = 0; row < 8; ++row) permute_16(block.data() + 16U * row);
