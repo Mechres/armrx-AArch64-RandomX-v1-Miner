@@ -1,5 +1,43 @@
 # Changelog
 
+## 2026-07-20 — Fix hash divergence: correct AES T-table transforms
+
+### Root cause: two bugs in software AES implementation
+
+**Bug 1: Wrong byte order and column permutation in encrypt_transform**
+`src/aes.cpp`: The AES encrypt T-table lookup used reversed byte order
+(MSB-first instead of LSB-first) within each 32-bit word, AND used a
+wrong column permutation pattern. This caused ALL AES encryption operations
+to produce incorrect output. The FIPS-197 KAT in test_blake2b.cpp was
+circular (expected value derived from the buggy code).
+
+Fix: Correct byte order (LSB-first) and column permutation to match the
+standard SubBytes→ShiftRows→MixColumns→AddRoundKey sequence.
+
+**Bug 2: Wrong column permutation in decrypt_transform (different from encrypt)**
+`src/aes.cpp`: The AES decrypt T-table lookup used the SAME column permutation
+as encrypt, but the upstream RandomX soft_aesdec uses a DIFFERENT permutation
+(a straight sequential rotation: s0,s1,s2,s3 → s1,s2,s3,s0 → etc.).
+
+Fix: Use the correct decryption-specific column permutation, matching the
+upstream's soft_aesdec.
+
+**Bug 3: Incorrect NEON hardware AES path**
+`src/aes_hash.cpp`: The ARM NEON `AESE`/`AESD` instructions implement a
+different operation order than the RandomX AES round specification.
+`AESE` applies AddRoundKey at the START (before SubBytes), while the
+standard applies it at the END (after MixColumns). `AESD` has a similar
+ordering reversal for decrypt. This caused all four AES-hash functions
+(fill_aes_1r_x4, fill_aes_4r_x4, hash_aes_1r_x4, hash_and_fill_aes_1r_x4)
+to produce incorrect results on AArch64.
+
+Fix: Removed all `#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)`
+NEON hardware paths from aes_hash.cpp. All AES operations now go through
+the software T-table path, which correctly implements the standard AES
+round order.
+
+**Files changed:** src/aes.cpp, src/aes_hash.cpp, tests/test_blake2b.cpp
+
 ## 2026-07-19 (Benchmark protocol v2 — region attribution & PMU baseline)
 
 ### Measurement foundation (Stage 1)
