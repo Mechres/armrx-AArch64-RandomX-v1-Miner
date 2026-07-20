@@ -36,7 +36,19 @@ NEON hardware paths from aes_hash.cpp. All AES operations now go through
 the software T-table path, which correctly implements the standard AES
 round order.
 
-**Files changed:** src/aes.cpp, src/aes_hash.cpp, tests/test_blake2b.cpp
+**Files changed:** src/aes.cpp, src/aes_hash.cpp, tests/test_blake2b.cpp, CMakeLists.txt
+
+### Post-fix benchmark re-baseline
+- **Hashrate dropped from 5.18 to 4.33 H/s** (−16.4%). Root cause: the old 5.18 H/s was from buggy AES producing wrong program entropy. Correct AES produces different (correct) VM programs that are inherently slower. NEON AES removal estimated ≤1.2% of the drop.
+- **33% instruction-count gap vs XMRig is now stale** — measured with buggy AES. Needs fresh comparison.
+- **KATs verified** on-device (armrx_tests: 16.19s on Cortex-A53).
+- **Build fixes**: removed dead `debug_hash` CMake target (file deleted in ed512e5 but CMake left behind); added `ARMRX_DISABLE_LTO` option (GCC 15 + musl LTO crash with fortified vsnprintf).
+
+### Cleanup
+- Stashed debug tracing code in `scratch_vm_study/upstream_rx` submodule
+- Archived old `plan.md` → `docs/archived/plan_v1.md` (superseded by PLAN.md)
+- Removed stale `#include <arm_neon.h>` from `src/aes_hash.cpp`
+- Updated AGENTS.md with devbox MCP commands, AES fix status
 
 ## 2026-07-19 (Benchmark protocol v2 — region attribution & PMU baseline)
 

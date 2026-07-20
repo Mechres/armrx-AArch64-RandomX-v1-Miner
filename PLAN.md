@@ -14,7 +14,8 @@
 
 - **Single-thread baseline:** 5.16–5.18 H/s (light mode JIT, `bench_armrx`)
 - **8-thread pool performance:** 28.92 H/s (3.61 H/s/thread — 30% per-thread drop due to memory bandwidth contention)
-- **CPI:** 1.22 (armrx) vs 1.56 (XMRig) — armrx emits simpler instructions that individually CPI better, but +33% more of them
+- **CPI:** 1.22 (armrx) — yet to be re-measured since AES fix (the 33% instruction-count gap was measured with buggy AES)
+- **AES T-table bugs corrected** — encrypt column permutation, decrypt column permutation, and incompatible NEON AESE/AESD ordering. All KATs verified against upstream RandomX reference.
 - **All KATs pass in JIT + interpreted mode**
 
 ### What's been delivered
@@ -38,16 +39,18 @@ See [`ROADMAP.md`](ROADMAP.md) for the detailed completed/remaining checklist.
 
 | # | Priority | Est. gain | Phase | Detail doc |
 |---|----------|-----------|-------|------------|
-| **1** | **Newton-Raphson FDIV/FSQRT postmortem** — debug x29 crash on existing NR code, then simplify | **+5–8% (BLOCKED)** | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
-| **2** | **Worker phase staggering** — tested, no benefit on Cortex-A53. Hardware bandwidth ceiling. | **+0%** | Beyond-parity A | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
-| **3** | **Peephole JIT coalescing** — disassembly comparison with XMRig on identical seed programs | **+5–10%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
-| **4** | **TUI redesign** — TuiSnapshot, terminal-width, NO_COLOR, EMA bars, atexit cursor | ✅ Done | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
-| **5** | **SuperscalarHash JIT output scheduling** — AArch64-level hazard analysis on emitted JIT buffer | **+3–5%** | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
-| **6** | **CLI/config consolidation** — `--version`, dead code deleted | ✅ Done | TUI U3 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u3--telemetry-and-cli) |
-| **7** | **Prometheus metrics endpoint** — HTTP `/metrics` on localhost | ✅ Done | Beyond-parity D | [`beyond-parity.md`](docs/beyond-parity.md#pillar-d-testing--observability-expansion) |
-| **8** | **PGO unblock** — try `-fprofile-use -fno-lto` path, static libgcov link, resolve GCC 15 + musl `__gcov_*` crash | **+5–10%** (blocked) | next_phase_v2 §2.6 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md#L47) |
-| **9** | **Stratum handshake / TLS tests** — integration tests for pool protocol under TSAN | Robustness | next_phase_v2 §4.4 | [`next_phase_v2.md`](docs/next_phase_v2.md#44-testing-strategy-for-next-phase-features) |
-| **10** | **DVFS / thermal pinning check** — measure throttle under sustained load | **+0–5%** | Beyond-parity | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
+| **1** | **CBRANCH misprediction cost reduction** — 34.42% branch miss rate, ~26% of cycles wasted. Evaluate CSEL for CBRANCH, balanced path costs. | **+5–15%** | JIT plan Phase 4 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
+| — | **Newton-Raphson FDIV/FSQRT postmortem** — debug x29 crash on existing NR code, then simplify | **+5–8% (FROZEN)** | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
+| **6** | **Worker phase staggering** — tested, no benefit on Cortex-A53. Hardware bandwidth ceiling. | **+0%** | Beyond-parity A | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
+| **2** | **Peephole JIT coalescing** — disassembly comparison with XMRig on identical seed programs | **+5–10%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
+| **5** | **TUI redesign** — TuiSnapshot, terminal-width, NO_COLOR, EMA bars, atexit cursor | ✅ Done | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
+| **3** | **Instruction scheduling for in-order A53** — static FP load scheduling, register-offset FP loads, IPC lift from 0.708 toward 2.0 peak | **+5–10%** | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
+| **4** | **SuperscalarHash JIT output scheduling** — AArch64-level hazard analysis on emitted JIT buffer | **+3–5%** | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
+| **7** | **CLI/config consolidation** — `--version`, dead code deleted | ✅ Done | TUI U3 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u3--telemetry-and-cli) |
+| **8** | **Prometheus metrics endpoint** — HTTP `/metrics` on localhost | ✅ Done | Beyond-parity D | [`beyond-parity.md`](docs/beyond-parity.md#pillar-d-testing--observability-expansion) |
+| **9** | **PGO unblock** — try `-fprofile-use -fno-lto` path, static libgcov link, resolve GCC 15 + musl `__gcov_*` crash | **+5–10%** (blocked) | next_phase_v2 §2.6 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md#L47) |
+| **10** | **Stratum handshake / TLS tests** — integration tests for pool protocol under TSAN | Robustness | next_phase_v2 §4.4 | [`next_phase_v2.md`](docs/next_phase_v2.md#44-testing-strategy-for-next-phase-features) |
+| **11** | **DVFS / thermal pinning check** — measure throttle under sustained load | **+0–5%** | Beyond-parity | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
 
 ---
 
@@ -83,7 +86,8 @@ NR postmortem ──► Simplify NR ──► Measure 1-8 thr scaling ──► 
 |-----|-------|--------|
 | [`ROADMAP.md`](ROADMAP.md) | Completed/remaining checklist | Active |
 | [`docs/next_phase_v2.md`](docs/next_phase_v2.md) | Comprehensive Phase 1/2/3 plan (post-review) | Active — detailed reference |
-| [`docs/next_phase.md`](docs/archived/next_phase.md) | v1 of above | **Archived** — superseded by v2 |
+| [`docs/archived/next_phase.md`](docs/archived/next_phase.md) | v1 of above | **Archived** — superseded by v2 |
+| [`docs/archived/plan_v1.md`](docs/archived/plan_v1.md) | v1 of master plan (261 lines) | **Archived** — superseded by this document |
 | [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | JIT instruction-count gap closure | Active reference |
 | [`docs/beyond-parity.md`](docs/beyond-parity.md) | Post-parity scaling optimization | Active reference (v2) |
 | [`docs/tui_usability_plan.md`](docs/tui_usability_plan.md) | TUI redesign, CLI ergonomics, Prometheus surface | Active reference |

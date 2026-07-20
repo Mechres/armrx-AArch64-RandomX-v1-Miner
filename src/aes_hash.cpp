@@ -4,12 +4,6 @@
 #include <cstring>
 #include <cstdint>
 
-#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
-// arm_neon.h covers all NEON + AES + SHA intrinsics on GCC/Clang AArch64.
-// arm_aes.h is an MSVC/ARM Compiler header and is not needed on GCC.
-#include <arm_neon.h>
-#endif
-
 namespace armrx {
 namespace {
 

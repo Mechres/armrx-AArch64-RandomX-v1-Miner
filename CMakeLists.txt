@@ -167,9 +167,6 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_mining PRIVATE armrx_core)
     add_test(NAME test_mining COMMAND test_mining)
 
-    add_executable(debug_hash tests/debug_hash.cpp)
-    target_link_libraries(debug_hash PRIVATE armrx_core)
-
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
     add_test(NAME bench_armrx COMMAND bench_armrx)
@@ -190,9 +187,10 @@ if(ARMRX_BUILD_TESTS)
 endif()
 
 # Enable Interprocedural Optimization (LTO) if supported
+option(ARMRX_DISABLE_LTO "Disable LTO/IPO even if supported (workaround for GCC 15 + musl crashes)" OFF)
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
-if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUAL "USE")
+if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUAL "USE" AND NOT ARMRX_DISABLE_LTO)
     message(STATUS "LTO/IPO is supported and enabled")
     set_property(TARGET armrx_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
