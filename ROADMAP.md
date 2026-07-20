@@ -4,11 +4,11 @@
 > For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 
-> **Current status:** Benchmark protocol v2 deployed on device. Region attribution shows
-> **98.24% of hash time is JIT execution** (only 1.76% is JIT compile). Branch miss rate 34.42%
-> on Cortex-A53. Per-hash ~118M instructions, IPC 0.708. Optimization focus shifting
-> from peephole instruction count to branch-misprediction cost reduction and instruction scheduling.
-> See [`docs/performance-next-agent-handoff.md`](docs/performance-next-agent-handoff.md).
+> **Current status:** Hash divergence fixed — three AES T-table bugs corrected.
+> AES encrypt (byte order + column permutation), AES decrypt (different column
+> permutation), and incompatible NEON AES paths removed. All KATs pass on both
+> x86_64 and AArch64. JIT and interpreted produce identical reference hashes.
+> See `docs/aes-ttable-bug-postmortem.md` for the full analysis.
 
 ## Baseline
 
@@ -46,6 +46,9 @@
 | O5 | Dataset huge pages (via `MappedMemory` + `MADV_HUGEPAGE`) | ✅ |
 | O6 | NEON Argon2 G-function (2× SIMD, 128→64 `gb` calls) | ✅ |
 | O7 | T-table AES fallback (replaces runtime `gf_inverse`) | ✅ |
+| — | AES encrypt_transform fix: correct byte order + column permutation | ✅ |
+| — | AES decrypt_transform fix: different column permutation from encrypt | ✅ |
+| — | NEON AES paths removed (AESE/AESD operation order ≠ RandomX spec) | ✅ |
 | O8 | Per-hash `mprotect` skip via `rwx_` flag | ✅ |
 | — | `bench_armrx` registered in CTest (3 tests) | ✅ |
 | — | ASan/UBSan CMake options | ✅ |

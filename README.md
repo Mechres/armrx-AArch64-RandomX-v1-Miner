@@ -65,15 +65,14 @@ Multiple pools can be specified for automatic failover: `--pool=A:1111 --pool=B:
 ### Interpreted VM
 
 The clean-room AArch64 interpreted VM matches the reference implementation
-by resolving five subtle design decisions:
+by resolving four subtle design decisions:
 
 | # | Decision | Detail |
 |---|----------|--------|
-| 1 | **AES inverse round** | `aesd` matches `InvShiftRows → InvSubBytes → InvMixColumns → AddRoundKey`; round-key XOR must happen *after* the inverse transforms |
-| 2 | **Word mapping** | `build_aes_block` follows strict little-endian layout matching `rx_set_int_vec_i128` |
-| 3 | **Scratchpad seeding** | `init_scratchpad` modifies `tempHash` in-place; first program runs with the modified seed |
-| 4 | **Frequency thresholds** | Cumulative opcode ceilings match standard RandomX v1 frequencies exactly |
-| 5 | **Zero-init registers** | Integer registers zeroed on VM setup to prevent cross-run residue |
+| 1 | **Word mapping** | `build_aes_block` follows strict little-endian layout matching `rx_set_int_vec_i128` |
+| 2 | **Scratchpad seeding** | `init_scratchpad` modifies `tempHash` in-place; first program runs with the modified seed |
+| 3 | **Frequency thresholds** | Cumulative opcode ceilings match standard RandomX v1 frequencies exactly |
+| 4 | **Zero-init registers** | Integer registers zeroed on VM setup to prevent cross-run residue |
 
 ### JIT Backend (AArch64 only)
 
@@ -178,6 +177,9 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **TUI: TuiSnapshot + injectable ostream** | ✅ |
 | **TUI: terminal-width awareness + NO_COLOR** | ✅ |
 | **TUI: EMA bar baseline + atexit cursor restore** | ✅ |
+| **AES T-table encrypt fix (byte order + column permutation)** | ✅ |
+| **AES T-table decrypt fix (different column permutation from encrypt)** | ✅ |
+| **NEON AES hardware path removed (AESE/AESD operation order mismatch)** | ✅ |
 | **Share accept/reject tracking** | ✅ |
 | **`--version` flag with git SHA** | ✅ |
 | **Dead config parser removed** | ✅ |
