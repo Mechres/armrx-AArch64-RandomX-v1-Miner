@@ -72,36 +72,6 @@ inline void write_block_to_span(std::span<std::byte> output, std::size_t offset,
 
 void fill_aes_1r_x4(AesState& state, std::span<std::byte> output) {
     ARMRX_ASSERT(output.size() % 64 == 0, "output size must be multiple of 64");
-#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
-    uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 0));
-    uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 16));
-    uint8x16_t s2 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 32));
-    uint8x16_t s3 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 48));
-
-    const uint8x16_t k0 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_0.data()));
-    const uint8x16_t k1 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_1.data()));
-    const uint8x16_t k2 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_2.data()));
-    const uint8x16_t k3 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_3.data()));
-
-    const uint8x16_t zero = vdupq_n_u8(0);
-
-    for (std::size_t offset = 0; offset < output.size(); offset += 64) {
-        s0 = veorq_u8(vaesimcq_u8(vaesdq_u8(s0, zero)), k0);
-        s1 = veorq_u8(vaesmcq_u8(vaeseq_u8(s1, zero)), k1);
-        s2 = veorq_u8(vaesimcq_u8(vaesdq_u8(s2, zero)), k2);
-        s3 = veorq_u8(vaesmcq_u8(vaeseq_u8(s3, zero)), k3);
-
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 0), s0);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 16), s1);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 32), s2);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 48), s3);
-    }
-
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 0), s0);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 16), s1);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 32), s2);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 48), s3);
-#else
     AesBlock s0 = read_block(state, 0);
     AesBlock s1 = read_block(state, 1);
     AesBlock s2 = read_block(state, 2);
@@ -123,58 +93,10 @@ void fill_aes_1r_x4(AesState& state, std::span<std::byte> output) {
     write_block(state, 1, s1);
     write_block(state, 2, s2);
     write_block(state, 3, s3);
-#endif
 }
 
 void fill_aes_4r_x4(AesState& state, std::span<std::byte> output) {
     ARMRX_ASSERT(output.size() % 64 == 0, "output size must be multiple of 64");
-#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
-    uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 0));
-    uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 16));
-    uint8x16_t s2 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 32));
-    uint8x16_t s3 = vld1q_u8(reinterpret_cast<const uint8_t*>(state.data() + 48));
-
-    const uint8x16_t k4r_0_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_0.data()));
-    const uint8x16_t k4r_1_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_1.data()));
-    const uint8x16_t k4r_2_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_2.data()));
-    const uint8x16_t k4r_3_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_3.data()));
-    const uint8x16_t k4r_4_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_4.data()));
-    const uint8x16_t k4r_5_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_5.data()));
-    const uint8x16_t k4r_6_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_6.data()));
-    const uint8x16_t k4r_7_v = vld1q_u8(reinterpret_cast<const uint8_t*>(key4r_7.data()));
-
-    const uint8x16_t zero = vdupq_n_u8(0);
-
-    for (std::size_t offset = 0; offset < output.size(); offset += 64) {
-        s0 = veorq_u8(vaesimcq_u8(vaesdq_u8(s0, zero)), k4r_0_v);
-        s1 = veorq_u8(vaesmcq_u8(vaeseq_u8(s1, zero)), k4r_0_v);
-        s0 = veorq_u8(vaesimcq_u8(vaesdq_u8(s0, zero)), k4r_1_v);
-        s1 = veorq_u8(vaesmcq_u8(vaeseq_u8(s1, zero)), k4r_1_v);
-        s0 = veorq_u8(vaesimcq_u8(vaesdq_u8(s0, zero)), k4r_2_v);
-        s1 = veorq_u8(vaesmcq_u8(vaeseq_u8(s1, zero)), k4r_2_v);
-        s0 = veorq_u8(vaesimcq_u8(vaesdq_u8(s0, zero)), k4r_3_v);
-        s1 = veorq_u8(vaesmcq_u8(vaeseq_u8(s1, zero)), k4r_3_v);
-
-        s2 = veorq_u8(vaesimcq_u8(vaesdq_u8(s2, zero)), k4r_4_v);
-        s3 = veorq_u8(vaesmcq_u8(vaeseq_u8(s3, zero)), k4r_4_v);
-        s2 = veorq_u8(vaesimcq_u8(vaesdq_u8(s2, zero)), k4r_5_v);
-        s3 = veorq_u8(vaesmcq_u8(vaeseq_u8(s3, zero)), k4r_5_v);
-        s2 = veorq_u8(vaesimcq_u8(vaesdq_u8(s2, zero)), k4r_6_v);
-        s3 = veorq_u8(vaesmcq_u8(vaeseq_u8(s3, zero)), k4r_6_v);
-        s2 = veorq_u8(vaesimcq_u8(vaesdq_u8(s2, zero)), k4r_7_v);
-        s3 = veorq_u8(vaesmcq_u8(vaeseq_u8(s3, zero)), k4r_7_v);
-
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 0), s0);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 16), s1);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 32), s2);
-        vst1q_u8(reinterpret_cast<uint8_t*>(output.data() + offset + 48), s3);
-    }
-
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 0), s0);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 16), s1);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 32), s2);
-    vst1q_u8(reinterpret_cast<uint8_t*>(state.data() + 48), s3);
-#else
     AesBlock s0 = read_block(state, 0);
     AesBlock s1 = read_block(state, 1);
     AesBlock s2 = read_block(state, 2);
@@ -205,44 +127,6 @@ void fill_aes_4r_x4(AesState& state, std::span<std::byte> output) {
 
 void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash) {
     ARMRX_ASSERT(input.size() % 64 == 0, "input size must be multiple of 64");
-#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
-    uint8x16_t s0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_0.data()));
-    uint8x16_t s1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_1.data()));
-    uint8x16_t s2 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_2.data()));
-    uint8x16_t s3 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_3.data()));
-
-    const uint8x16_t xk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_0.data()));
-    const uint8x16_t xk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_1.data()));
-
-    const uint8x16_t zero = vdupq_n_u8(0);
-
-    for (std::size_t offset = 0; offset < input.size(); offset += 64) {
-        uint8x16_t in0 = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data() + offset + 0));
-        uint8x16_t in1 = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data() + offset + 16));
-        uint8x16_t in2 = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data() + offset + 32));
-        uint8x16_t in3 = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data() + offset + 48));
-
-        s0 = veorq_u8(vaesmcq_u8(vaeseq_u8(s0, zero)), in0);
-        s1 = veorq_u8(vaesimcq_u8(vaesdq_u8(s1, zero)), in1);
-        s2 = veorq_u8(vaesmcq_u8(vaeseq_u8(s2, zero)), in2);
-        s3 = veorq_u8(vaesimcq_u8(vaesdq_u8(s3, zero)), in3);
-    }
-
-    s0 = veorq_u8(vaesmcq_u8(vaeseq_u8(s0, zero)), xk0);
-    s1 = veorq_u8(vaesimcq_u8(vaesdq_u8(s1, zero)), xk0);
-    s2 = veorq_u8(vaesmcq_u8(vaeseq_u8(s2, zero)), xk0);
-    s3 = veorq_u8(vaesimcq_u8(vaesdq_u8(s3, zero)), xk0);
-
-    s0 = veorq_u8(vaesmcq_u8(vaeseq_u8(s0, zero)), xk1);
-    s1 = veorq_u8(vaesimcq_u8(vaesdq_u8(s1, zero)), xk1);
-    s2 = veorq_u8(vaesmcq_u8(vaeseq_u8(s2, zero)), xk1);
-    s3 = veorq_u8(vaesimcq_u8(vaesdq_u8(s3, zero)), xk1);
-
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 0), s0);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 16), s1);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 32), s2);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 48), s3);
-#else
     AesBlock s0 = hash_state_0;
     AesBlock s1 = hash_state_1;
     AesBlock s2 = hash_state_2;
@@ -274,74 +158,10 @@ void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash) {
     write_block(hash, 1, s1);
     write_block(hash, 2, s2);
     write_block(hash, 3, s3);
-#endif
 }
 
 void hash_and_fill_aes_1r_x4(std::span<std::byte> scratchpad, AesState& hash, AesState& fill_state) {
     ARMRX_ASSERT(scratchpad.size() % 64 == 0, "scratchpad size must be multiple of 64");
-#if defined(__aarch64__) && defined(__ARM_FEATURE_CRYPTO)
-    uint8x16_t hs0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_0.data()));
-    uint8x16_t hs1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_1.data()));
-    uint8x16_t hs2 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_2.data()));
-    uint8x16_t hs3 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_state_3.data()));
-
-    uint8x16_t fs0 = vld1q_u8(reinterpret_cast<const uint8_t*>(fill_state.data() + 0));
-    uint8x16_t fs1 = vld1q_u8(reinterpret_cast<const uint8_t*>(fill_state.data() + 16));
-    uint8x16_t fs2 = vld1q_u8(reinterpret_cast<const uint8_t*>(fill_state.data() + 32));
-    uint8x16_t fs3 = vld1q_u8(reinterpret_cast<const uint8_t*>(fill_state.data() + 48));
-
-    const uint8x16_t fk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_0.data()));
-    const uint8x16_t fk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_1.data()));
-    const uint8x16_t fk2 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_2.data()));
-    const uint8x16_t fk3 = vld1q_u8(reinterpret_cast<const uint8_t*>(key1r_3.data()));
-
-    const uint8x16_t xk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_0.data()));
-    const uint8x16_t xk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_1.data()));
-
-    const uint8x16_t zero = vdupq_n_u8(0);
-
-    for (std::size_t offset = 0; offset < scratchpad.size(); offset += 64) {
-        uint8x16_t sp0 = vld1q_u8(reinterpret_cast<const uint8_t*>(scratchpad.data() + offset + 0));
-        uint8x16_t sp1 = vld1q_u8(reinterpret_cast<const uint8_t*>(scratchpad.data() + offset + 16));
-        uint8x16_t sp2 = vld1q_u8(reinterpret_cast<const uint8_t*>(scratchpad.data() + offset + 32));
-        uint8x16_t sp3 = vld1q_u8(reinterpret_cast<const uint8_t*>(scratchpad.data() + offset + 48));
-
-        hs0 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs0, zero)), sp0);
-        hs1 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs1, zero)), sp1);
-        hs2 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs2, zero)), sp2);
-        hs3 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs3, zero)), sp3);
-
-        fs0 = veorq_u8(vaesimcq_u8(vaesdq_u8(fs0, zero)), fk0);
-        fs1 = veorq_u8(vaesmcq_u8(vaeseq_u8(fs1, zero)), fk1);
-        fs2 = veorq_u8(vaesimcq_u8(vaesdq_u8(fs2, zero)), fk2);
-        fs3 = veorq_u8(vaesmcq_u8(vaeseq_u8(fs3, zero)), fk3);
-
-        vst1q_u8(reinterpret_cast<uint8_t*>(scratchpad.data() + offset + 0), fs0);
-        vst1q_u8(reinterpret_cast<uint8_t*>(scratchpad.data() + offset + 16), fs1);
-        vst1q_u8(reinterpret_cast<uint8_t*>(scratchpad.data() + offset + 32), fs2);
-        vst1q_u8(reinterpret_cast<uint8_t*>(scratchpad.data() + offset + 48), fs3);
-    }
-
-    vst1q_u8(reinterpret_cast<uint8_t*>(fill_state.data() + 0), fs0);
-    vst1q_u8(reinterpret_cast<uint8_t*>(fill_state.data() + 16), fs1);
-    vst1q_u8(reinterpret_cast<uint8_t*>(fill_state.data() + 32), fs2);
-    vst1q_u8(reinterpret_cast<uint8_t*>(fill_state.data() + 48), fs3);
-
-    hs0 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs0, zero)), xk0);
-    hs1 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs1, zero)), xk0);
-    hs2 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs2, zero)), xk0);
-    hs3 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs3, zero)), xk0);
-
-    hs0 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs0, zero)), xk1);
-    hs1 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs1, zero)), xk1);
-    hs2 = veorq_u8(vaesmcq_u8(vaeseq_u8(hs2, zero)), xk1);
-    hs3 = veorq_u8(vaesimcq_u8(vaesdq_u8(hs3, zero)), xk1);
-
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 0), hs0);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 16), hs1);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 32), hs2);
-    vst1q_u8(reinterpret_cast<uint8_t*>(hash.data() + 48), hs3);
-#else
     AesBlock hs0 = hash_state_0;
     AesBlock hs1 = hash_state_1;
     AesBlock hs2 = hash_state_2;
