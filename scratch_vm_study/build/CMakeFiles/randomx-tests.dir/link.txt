@@ -1,0 +1,1 @@
+/usr/bin/c++  -maes -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/randomx-tests.dir/link.d "CMakeFiles/randomx-tests.dir/src/tests/tests.cpp.o" -o randomx-tests  librandomx.a

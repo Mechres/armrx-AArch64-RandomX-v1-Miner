@@ -955,6 +955,15 @@ void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::siz
     machine->init_scratchpad(tempHash.data());
     machine->reset_rounding_mode();
 
+    // Debug: print tempHash after init_scratchpad
+    std::cout << "[armrx] after initScratchpad tempHash:";
+    for (int i = 0; i < 8; ++i) {
+        uint64_t v;
+        std::memcpy(&v, tempHash.data() + i * 8, 8);
+        std::cout << " " << std::hex << v;
+    }
+    std::cout << std::dec << std::endl;
+
     alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
     for (int chain = 0; chain < 7; ++chain) {
         machine->run(tempHash.data());

@@ -122,7 +122,6 @@ void fill_aes_4r_x4(AesState& state, std::span<std::byte> output) {
     write_block(state, 1, s1);
     write_block(state, 2, s2);
     write_block(state, 3, s3);
-#endif
 }
 
 void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash) {
@@ -213,7 +212,6 @@ void hash_and_fill_aes_1r_x4(std::span<std::byte> scratchpad, AesState& hash, Ae
     write_block(hash, 1, hs1);
     write_block(hash, 2, hs2);
     write_block(hash, 3, hs3);
-#endif
 }
 
 } // namespace armrx
