@@ -15,12 +15,12 @@ was in shared code that runs **before** the JIT/interpreted split.
 
 ## Root Cause
 
-Three independent bugs in the AES T-table transforms in `src/aes.cpp` and
+Three independent bugs in the AES T-table transforms (formerly in `src/aes.cpp`, now in `include/armrx/aes.hpp`) and
 `src/aes_hash.cpp`:
 
 ### Bug 1: `encrypt_transform` — reversed byte order and wrong column permutation
 
-**File:** `src/aes.cpp:20-35`
+**File:** `include/armrx/aes.hpp:20-35`
 
 The T-table lookup extracted bytes in MSB-first order (`(s0 >> 24) & 0xff`)
 instead of LSB-first (`(s0 >> 0) & 0xff`). Combined with an incorrect column
@@ -49,7 +49,7 @@ t3 = TE0[(s3 >>  0) & 0xff] ^ TE1[(s0 >>  8) & 0xff] ^
 
 ### Bug 2: `decrypt_transform` — used encrypt's column permutation
 
-**File:** `src/aes.cpp:52-67`
+**File:** `include/armrx/aes.hpp:52-67`
 
 The upstream `soft_aesenc` and `soft_aesdec` use **different** column permutations:
 
@@ -119,8 +119,8 @@ The bug was found by stage-gated binary search using the upstream reference
 
 | File | Change |
 |------|--------|
-| `src/aes.cpp:20-35` | Fix encrypt_transform (byte order + column permutation) |
-| `src/aes.cpp:52-67` | Fix decrypt_transform (different column permutation) |
+| `include/armrx/aes.hpp` | Software AES encrypt/decrypt round optimization (inlined, by-value) |
+| `src/aes.cpp` | Deleted (transforms moved to `aes.hpp`) |
 | `src/aes_hash.cpp` | Remove all 4 NEON hardware AES paths (~180 lines) |
 | `tests/test_blake2b.cpp` | Fix circular FIPS-197 KAT expected value |
 

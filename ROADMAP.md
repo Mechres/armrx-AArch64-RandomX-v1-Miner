@@ -124,7 +124,8 @@
 |-----|-------------|
 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
-| [`docs/next_phase_v2.md`](docs/next_phase_v2.md) | Comprehensive next-phase improvement plan (post-review v2) |
+| [`docs/next_phase_v3.md`](docs/next_phase_v3.md) | Comprehensive next-phase improvement plan (v3) |
+| [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |
 
 ---
 
@@ -143,7 +144,7 @@
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | — | Stratum V2 protocol support | 🔴 Major | Next-gen pool compatibility |
-| — | HTTP Prometheus metrics endpoint | 🟡 Medium | Monitoring / dashboard integration |
+| — | HTTP Prometheus metrics endpoint | ✅ Completed | Serving GET /metrics, loopback-only |
 | — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | Failed once (segfault). Do not retry without KAT proof and XMRig source study. |
 
 ### Maintenance
@@ -161,3 +162,5 @@
 |-----|-------------|
 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
+| [`docs/next_phase_v3.md`](docs/next_phase_v3.md) | Comprehensive next-phase improvement plan (v3) |
+| [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |

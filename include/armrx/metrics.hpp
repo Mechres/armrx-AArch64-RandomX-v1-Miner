@@ -10,6 +10,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include "armrx/log.hpp"
 
 namespace armrx {
 
@@ -35,15 +36,15 @@ public:
             addr.sin_port = ::htons(port);
             addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
             if (::bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-                std::cerr << "[Metrics] bind(" << port << ") failed\n";
+                ARMRX_LOG_WARN << "Metrics bind(" << port << ") failed";
                 ::close(fd); running_ = false; return;
             }
             if (::listen(fd, 5) < 0) {
-                std::cerr << "[Metrics] listen() failed\n";
+                ARMRX_LOG_WARN << "Metrics listen() failed";
                 ::close(fd); running_ = false; return;
             }
             server_fd_ = fd;
-            std::cerr << "[Metrics] listening on http://127.0.0.1:" << port << "/metrics\n";
+            ARMRX_LOG_INFO << "Metrics listening on http://127.0.0.1:" << port << "/metrics";
             while (running_) {
                 struct sockaddr_in client{};
                 socklen_t client_len = sizeof(client);

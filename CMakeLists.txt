@@ -132,7 +132,7 @@ if(ARMRX_JIT_PROFILE)
 endif()
 
 if(ARMRX_ENABLE_JIT_FAST_DIV_SQRT)
-    target_compile_definitions(armrx_core PUBLIC ARMRX_JIT_FAST_DIV_SQRT)
+    target_compile_definitions(armrx_core PRIVATE ARMRX_JIT_FAST_DIV_SQRT)
     message(STATUS "Fast JIT FDIV and FSQRT (Newton-Raphson) enabled")
 endif()
 

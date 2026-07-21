@@ -34,10 +34,9 @@ The JIT speedup over interpreted is **12.85×** on Cortex-A53 (192,909 μs/hash 
 ### Module Structure
 
 ```
-include/armrx/          — Public headers (aes.hpp, aes_generator.hpp, aes_hash.hpp,
-│                         vm.hpp, program.hpp, instruction.hpp, blake2b.hpp, ...)
+include/armrx/          — Public headers (aes.hpp [inlined software AES transforms], aes_generator.hpp,
+│                         aes_hash.hpp, vm.hpp, program.hpp, instruction.hpp, blake2b.hpp, ...)
 src/                    — Implementation
-├── aes.cpp             — AES T-table encrypt/decrypt single-round functions
 ├── aes_generator.cpp   — AesGenerator1R, AesGenerator4R stateful generators
 ├── aes_hash.cpp        — fill_aes_1r_x4, fill_aes_4r_x4, hash_aes_1r_x4,
 │                         hash_and_fill_aes_1r_x4 (software T-table path only)
@@ -69,7 +68,7 @@ docs/                   — Documentation
 
 ### 2.1 AES T-table Encrypt — Byte Order & Column Permutation
 
-**Files:** `src/aes.cpp:20-35`  
+**Files:** `include/armrx/aes.hpp:20-35` (formerly `src/aes.cpp:20-35`)  
 **Bug:** The T-table lookup used MSB-first byte extraction (`(s0 >> 24) & 0xff`) instead of LSB-first (`(s0 >> 0) & 0xff`), combined with an incorrect column permutation for the ShiftRows+MixColumns mapping. This caused every AES encryption operation to produce wrong output.
 
 **Fix:** Changed to LSB-first byte extraction with the standard ShiftRows column permutation:
@@ -84,7 +83,7 @@ t3 = TE0[(s3>> 0)] ^ TE1[(s0>> 8)] ^ TE2[(s1>>16)] ^ TE3[(s2>>24)]
 
 ### 2.2 AES T-table Decrypt — Wrong Column Permutation
 
-**Files:** `src/aes.cpp:52-67`  
+**Files:** `include/armrx/aes.hpp:52-67` (formerly `src/aes.cpp:52-67`)  
 **Bug:** The decrypt transform used the **encrypt** column permutation. The upstream `soft_aesdec` uses a **different** permutation — a straight sequential rotation rather than the encrypt's interleaved pattern:
 
 | t | Correct encrypt (TE) | Correct decrypt (TD) |

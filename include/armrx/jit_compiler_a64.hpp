@@ -64,7 +64,6 @@ namespace armrx {
 
 		ProgramFunc* getProgramFunc() { return reinterpret_cast<ProgramFunc*>(code); }
 		DatasetInitFunc* getDatasetInitFunc();
-		uint8_t* getCode() { return code; }
 		size_t getCodeSize();
 
 		bool enableWriting();
@@ -73,6 +72,8 @@ namespace armrx {
 		void setFlags(randomx_flags f) { flags = f; }
 	private:
 		bool rwx_ = false;
+		void emitPrologueMix(Program& program, uint32_t& codePos);
+		void emitSpMix2(ProgramConfiguration& config, uint32_t& codePos);
 		static InstructionGeneratorA64 engine[256];
 		uint32_t reg_changed_offset[8];
 		uint8_t* code;

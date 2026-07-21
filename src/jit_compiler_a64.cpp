@@ -173,25 +173,24 @@ bool JitCompilerA64::enableExecution()
 void JitCompilerA64::emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_t codePos) {
 	if (flags & RANDOMX_FLAG_V2) {
 		if (flags & RANDOMX_FLAG_HARD_AES) {
-			JitCompilerA64::emit32(0x4F00041C, jit.getCode(), codePos);
+			JitCompilerA64::emit32(0x4F00041C, jit.code, codePos);
 		} else {
 			uint32_t offset = (uint8_t*)randomx_program_aarch64_v2_FE_mix_soft_aes - (uint8_t*)randomx_program_aarch64_v2_FE_mix;
-			JitCompilerA64::emit32(ARMV8A::B | (offset / 4), jit.getCode(), codePos);
+			JitCompilerA64::emit32(ARMV8A::B | (offset / 4), jit.code, codePos);
 			offset = (uint8_t*)randomx_program_aarch64_aes_lut_pointers - (uint8_t*)randomx_program_aarch64;
 			const void* lut_enc = &randomx_aes_lut_enc[0][0];
 			const void* lut_dec = &randomx_aes_lut_dec[0][0];
-			memcpy(jit.getCode() + offset + 0, &lut_enc, sizeof(lut_enc));
-			memcpy(jit.getCode() + offset + 8, &lut_dec, sizeof(lut_dec));
+			memcpy(jit.code + offset + 0, &lut_enc, sizeof(lut_enc));
+			memcpy(jit.code + offset + 8, &lut_dec, sizeof(lut_dec));
 		}
 	} else {
 		const uint32_t offset = (uint8_t*)randomx_program_aarch64_v1_FE_mix - (uint8_t*)randomx_program_aarch64_v2_FE_mix;
-		JitCompilerA64::emit32(ARMV8A::B | (offset / 4), jit.getCode(), codePos);
+		JitCompilerA64::emit32(ARMV8A::B | (offset / 4), jit.code, codePos);
 	}
 }
 
-void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
-{
-	uint32_t codePos = PrologueSize;
+void JitCompilerA64::emitPrologueMix(Program& program, uint32_t& codePos) {
+	codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
 	num32bitLiterals = 0;
 
@@ -210,6 +209,28 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 			jit_dump_.push_back({instr.opcode, pos_before, codePos - pos_before});
 		}
 	}
+}
+
+void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos) {
+	// Update spMix1
+	// eor x10, config.readReg0, config.readReg1
+	codePos = ((uint8_t*)randomx_program_aarch64_update_spMix1) - ((uint8_t*)randomx_program_aarch64);
+	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
+
+	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
+	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+
+	// ubfx x20, x10, #38, #width
+	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+
+	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
+	emitV2AesTweak(*this, flags, codePos);
+}
+
+void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
+{
+	uint32_t codePos;
+	emitPrologueMix(program, codePos);
 
 	// Update spMix2
 	// eor w20, config.readReg2, config.readReg3
@@ -227,19 +248,7 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 	codePos = (((uint8_t*)randomx_program_aarch64_cacheline_align_mask2) - ((uint8_t*)randomx_program_aarch64));
 	emit32(0x121A0000 | 10 | (10 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
-	// Update spMix1
-	// eor x10, config.readReg0, config.readReg1
-	codePos = ((uint8_t*)randomx_program_aarch64_update_spMix1) - ((uint8_t*)randomx_program_aarch64);
-	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
-
-	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	// ubfx x20, x10, #38, #width
-	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
-	emitV2AesTweak(*this, flags, codePos);
+	emitSpMix2(config, codePos);
 
 	// Apply v2 prefetch tweak
 	if (flags & RANDOMX_FLAG_V2) {
@@ -260,25 +269,8 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 
 void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset)
 {
-	uint32_t codePos = PrologueSize;
-	literalPos = ImulRcpLiteralsEnd;
-	num32bitLiterals = 0;
-
-	for (uint32_t i = 0; i < RegistersCount; ++i)
-		reg_changed_offset[i] = codePos;
-
-	for (uint32_t i = 0; i < program.getSize(flags); ++i)
-	{
-		Instruction& instr = program(i);
-		instr.src %= RegistersCount;
-		instr.dst %= RegistersCount;
-		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode in generateProgramLight");
-		const uint32_t pos_before = codePos;
-		(this->*engine[instr.opcode])(instr, codePos);
-		if (jit_dump_enabled_) {
-			jit_dump_.push_back({instr.opcode, pos_before, codePos - pos_before});
-		}
-	}
+	uint32_t codePos;
+	emitPrologueMix(program, codePos);
 
 	// Update spMix2
 	// eor w20, config.readReg2, config.readReg3
@@ -304,19 +296,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 	codePos = (((uint8_t*)randomx_program_aarch64_light_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
 	emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
-	// Update spMix1
-	// eor x10, config.readReg0, config.readReg1
-	codePos = ((uint8_t*)randomx_program_aarch64_update_spMix1) - ((uint8_t*)randomx_program_aarch64);
-	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
-
-	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	// ubfx x20, x10, #38, #width
-	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
-
-	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
-	emitV2AesTweak(*this, flags, codePos);
+	emitSpMix2(config, codePos);
 
 	// Apply dataset offset
 	codePos = ((uint8_t*)randomx_program_aarch64_light_dataset_offset) - ((uint8_t*)randomx_program_aarch64);
