@@ -38,13 +38,16 @@
 | **Auto-reconnect + pool failover** | Reliability | User request | `stratum_client.cpp/hpp`, `main.cpp` |
 | **Config file** | UX | User request | `config.cpp/hpp`, `main.cpp` |
 | **TUI dashboard** (--tui) | UX | User request | `tui.cpp/hpp`, `main.cpp` |
+| **JIT prologue instruction scheduling (O12)** | +0.33% hashrate, −439M cycles | Gemini | `jit_compiler_a64_static.S` |
+| **JIT register-offset FP loads (O13)** | −56M instructions | Gemini | `jit_compiler_a64.cpp` |
+| **Profile-Guided Optimization (PGO)** | +0.8% hashrate, −6.4B instructions, −10.7B cycles | CMake options | `CMakeLists.txt` |
 
 ### ❌ FAILED — Did not work
 
 | Optimization | Attempt | Why it failed |
 |-------------|---------|---------------|
 | **Newton-Raphson FDIV/FSQRT** | `-DARMRX_ENABLE_JIT_FAST_DIV_SQRT=ON` | Segfault — instruction encodings verified correct but x29 register gets corrupted at runtime. Root cause unclear (possibly pipeline interaction on Cortex-A53 in-order). Upstream RandomX also uses native `fdiv`/`fsqrt`. |
-| **PGO (Profile-Guided Optimization)** | `-DARMRX_PGO=GENERATE` → run → `-DARMRX_PGO=USE` | Linker crashes with SIGSEGV — `__gcov_*` symbols not found. Caused by GCC 15.2.0 + LTO + musl incompatibility on Alpine. |
+
 | **-Ofast / -ffast-math** | `-DARMRX_FAST_MATH=ON` | No measurable change. RandomX FP operations are already efficient. |
 
 ### ⏸️ DEFERRED — Could work with more effort

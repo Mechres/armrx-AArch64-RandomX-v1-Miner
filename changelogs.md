@@ -2,6 +2,17 @@
 
 ## 2026-07-21 — Optimize instruction scheduling and JIT FP loads
 
+- **Unblocked Profile-Guided Optimization (PGO)** (`CMakeLists.txt`):
+  - Fixed a CMake bug where PGO compile and link options (`-fprofile-generate`/`-fprofile-use`) were `PRIVATE` to `armrx_core`, causing dependent executables to miss gcov symbol linkage and fail with ld SEGSEGV. Propagated them as `PUBLIC`.
+  - Fixed a JIT test configuration bug: JIT-only tests/benchmarks (`bench_opcodes`, `test_jit_encodings`, `test_jit_determinism`) were conditionally wrapped in `if(ARMRX_HAVE_JIT)`, but `ARMRX_HAVE_JIT` was only defined as a compiler preprocessor macro and not a CMake variable. Explicitly set `ARMRX_HAVE_JIT` as a CMake variable on AArch64 systems.
+  - Verification results (on big core CPU 0):
+    - Successfully compiled, linked, and validated all 6 tests with PGO USE.
+    - Saved **6.4 billion instructions** (7.1% reduction) and **10.7 billion cycles** (9.1% reduction) on the region-attribution benchmark.
+    - Increased JIT pipeline efficiency with IPC rising from **0.7676 to 0.7846** (+2.2%).
+    - Sped up `generate_dataset_item` by **10.6%**, `initialize_dataset` by **7.6%**, and interpreted mode by **8.7%**.
+    - Raised overall JIT hashrate to **4.45 H/s** (median 224,922 μs).
+    - All KATs passing 100%.
+
 - **Interleaved FP loads and conversions in main loop** (`src/jit_compiler_a64_static.S`): Reordered prologue instructions to hide the 3-cycle load-use penalties of `ldp`/`ldr` and the 5-7 cycle latencies of the `sshll`/`scvtf` pipelines.
 - **Implemented register-offset FP loads in JIT compiler** (`src/jit_compiler_a64.cpp`): Replaced the serial `add x19, x2, x19` + `ld1 {v.2s}, [x19]` instruction pair with a single register-offset load `ldr d<tmp_reg_fp>, [x2, x19]`. This directly eliminated 1 instruction from every memory load FP operation and removed serialization stalls.
 - **Verification Results**:

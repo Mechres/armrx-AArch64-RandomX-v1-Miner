@@ -115,6 +115,7 @@
 | — | `--version` flag with git SHA (U3.5) | ✅ |
 | — | Dead config parser removed (U3.7) | ✅ |
 | — | Prometheus metrics endpoint | ✅ |
+| P2.6 | Profile-Guided Optimization (PGO) unblocked | ✅ |
 
 ### Docs
 | Doc | Description |
@@ -133,7 +134,7 @@
 |---|------|------|-------------|------|-------|
 | **P4** | **Reduce JIT execution branch-misprediction cost** — 34.42% branch miss rate on A53, costing ~26% of total cycles. Evaluate CSEL for CBRANCH, balanced path costs, instruction scheduling for in-order pipeline. | `jit_compiler_a64.cpp` | ~+5–15% | 🟡 Medium | New Priority 1 based on benchmark v2. CBRANCH is inherently unpredictable; focus on reducing *cost* of misprediction. |
 | **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | Downgraded from ~15–20%. Region attribution shows 98.24% of time is in execution. Per-opcode savings modest vs branch-miss waste. See benchmark v2 findings. |
-| PGO | Profile-Guided Optimization | CMake option (`ARMRX_PGO=GENERATE/USE`) | ~+5–10% | 🟡 Medium | Blocked: GCC 15 + musl `__gcov_*` linker crash. See `OPTIMIZATION_REFERENCE.md:47`. |
+
 
 ### Features
 
