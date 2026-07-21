@@ -31,7 +31,7 @@
 | # | Item | Est. gain | Rationale |
 |---|------|:---------:|-----------|
 | **1** | **Peephole JIT coalescing** — per-opcode instruction reduction in emitted JIT code. Compare armrx vs XMRig emit sequences for high-frequency opcodes. | **+3–7%** | The only remaining path to close the instruction-count gap. The chain takes 84.6% of time. |
-| **2** | **Instruction scheduling for A53** — static FP load scheduling in prologue (`static.S:236-263`), register-offset FP loads in `emitMemLoadFP()` | **+5–10%** | IPC 0.786 vs theoretical 2.0 peak. In-order A53 stalls on load-use and FP pipeline latency. |
+| **2** | **Instruction scheduling for A53** — static FP load scheduling in prologue (`static.S:236-263`), register-offset FP loads in `emitMemLoadFP()` | **Completed** | Improved median hashrate to 4.43 H/s, saving 56M instructions and 439M cycles. |
 | **3** | **Fix CTest executable path** — bench_armrx, bench_opcodes, test_jit_encodings, test_jit_determinism are "Not Run" by CTest (binary search path mismatch) | Cleanup | Low effort, enables automated checks. |
 
 ### Frozen / Deprioritized

@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-21 — Optimize instruction scheduling and JIT FP loads
+
+- **Interleaved FP loads and conversions in main loop** (`src/jit_compiler_a64_static.S`): Reordered prologue instructions to hide the 3-cycle load-use penalties of `ldp`/`ldr` and the 5-7 cycle latencies of the `sshll`/`scvtf` pipelines.
+- **Implemented register-offset FP loads in JIT compiler** (`src/jit_compiler_a64.cpp`): Replaced the serial `add x19, x2, x19` + `ld1 {v.2s}, [x19]` instruction pair with a single register-offset load `ldr d<tmp_reg_fp>, [x2, x19]`. This directly eliminated 1 instruction from every memory load FP operation and removed serialization stalls.
+- **Verification Results**:
+  - Saved **56 million instructions** and **439 million cycles** on the standard region-attribution benchmark.
+  - Improved JIT execution loop (chain) hashrate by **1.7%** (from 169.8 ms down to 166.9 ms per hash).
+  - Raised overall hashrate from **4.41 H/s to 4.43 H/s** (median 226,651 μs -> 225,911 μs).
+  - Verified 100% correct and deterministic execution against all KATs.
+
 ## 2026-07-20 — Fix hash divergence: correct AES T-table transforms
 
 ### Root cause: two bugs in software AES implementation

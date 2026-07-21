@@ -663,11 +663,8 @@ void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* co
 
 	emit32(instr.getModMem() ? andInstrL1 : andInstrL2, code, k);
 
-	// add tmp_reg, x2, tmp_reg
-	emit32(ARMV8A::ADD | tmp_reg | (2 << 5) | (tmp_reg << 16), code, k);
-
-	// ld1 {tmp_reg_fp.2s}, [tmp_reg]
-	emit32(0x0C407800 | (tmp_reg << 5) | tmp_reg_fp, code, k);
+	// ldr d<tmp_reg_fp>, [x2, tmp_reg]
+	emit32(0xfc606800 | (tmp_reg << 16) | (2 << 5) | tmp_reg_fp, code, k);
 
 	// sxtl tmp_reg_fp.2d, tmp_reg_fp.2s
 	emit32(0x0F20A400 | (tmp_reg_fp << 5) | tmp_reg_fp, code, k);

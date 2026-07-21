@@ -50,6 +50,8 @@
 | — | AES decrypt_transform fix: different column permutation from encrypt | ✅ |
 | — | NEON AES paths removed (AESE/AESD operation order ≠ RandomX spec) | ✅ |
 | O8 | Per-hash `mprotect` skip via `rwx_` flag | ✅ |
+| O12 | JIT prologue instruction scheduling | ✅ |
+| O13 | JIT register-offset FP loads | ✅ |
 | — | `bench_armrx` registered in CTest (3 tests) | ✅ |
 | — | ASan/UBSan CMake options | ✅ |
 | — | `.clang-format` / `.clang-tidy` baseline configs | ✅ |

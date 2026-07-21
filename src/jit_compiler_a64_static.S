@@ -219,56 +219,67 @@ DECL(randomx_program_aarch64):
 DECL(randomx_program_aarch64_main_loop):
 .Lmain_loop:
 
-	# xor integer registers with scratchpad data (spAddr0) + load FP registers
-	# Interleaved to hide FP L1D load latency behind integer ALU ops on A53's
-	# in-order pipeline. Each group: ldp (load) → eor×2 (ALU) → ldr dN (start
-	# NEON load) → sshll (NEON shift) → scvtf (NEON convert)
+	# Interleaved loading of FP registers (d16-d23) and integer registers (F0-F3)
+	# to hide load latencies and FP execution delays.
+	
+	# Load first batch of FP registers to build distance before sshll/scvtf
+	ldr	d16, [x17]
+	ldr	d17, [x17, #8]
+	ldr	d18, [x17, #16]
+	ldr	d19, [x17, #24]
+	ldr	d20, [x17, #32]
 
-	# Group F0 (+ int regs 4-5)
+	# Start loading F0 int registers
 	ldp	x20, x19, [x16]
+	# Hide the 3-cycle load-use latency of the ldp by completing FP register loads
+	ldr	d21, [x17, #40]
+	ldr	d22, [x17, #48]
+	ldr	d23, [x17, #56]
+	# XOR F0 int registers
 	eor	x4, x4, x20
 	eor	x5, x5, x19
-	ldr	d16, [x17]
-	sshll	v16.2d, v16.2s, #0
-	scvtf	v16.2d, v16.2d
 
-	# Group F1 (+ int regs 6-7)
+	# Start loading F1 int registers
 	ldp	x20, x19, [x16, 16]
+	# Hide ldp latency with first three FP shifts
+	sshll	v16.2d, v16.2s, #0
+	sshll	v17.2d, v17.2s, #0
+	sshll	v18.2d, v18.2s, #0
+	# XOR F1 int registers
 	eor	x6, x6, x20
 	eor	x7, x7, x19
-	ldr	d17, [x17, #8]
-	sshll	v17.2d, v17.2s, #0
-	scvtf	v17.2d, v17.2d
 
-	# Group F2 (+ int regs 12-13)
+	# Start loading F2 int registers
 	ldp	x20, x19, [x16, 32]
+	# Hide ldp latency with next three FP shifts
+	sshll	v19.2d, v19.2s, #0
+	sshll	v20.2d, v20.2s, #0
+	sshll	v21.2d, v21.2s, #0
+	# XOR F2 int registers
 	eor	x12, x12, x20
 	eor	x13, x13, x19
-	ldr	d18, [x17, #16]
-	sshll	v18.2d, v18.2s, #0
-	scvtf	v18.2d, v18.2d
 
-	# Group F3 (+ int regs 14-15)
+	# Start loading F3 int registers
 	ldp	x20, x19, [x16, 48]
+	# Hide ldp latency with remaining FP shifts & first convert (F0)
+	sshll	v22.2d, v22.2s, #0
+	sshll	v23.2d, v23.2s, #0
+	scvtf	v16.2d, v16.2d
+	# XOR F3 int registers
 	eor	x14, x14, x20
 	eor	x15, x15, x19
-	ldr	d19, [x17, #24]
-	sshll	v19.2d, v19.2s, #0
-	scvtf	v19.2d, v19.2d
 
-	# Load group E registers (spAddr1) — no more integer work to pair
-	ldr	d20, [x17, #32]
-	sshll	v20.2d, v20.2s, #0
+	# FP converts (scvtf) for remaining registers
+	scvtf	v17.2d, v17.2d
+	scvtf	v18.2d, v18.2d
+	scvtf	v19.2d, v19.2d
 	scvtf	v20.2d, v20.2d
-	ldr	d21, [x17, #40]
-	sshll	v21.2d, v21.2s, #0
 	scvtf	v21.2d, v21.2d
-	ldr	d22, [x17, #48]
-	sshll	v22.2d, v22.2s, #0
 	scvtf	v22.2d, v22.2d
-	ldr	d23, [x17, #56]
-	sshll	v23.2d, v23.2s, #0
 	scvtf	v23.2d, v23.2d
+
+	# E register logic mask (bif) - v20-v23 depend on scvtf v20-v23.
+	# Constant 4-instruction gap ensures minimal pipeline stalls.
 	bif	v20.16b, v30.16b, v29.16b
 	bif	v21.16b, v30.16b, v29.16b
 	bif	v22.16b, v30.16b, v29.16b
