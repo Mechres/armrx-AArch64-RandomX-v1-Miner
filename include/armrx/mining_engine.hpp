@@ -76,6 +76,12 @@ private:
     std::size_t size_ = 0;
 };
 
+enum class AffinityMode {
+    All,
+    Unpinned,
+    BigOnly
+};
+
 class MiningEngine {
 public:
     using ShareCallback = std::function<void(const Job& job, std::uint64_t nonce, std::array<std::byte, 32> hash)>;
@@ -88,6 +94,7 @@ public:
 
     void set_rt_priority(bool enable) { rt_priority_ = enable; }
     void set_stagger_ms(unsigned ms) { stagger_ms_ = ms; }
+    void set_affinity_mode(AffinityMode mode) { affinity_mode_ = mode; }
 
     void set_job(const Job& job);
 
@@ -133,6 +140,7 @@ private:
     bool has_job_{false};
     bool rt_priority_ = false;
     unsigned stagger_ms_ = 0;
+    AffinityMode affinity_mode_ = AffinityMode::All;
 
     // Shared Cache and Dataset
     std::shared_ptr<Argon2dCache> shared_cache_;

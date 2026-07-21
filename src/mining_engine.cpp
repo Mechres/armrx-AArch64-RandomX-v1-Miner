@@ -221,12 +221,22 @@ double MiningEngine::hash_rate() const {
 }
 
 void MiningEngine::worker_loop(unsigned int thread_id) {
-    // Pin this worker to a specific CPU core (big cores first on big.LITTLE)
-    cpu_set_t cpus{};
-    CPU_ZERO(&cpus);
-    unsigned int cpu_id = core_order_[thread_id % core_order_.size()];
-    CPU_SET(static_cast<int>(cpu_id), &cpus);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+    if (affinity_mode_ == AffinityMode::BigOnly) {
+        // Pin strictly to the big cores (0-3) on this topology
+        cpu_set_t cpus{};
+        CPU_ZERO(&cpus);
+        unsigned int cpu_id = thread_id % 4;
+        CPU_SET(static_cast<int>(cpu_id), &cpus);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+    } else if (affinity_mode_ == AffinityMode::All) {
+        // Pin to all cores sequentially
+        cpu_set_t cpus{};
+        CPU_ZERO(&cpus);
+        unsigned int cpu_id = core_order_[thread_id % core_order_.size()];
+        CPU_SET(static_cast<int>(cpu_id), &cpus);
+        pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+    }
+    // If AffinityMode::Unpinned, skip pinning and let the OS handle scheduling
 
     if (rt_priority_) {
         struct sched_param param{};

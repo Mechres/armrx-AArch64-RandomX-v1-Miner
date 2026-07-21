@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-21 — Software AES Inlining and big.LITTLE Scheduling
+
+- **Optimized Software AES Path by Inlining and Register Passing** (`include/armrx/aes.hpp`, `src/aes.cpp`):
+  - Moved the definitions of `encrypt_transform`/`decrypt_transform` and `aes_encrypt_round`/`aes_decrypt_round` into `include/armrx/aes.hpp` as `inline` functions.
+  - Changed parameters to pass `AesBlock` by value. Because `AesBlock` is exactly 16 bytes, the compiler now passes it directly in AArch64 registers (`x0`/`x1` or `q0`), completely eliminating memory overlap checks, dynamic stack frames, and over 1 million calls to `memcpy`/`memmove` via the PLT per 2MB scratchpad.
+  - Removed `src/aes.cpp` and updated `CMakeLists.txt`.
+  - **Verification Results** (on big core CPU 0):
+    - `fill_aes_1r_x4` (init_scratchpad): improved from **16.8 ms to 14.1 ms** (**+19.3% faster**).
+    - `hash_aes_1r_x4` (get_final_result): improved from **17.0 ms to 14.7 ms** (**+16.0% faster**).
+    - Overall single-thread hashrate: raised from **4.45 H/s to 4.55 H/s** (**+2.25% speedup**).
+
+- **Implemented big.LITTLE-Aware Worker Scheduling** (`src/mining_engine.cpp`, `src/main.cpp`):
+  - Added `--affinity-mode=all|unpinned|big-only` flag and config setting to customize thread pinning.
+  - Confirmed core topology: cores 0-3 are big cores (`cpu@100-103`), cores 4-7 are LITTLE cores (`cpu@0-3`).
+  - **Benchmarked Scheduling Policies** (on 8× Cortex-A53 SoC, 20-second mine run):
+    - **Policy A (pinned 8 threads):** Pinned 4 on big cores, 4 on LITTLE cores sequentially. Achieved **25.35 H/s** (507 hashes).
+    - **Policy B (unpinned 8 threads):** Threads freely scheduled by OS. Achieved **25.55 H/s** (511 hashes) - best total hashrate.
+    - **Policy C (big-cores-only 4 threads):** Ran 4 workers pinned to big cores 0-3. Achieved **17.00 H/s** (340 hashes).
+    - **Contention Findings:** Worker efficiency under Policy C was **4.25 H/s/worker**, but dropped to **3.18 H/s/worker** under Policy A/B (a **25% reduction** due to memory bus contention during shared 256 MiB dataset access). However, total H/s is still 50% higher with all 8 threads.
+
 ## 2026-07-21 — Optimize instruction scheduling and JIT FP loads
 
 - **Unblocked Profile-Guided Optimization (PGO)** (`CMakeLists.txt`):

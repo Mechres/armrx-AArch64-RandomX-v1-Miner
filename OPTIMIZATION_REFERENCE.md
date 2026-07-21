@@ -41,6 +41,8 @@
 | **JIT prologue instruction scheduling (O12)** | +0.33% hashrate, −439M cycles | Gemini | `jit_compiler_a64_static.S` |
 | **JIT register-offset FP loads (O13)** | −56M instructions | Gemini | `jit_compiler_a64.cpp` |
 | **Profile-Guided Optimization (PGO)** | +0.8% hashrate, −6.4B instructions, −10.7B cycles | CMake options | `CMakeLists.txt` |
+| **Software AES header inlining & register-passing** | +19.3% in scratchpad init, +2.25% overall JIT hashrate | Analysis | `include/armrx/aes.hpp`, `CMakeLists.txt` |
+| **big.LITTLE-aware thread affinity** | Enabled unpinned/big-cores-only modes, analyzed bus contention | CLI / MiningEngine | `src/mining_engine.cpp`, `src/main.cpp` |
 
 ### ❌ FAILED — Did not work
 

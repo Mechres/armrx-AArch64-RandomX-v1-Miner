@@ -116,6 +116,8 @@
 | — | Dead config parser removed (U3.7) | ✅ |
 | — | Prometheus metrics endpoint | ✅ |
 | P2.6 | Profile-Guided Optimization (PGO) unblocked | ✅ |
+| P2.7 | Software AES header inlining & register-passing | ✅ |
+| P2.8 | big.LITTLE worker thread scheduling | ✅ |
 
 ### Docs
 | Doc | Description |

@@ -92,6 +92,7 @@ int main(int argc, char** argv) {
     bool use_rt_priority = false;
     unsigned stagger_ms = 0;
     std::uint16_t metrics_port = 0;  // 0 = disabled
+    armrx::AffinityMode affinity_mode = armrx::AffinityMode::All;
     unsigned int current_pool_idx = 0;
 
     // Load config from file (CLI overrides below)
@@ -180,6 +181,21 @@ int main(int argc, char** argv) {
                 runtime_seconds = static_cast<unsigned>(std::stoul(std::string{argument.substr(10)}));
             } catch (...) {
                 std::cerr << "Invalid --seconds value: " << argument.substr(10) << '\n';
+                return 64;
+            }
+            continue;
+        }
+
+        if (argument.rfind("--affinity-mode=", 0) == 0) {
+            const auto aff_text = argument.substr(16);
+            if (aff_text == "all") {
+                affinity_mode = armrx::AffinityMode::All;
+            } else if (aff_text == "unpinned") {
+                affinity_mode = armrx::AffinityMode::Unpinned;
+            } else if (aff_text == "big-only") {
+                affinity_mode = armrx::AffinityMode::BigOnly;
+            } else {
+                std::cerr << "Invalid affinity mode: " << aff_text << '\n';
                 return 64;
             }
             continue;
@@ -456,6 +472,7 @@ int main(int argc, char** argv) {
         job.target       = difficulty_to_target(difficulty);
 
         armrx::MiningEngine engine(effective_mode, workers);
+        engine.set_affinity_mode(affinity_mode);
         engine.set_rt_priority(use_rt_priority);
         engine.set_stagger_ms(stagger_ms);
         engine.set_job(job);
@@ -554,6 +571,7 @@ int main(int argc, char** argv) {
                   << " pool(s) configured\n";
 
         armrx::MiningEngine engine(effective_mode, workers);
+        engine.set_affinity_mode(affinity_mode);
         engine.set_rt_priority(use_rt_priority);
         engine.set_stagger_ms(stagger_ms);
 

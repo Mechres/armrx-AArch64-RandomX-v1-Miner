@@ -187,6 +187,8 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **JIT prologue instruction scheduling (O12)** | ✅ |
 | **JIT register-offset FP loads (O13)** | ✅ |
 | **Profile-Guided Optimization (PGO) unblocked** | ✅ |
+| **Software AES header inlining & register-passing** | ✅ |
+| **big.LITTLE-aware worker thread scheduling** | ✅ |
 | **Peephole JIT plan** | 📄 [docs/peephole-jit-plan.md](docs/peephole-jit-plan.md) |
 | **Beyond-parity plan** | 📄 [docs/new_plan.md](docs/beyond-parity.md) |
 | **CBRANCH postmortem** | 📄 [docs/branchless-cbranch.md](docs/branchless-cbranch.md) |

@@ -30,7 +30,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 add_library(armrx_core
-    src/aes.cpp
     src/aes_generator.cpp
     src/argon2.cpp
     src/blake2_generator.cpp
