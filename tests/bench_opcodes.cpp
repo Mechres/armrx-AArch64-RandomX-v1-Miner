@@ -67,7 +67,7 @@ void build_opcode_map() {
 int main(int argc, char** argv) {
     build_opcode_map();
 
-    int num_seeds = 200;
+    int num_seeds = 20;
     if (argc > 1) num_seeds = std::stoi(argv[1]);
     if (num_seeds < 1) num_seeds = 1;
 

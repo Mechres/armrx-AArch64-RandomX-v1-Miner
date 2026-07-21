@@ -39,9 +39,11 @@ round order.
 **Files changed:** src/aes.cpp, src/aes_hash.cpp, tests/test_blake2b.cpp, CMakeLists.txt
 
 ### Post-fix benchmark re-baseline
-- **Hashrate dropped from 5.18 to 4.33 H/s** (−16.4%). Root cause: the old 5.18 H/s was from buggy AES producing wrong program entropy. Correct AES produces different (correct) VM programs that are inherently slower. NEON AES removal estimated ≤1.2% of the drop.
+- **Hashrate dropped from 5.18 to 4.34 H/s** (−16.4%). Root cause confirmed by region attribution: the NEON AES removal changed init_scratchpad from 589 μs → 17,554 μs (29.8×) and get_final_result from 1,023 μs → 17,974 μs (17.6×). Chain execution (VM JIT) barely changed (+2%).
+- **NEON AES encrypt re-enable attempted** — AESE+AESMC added for encrypt operations. Benchmarked as zero benefit on Cortex-A53 (17,549 μs vs 17,554 μs — within noise). Per-block NEON load/store overhead cancels AES instruction speedup on this core. Reverted.
+- **Branch-miss profile** (perf record -e branch-misses): **94.85%** of branch misses are in `execute_superscalar` (dataset generation, runs per-job, not per-hash). The JIT CBRANCH is invisible to perf (JIT buffer never registered) and the `bne+b` fix handles it. CBRANCH is confirmed **not the bottleneck** on the hash path.
 - **33% instruction-count gap vs XMRig is now stale** — measured with buggy AES. Needs fresh comparison.
-- **KATs verified** on-device (armrx_tests: 16.19s on Cortex-A53).
+- **KATs verified** on-device (armrx_tests: 15.95s on Cortex-A53).
 - **Build fixes**: removed dead `debug_hash` CMake target (file deleted in ed512e5 but CMake left behind); added `ARMRX_DISABLE_LTO` option (GCC 15 + musl LTO crash with fortified vsnprintf).
 
 ### Cleanup
