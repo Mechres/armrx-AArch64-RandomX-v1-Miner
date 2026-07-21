@@ -93,6 +93,7 @@ NR postmortem ──► Simplify NR ──► Measure 1-8 thr scaling ──► 
 | [`docs/beyond-parity.md`](docs/beyond-parity.md) | Post-parity scaling optimization | Active reference (v2) |
 | [`docs/tui_usability_plan.md`](docs/tui_usability_plan.md) | TUI redesign, CLI ergonomics, Prometheus surface | Active reference |
 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction postmortem | Reference |
+| [`docs/jit-buffer-size-audit.md`](docs/jit-buffer-size-audit.md) | JIT buffer size analysis and security audit | Reference |
 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md) | Historical log of every optimization tried | Reference |
 
 ---
