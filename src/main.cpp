@@ -78,6 +78,7 @@ int main(int argc, char** argv) {
     bool should_mine = false;
     std::uint64_t difficulty = 100;
     unsigned int runtime_seconds = 10;
+    unsigned int warmup_secs = 30;  // seconds to skip before taking the steady-state snapshot
 
     // Pool / stratum options
     bool should_connect_pool = false;
@@ -181,6 +182,16 @@ int main(int argc, char** argv) {
                 runtime_seconds = static_cast<unsigned>(std::stoul(std::string{argument.substr(10)}));
             } catch (...) {
                 std::cerr << "Invalid --seconds value: " << argument.substr(10) << '\n';
+                return 64;
+            }
+            continue;
+        }
+
+        if (argument.rfind("--warmup=", 0) == 0) {
+            try {
+                warmup_secs = static_cast<unsigned>(std::stoul(std::string{argument.substr(9)}));
+            } catch (...) {
+                std::cerr << "Invalid --warmup value: " << argument.substr(9) << '\n';
                 return 64;
             }
             continue;
@@ -344,6 +355,7 @@ int main(int argc, char** argv) {
                 << "  --mine                     Start local RandomX miner benchmark\n"
                 << "  --difficulty=N             Set miner target difficulty (default: 100)\n"
                 << "  --seconds=S                Duration to run benchmark in seconds, 0 for infinite (default: 10)\n"
+                << "  --warmup=W                 Warmup seconds before steady-state measurement (default: 30)\n"
                 << "\n"
                 << "Pool mining (Stratum V1):\n"
                 << "  --pool=host[:port]         Pool address (default port: 3333); multiple allowed for failover\n"
@@ -514,13 +526,25 @@ int main(int argc, char** argv) {
 
         auto start_time      = std::chrono::steady_clock::now();
         unsigned elapsed_sec = 0;
+        // Snapshot taken after warmup to measure steady-state rate
+        armrx::MiningEngine::HashSnapshot snap_warmup;
+        bool snap_taken = false;
+        const unsigned effective_warmup = (runtime_seconds > 0 && warmup_secs >= runtime_seconds)
+                                           ? runtime_seconds / 2
+                                           : warmup_secs;
 
         while (keep_running && (runtime_seconds == 0 || elapsed_sec < runtime_seconds)) {
             std::this_thread::sleep_for(std::chrono::seconds(1));
             elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - start_time).count());
 
-            const double speed       = engine.hash_rate();
+            // Take post-warmup snapshot once
+            if (!snap_taken && elapsed_sec >= effective_warmup) {
+                snap_warmup = engine.snapshot();
+                snap_taken = true;
+            }
+
+            const double speed         = engine.hash_rate();
             const std::uint64_t total  = engine.total_hashes();
             const std::uint64_t shares = shares_found.load();
 
@@ -531,10 +555,45 @@ int main(int argc, char** argv) {
                       << " | Time: " << elapsed_sec << "s\r" << std::flush;
         }
         std::cout << std::endl;
+
+        // Take end snapshot for steady-state computation
+        const auto snap_end = engine.snapshot();
         engine.stop();
+
+        // Compute steady-state rates from snapshot delta
+        double steady_total = 0.0;
+        std::vector<double> steady_per_worker;
+        if (snap_taken) {
+            const double delta_secs = std::chrono::duration<double>(snap_end.ts - snap_warmup.ts).count();
+            if (delta_secs > 0.5) {
+                const std::uint64_t delta_total = (snap_end.total >= snap_warmup.total)
+                    ? snap_end.total - snap_warmup.total : 0;
+                steady_total = static_cast<double>(delta_total) / delta_secs;
+                const unsigned nw = engine.num_workers();
+                steady_per_worker.resize(nw);
+                for (unsigned i = 0; i < nw; ++i) {
+                    const std::uint64_t dw = (i < snap_end.per_worker.size() &&
+                                              i < snap_warmup.per_worker.size() &&
+                                              snap_end.per_worker[i] >= snap_warmup.per_worker[i])
+                        ? snap_end.per_worker[i] - snap_warmup.per_worker[i] : 0;
+                    steady_per_worker[i] = static_cast<double>(dw) / delta_secs;
+                }
+            }
+        }
+
         std::cout << "Mining benchmark complete.\n"
                   << "Total Hashes computed: " << engine.total_hashes() << "\n"
                   << "Final Shares found: "    << shares_found.load()    << "\n";
+        if (snap_taken && steady_total > 0.0) {
+            std::cout << std::fixed << std::setprecision(2)
+                      << "Steady-state hashrate: " << steady_total << " H/s"
+                      << " (measured over " << static_cast<unsigned>(
+                             std::chrono::duration<double>(snap_end.ts - snap_warmup.ts).count())
+                      << "s post-warmup)\n";
+            for (unsigned i = 0; i < steady_per_worker.size(); ++i) {
+                std::cout << "  worker[" << i << "]: " << steady_per_worker[i] << " H/s\n";
+            }
+        }
 #ifdef ARMRX_JIT_PROFILE
         std::uint64_t total_compile = engine.total_jit_compile_time_ns();
         std::uint64_t total_execute = engine.total_jit_execute_time_ns();

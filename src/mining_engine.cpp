@@ -220,6 +220,24 @@ double MiningEngine::hash_rate() const {
     return static_cast<double>(total_hashes_.load()) / elapsed;
 }
 
+MiningEngine::HashSnapshot MiningEngine::snapshot() const {
+    HashSnapshot s;
+    s.ts = std::chrono::steady_clock::now();
+    if (!worker_hashes_ || num_workers_ == 0) {
+        s.total = 0;
+        return s;
+    }
+    s.per_worker.resize(num_workers_);
+    std::uint64_t sum = 0;
+    for (unsigned i = 0; i < num_workers_; ++i) {
+        s.per_worker[i] = worker_hashes_[i].load(std::memory_order_relaxed);
+        sum += s.per_worker[i];
+    }
+    s.total = sum;
+    return s;
+}
+
+
 void MiningEngine::worker_loop(unsigned int thread_id) {
     if (affinity_mode_ == AffinityMode::BigOnly) {
         // Pin strictly to the big cores (0-3) on this topology

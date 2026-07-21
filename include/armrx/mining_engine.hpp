@@ -102,6 +102,16 @@ public:
     [[nodiscard]] double hash_rate() const;
     [[nodiscard]] double worker_hash_rate(unsigned int thread_id) const;
 
+    /// Atomic snapshot of per-worker hash counts + wall-clock time.
+    /// Take two snapshots and diff them to get steady-state (post-warmup) rates.
+    struct HashSnapshot {
+        std::chrono::steady_clock::time_point ts;
+        std::uint64_t total;                     ///< sum of all workers
+        std::vector<std::uint64_t> per_worker;   ///< indexed by thread_id
+    };
+    [[nodiscard]] HashSnapshot snapshot() const;
+    [[nodiscard]] unsigned int num_workers() const { return num_workers_; }
+
 #ifdef ARMRX_JIT_PROFILE
     [[nodiscard]] std::uint64_t total_jit_compile_time_ns() const { return total_jit_compile_time_ns_.load(std::memory_order_relaxed); }
     [[nodiscard]] std::uint64_t total_jit_execute_time_ns() const { return total_jit_execute_time_ns_.load(std::memory_order_relaxed); }

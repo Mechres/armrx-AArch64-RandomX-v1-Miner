@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-21 — Architectural Refactoring, Steady-State Benchmarking, and Worker-Count Sweep
+
+- **Architectural Cleanup & Security Scoping** (`src/jit_compiler_a64.cpp`, `include/armrx/jit_compiler_a64.hpp`, `CMakeLists.txt`, `include/armrx/metrics.hpp`):
+  - Deduplicated JIT loop setup by extracting `emitPrologueMix` and `emitSpMix2` to reduce JIT function body duplication by ~70%.
+  - Encapsulated executable page references by removing the unused public `getCode()` accessor.
+  - Restricted compilation scope of `ARMRX_JIT_FAST_DIV_SQRT` to `PRIVATE` in `CMakeLists.txt`.
+  - Refactored `MetricsExporter` to output loopback metrics via the structured logger instead of direct raw calls to `std::cerr`.
+- **Steady-State Benchmarking & Warmup Logic** (`src/main.cpp`, `src/mining_engine.cpp`, `include/armrx/mining_engine.hpp`):
+  - Implemented `--warmup=<seconds>` option to specify a dataset initialization / JIT stabilization window.
+  - Implemented `snapshot()` method in `MiningEngine` to atomically capture per-worker total hashes and timestamps.
+  - Calculated post-warmup steady-state total and per-worker hashrates between two snapshot points to eliminate startup bias.
+- **Worker-Count Sweep Benchmark** (`tools/sweep_workers.py`):
+  - Swept configurations from 4 to 8 workers on the Snapdragon 410 (8× Cortex-A53 CPU, 4 big cores cluster + 4 little cores cluster).
+  - Executed 180s runs repeated 3 times with 40s warmups.
+  - Excluded contaminated first run of Config C caused by background sweeps, confirming that:
+    - Big cores run at exactly **4.11 H/s/thread** completely independent of active thread counts.
+    - Little cores run at exactly **2.28 H/s/thread** up to 3 threads, with minor scheduler/frequency drop to **1.83 H/s/thread** under full 8-worker saturation.
+    - Contention is minimal, and total hashrate scales monotonically from **16.45 H/s** (4 big) to **25.28 H/s** (4 big + 4 little, pinned).
+    - Sequential pinning (`A_pinned`) outperforms unpinned OS-scheduled mode (`A_unpin`) with higher mean and lower variance.
+
 ## 2026-07-21 — Software AES Inlining and big.LITTLE Scheduling
 
 - **Optimized Software AES Path by Inlining and Register Passing** (`include/armrx/aes.hpp`, `src/aes.cpp`):

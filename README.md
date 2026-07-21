@@ -48,6 +48,7 @@ Provide an AArch64 CMake toolchain file and leave `ARMRX_ENABLE_NATIVE` off.
 | `--workers` | all cores | Thread count |
 | `--difficulty` | `100` | Target share difficulty |
 | `--seconds` | `10` | Duration (`0` = indefinite) |
+| `--warmup` | `30` | Warmup duration in seconds before starting steady-state hashrate measurement |
 
 ### 3. Pool Mining (Stratum V1 / CryptoNote)
 ```sh
