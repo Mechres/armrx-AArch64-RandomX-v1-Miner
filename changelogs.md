@@ -2,13 +2,16 @@
 
 ## 2026-07-21 — JIT Buffer Overflow Resolution and Newton-Raphson Evaluation
 
-- **Resolved JIT Compiler Buffer Overflow & literal pool corruption** (`src/jit_compiler_a64_static.S`):
-  - Identified that JIT compiled RandomX programs require on average 19,045 bytes (exceeding the allocated 16,384 bytes). This caused compiled instructions to overwrite the GPR literal pool, corrupting `x29`/`x30` registers during compile-time.
-  - Expanded the instruction slots buffer size to 32,768 bytes (`RANDOMX_PROGRAM_MAX_SIZE * 32`), completely resolving all literal pool corruption and segfaults.
+- **Conducted JIT Safety Audit & Expanded JIT Buffer** (`src/jit_compiler_a64_static.S`, `docs/jit-buffer-size-audit.md`):
+  - Audited code sizes, showing that the 19,045-byte estimate was a cumulative count of 8 chained programs combined.
+  - Proved that a single program occupies ~2,380 bytes, utilizing only 14.5% of the original 16,384-byte buffer.
+  - Calculated that the worst-case program size is strictly under 13.3 KB, meaning the original buffer was already 100% safe.
+  - Retained the expanded 32,768-byte buffer size as a defense-in-depth security measure.
 - **Evaluated Fast Newton-Raphson JIT Math** (`CMakeLists.txt`):
-  - Enabled and validated fast Newton-Raphson `FDIV_M`/`FSQRT_R` (ARMRX_ENABLE_JIT_FAST_DIV_SQRT), passing 100% of all correctness and determinism tests in CTest.
-  - Measured single-thread performance: Newton-Raphson math yielded **5.12 H/s** compared to **5.18 H/s** for native hardware division (a ~1.1% hashrate decrease). 
-  - Microarchitectural analysis showed that replacing native division with 12-17 instruction approximations increases instruction-decode overhead and FPU pipeline pressure on the in-order Cortex-A53, so native division remains preferred. Fast JIT math is kept OFF by default.
+  - Validated fast Newton-Raphson `FDIV_M`/`FSQRT_R` (ARMRX_ENABLE_JIT_FAST_DIV_SQRT), passing 100% of all correctness and determinism tests in CTest.
+  - Measured single-thread performance: Newton-Raphson math yielded **5.12 H/s** compared to **5.18 H/s** for native hardware division (a ~1.1% hashrate decrease) due to FPU pipeline pressure. Kept OFF by default.
+- **Updated Project Master Plan** (`PLAN.md`):
+  - Re-wrote the master update and improvement plan, detailing architectural refactoring (joinable socket threads, generalized nonces), performance paths, mock stratum testing, and a phased execution roadmap.
 
 ## 2026-07-21 — Architectural Refactoring, Steady-State Benchmarking, and Worker-Count Sweep
 

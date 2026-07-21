@@ -1,106 +1,112 @@
-# armrx — Master Plan
+# armrx — Master Update and Improvement Plan
 
-> **Single source of truth for what we're building, why, and in what order.**
-> Supersedes `docs/next_phase.md` (v1, archived). Detailed reference documents
-> for each area are linked — read those for implementation specs.
->
-> Current status: **Post-parity on 8× Cortex-A53 (~28.9 H/s Monero mainnet).**
-> Focus shifts from JIT correctness to hardware ceiling mitigation and
-> operator-facing polish.
+This document serves as the master plan and improvement roadmap for the `armrx` RandomX AArch64 miner. It details structural architecture upgrades, microarchitectural performance optimizations, quality assurance steps, developer experience (DX) refinements, and a phased execution schedule.
 
 ---
 
-## Where we are
+## 1. Code Architecture & Structural Integrity
 
-- **Single-thread baseline:** 5.18 H/s (light mode JIT, `bench_armrx`)
-- **8-thread pool performance:** 25.28 H/s pinned / 25.13 H/s unpinned. Worker sweep confirms linear scaling up to 8 threads with minimal memory bus contention (big cores sustain 4.11 H/s/thread across all configurations).
-- **JIT code buffer overflow resolved:** Expanded JIT instructions buffer size to 32,768 bytes, completely eliminating GPR literal pool corruption (`x29`/`x30` registers) and segfaults.
-- **Newton-Raphson Fast Math evaluated:** Fast math verified 100% correct, but kept OFF by default due to a 1.1% hashrate regression caused by FPU pipeline pressure and instruction-decode overhead on the Cortex-A53.
-- **AES T-table bugs corrected** — encrypt column permutation, decrypt column permutation, and incompatible NEON AESE/AESD ordering. All KATs verified against upstream RandomX reference.
-- **All KATs pass in JIT + interpreted mode**
+### 1.1 Unsafe Thread Detachment in `MetricsExporter`
+*   **Bottleneck:** In [metrics.hpp](file:///home/mechres/Projeler/aarch64-randomx/include/armrx/metrics.hpp#L78), the Prometheus server spawns a background thread and immediately calls `thread_.detach()`. The metrics provider callback lambda captures local stack instances from `main()` (such as `engine` and `pool_mgr`) by reference. If the miner terminates or `MetricsExporter` is destroyed, the detached background thread can execute the callback on dangling references, causing a use-after-free segmentation fault on exit.
+*   **Refactoring:** Convert the socket thread to a joinable lifecycle. 
+    1. Re-architect the class to hold a joinable `std::thread`.
+    2. In the destructor, set an atomic `running_` flag to `false`.
+    3. Invoke `::shutdown(server_fd_, SHUT_RDWR)` to force the blocking `::accept` socket call to immediately return with `EINVAL` or `EBADF`.
+    4. Call `thread_.join()` to guarantee the thread has terminated before references in `main()` are destroyed.
 
-### What's been delivered
+### 1.2 Configuration Hardcoding of Stratum Nonces
+*   **Bottleneck:** Nonce parameters (`nonce_offset = 39` and `nonce_size = 4`) are hardcoded directly inside the notification handlers in [stratum_client.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/stratum_client.cpp#L644-L645). While correct for Monero, this hardcoding limits modularity and compatibility with custom stratum configurations or alternative RandomX-based blockchains.
+*   **Refactoring:** Abstract nonce parameters.
+    1. Define a `NonceMetadata` struct in `mining_common.hpp` containing `offset` and `size` fields.
+    2. Propagate these configuration fields from `PoolConfig` down through `StratumClient` and into the generated `Job` instances.
 
-| Area | Items | Status |
-|------|-------|--------|
-| **Security** | TLS hostname verification, JSON injection protection, read_buf cap, W^X compliance, CLI validation, SIGTERM | ✅ |
-| **Concurrency** | Stratum mutex, atomic session members, TSAN CMake option, per-instance rounding mode | ✅ |
-| **Memory** | MAP_HUGETLB for dataset/cache/scratchpad, MADV_POPULATE_WRITE warmup | ✅ |
-| **JIT tooling** | `--jit-dump`, bench_opcodes frequency analyzer, determinism/encoding tests, per-opcode audit | ✅ |
-| **Structured logger** | `include/armrx/log.hpp`, all cross-thread log sites migrated, `--log-level` flag | ✅ |
-| **Hot-path** | Template copy moved to job-change path, superscalar heap churn eliminated | ✅ |
-| **Parser** | `get_array_first` dead-code fix, `find_key` scope fix, `json::escape` all control chars | ✅ |
-| **Pool** | CryptoNote + Stratum V1 dual protocol, auto-reconnect with backoff, multi-pool failover | ✅ |
-
-See [`ROADMAP.md`](ROADMAP.md) for the detailed completed/remaining checklist.
+### 1.3 Monolithic Main Coordination
+*   **Bottleneck:** [main.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/main.cpp) spans 800+ lines, mixing CLI argument parsing, JSON configuration deserialization, signal handlers, interactive TUI hooks, metrics endpoints, and thread pooling setup.
+*   **Refactoring:**
+    1. Extract argument parsing into a dedicated `CommandLineParser` class.
+    2. Move miner state coordination, signals, and worker-pool lifecycles into a single `MinerApp` runner module.
 
 ---
 
-## Active priorities (ranked by impact)
+## 2. Performance & Resource Optimization
 
-| # | Priority | Est. gain | Phase | Detail doc |
-|---|----------|-----------|-------|------------|
-| **1** | **CBRANCH misprediction cost reduction** — 34.42% branch miss rate, ~26% of cycles wasted. Evaluate CSEL for CBRANCH, balanced path costs. | **+5–15%** | JIT plan Phase 4 | [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) |
-| — | **Newton-Raphson FDIV/FSQRT postmortem** — JIT buffer overflow resolved; fast math evaluated (slowdown on A53, kept OFF) | ✅ Done | Beyond-parity B | [`beyond-parity.md`](docs/beyond-parity.md#pillar-b-newton-raphson-fdivfsqrt-jit-unblocking-highest-single-jit-win) |
-| **2** | **Peephole JIT coalescing** — JIT buffer overflow resolved. Validate opcode generation patterns against XMRig | **+3–8%** | JIT plan Phase 2 | [`peephole-jit-plan.md`](docs/peephole-jit-plan.md) |
-| **5** | **TUI redesign** — TuiSnapshot, terminal-width, NO_COLOR, EMA bars, atexit cursor | ✅ Done | TUI U1 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u1--tui-foundations) |
-| **3** | **Instruction scheduling for in-order A53** — static FP load scheduling, register-offset FP loads, IPC lift from 0.708 toward 2.0 peak | ✅ Done | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
-| **4** | **SuperscalarHash JIT output scheduling** — AArch64-level hazard analysis on emitted JIT buffer | **+3–5%** | Beyond-parity C | [`beyond-parity.md`](docs/beyond-parity.md#pillar-c-superscalarhash-jit-scheduling) |
-| **7** | **CLI/config consolidation** — `--version`, dead code deleted | ✅ Done | TUI U3 | [`tui_usability_plan.md`](docs/tui_usability_plan.md#phase-u3--telemetry-and-cli) |
-| **8** | **Prometheus metrics endpoint** — HTTP `/metrics` on localhost | ✅ Done | Beyond-parity D | [`beyond-parity.md`](docs/beyond-parity.md#pillar-d-testing--observability-expansion) |
-| **9** | **PGO unblock** — try `-fprofile-use -fno-lto` path, static libgcov link, resolve GCC 15 + musl `__gcov_*` crash | ✅ Done | next_phase_v2 §2.6 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md) |
-| **10** | **Software AES header inlining & register-passing** — pass block by-value to prevent PLT memcpy | ✅ Done | next_phase_v3 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md) |
-| **11** | **big.LITTLE thread affinity** — sequential pinning vs unpinned vs big-only scheduling | ✅ Done | next_phase_v3 | [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md) |
-| **12** | **Stratum handshake / TLS tests** — integration tests for pool protocol under TSAN | Robustness | next_phase_v2 §4.4 | [`docs/next_phase_v3.md`](docs/next_phase_v3.md) |
-| **13** | **DVFS / thermal pinning check** — measure throttle under sustained load | **+0–5%** | Beyond-parity | [`beyond-parity.md`](docs/beyond-parity.md#priority-re-ranking-from-post-parity-analysis) |
+### 2.1 CPU Core Reuse for Dataset Initialization
+*   **Bottleneck:** During seed change shifts, [mining_engine.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/mining_engine.cpp#L171-L185) creates a temporary vector of threads `init_threads` to initialize the 2080 MiB dataset in parallel, joins them, and discards them. Spawning new OS threads under CPU contention incurs significant scheduling latency and invalidates cache states.
+*   **Optimization:** Reuse the existing long-lived mining worker threads. Integrate a synchronization barrier (using `std::barrier` or condition variables) inside `MiningEngine` to desynchronize mining loops during a job transition, partition the dataset ranges, and utilize the existing CPU-affinity-pinned threads to populate the dataset.
+
+### 2.2 Argon2d Cache SIMD Evaluation
+*   **Bottleneck:** The NEON implementation of the Argon2 `gb` permutation function in [argon2.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/argon2.cpp#L199-L200) is currently disabled using `#if 0`.
+*   **Optimization:** Conduct a comparative micro-benchmark on the Cortex-A53 to measure if vector load/store instructions (`vld1q_u64`/`vst1q_u64`) suffer from memory gather penalties during diagonal permutations. If a net performance gain is verified, permanently enable `permute_block_neon`; otherwise, clean the codebase by removing the dead code.
+
+### 2.3 JIT Memory Page Recycling
+*   **Bottleneck:** `allocMemoryPages` is executed on every JIT compilation run, requesting virtual memory allocations from the OS kernel.
+*   **Optimization:** Implement a pre-allocated pool of JIT RX pages during miner initialization. Recirculate these buffers across compile cycles, using `mprotect` calls only to toggle permissions, reducing memory allocation transitions.
 
 ---
 
-## Phase roadmap
+## 3. Code Quality, Testing & Security
+
+### 3.1 Hardened Network Parsing & Fuzzing
+*   **Vulnerability:** The stratum JSON parser in `armrx::json` relies on custom string search procedures (`find`, `get_string`). A compromised mining pool could exploit this by sending nested arrays, malformed unicode control characters, or oversized string payloads to crash the worker thread or overflow stack variables.
+*   **Mitigation:** 
+    1. Establish a fuzzing target using LibFuzzer to stream mutated payloads to `StratumClient::handle_line`.
+    2. Re-engineer the JSON module to use a hardened, non-allocating SAX parser with strict input length checks.
+
+### 3.2 Automated Stratum Protocol Testing
+*   **Coverage Gap:** The test suite has no coverage for networking protocols, socket reconnect loops, or pool failovers.
+*   **Strategy:** Build a local test harness `test_pool_protocol.cpp` using a mock TCP socket. It must simulate:
+    *   Stratum V1 / CryptoNote subscribe handshakes.
+    *   Simulated connection drops to verify that `StratumClient` executes exponential backoff.
+    *   Pool timeout failures to verify that `PoolManager` seamlessly migrates workers to the next configured fallback pool.
+
+### 3.3 Windows Privilege Least-Privilege Alignment
+*   **Vulnerability:** In [virtual_memory.c](file:///home/mechres/Projeler/aarch64-randomx/src/virtual_memory.c#L212), Windows builds query `SeLockMemoryPrivilege`. Requesting high-level privileges creates security flags on host platforms.
+*   **Mitigation:** Enforce strict error handling. If privilege request is denied, print a warning stating that large pages are disabled, and degrade gracefully to standard virtual allocation instead of failing.
+
+---
+
+## 4. Developer Experience (DX) & CI/CD Pipeline
+
+### 4.1 Cross-Compile Containerization
+*   **Bottleneck:** Local development relies on manual host synchronization (`devbox_sync`) to a remote target, complicating CI automation.
+*   **Strategy:** Build a Dockerfile wrapping a QEMU AArch64 environment with a postmarketOS toolchain. Set up a GitHub Actions workflow that executes this container, compiling the source and running the CTest suite on virtualized AArch64 runners.
+
+### 4.2 Unified Compilation Flag Invariants
+*   **Bottleneck:** Flag scopes (`ARMRX_ENABLE_JIT_FAST_DIV_SQRT`, `ARMRX_FAST_MATH`, `ARMRX_JIT_PROFILE`) are configured across different files, risking compilation conflicts (e.g. public definition leakage clobbering LTO/PGO optimizations).
+*   **Strategy:** Move compile definition bindings to a centralized `cmake/CompilerFlags.cmake` file. Enforce static checks to throw a build error if conflicting configurations are requested.
+
+---
+
+## 5. Future-Proof Roadmap
 
 ```
-Now ─────────────────────────────────────────────────────────────────►
-
-NR postmortem ──► Simplify NR ──► Measure 1-8 thr scaling ──► Stagger
-                    │                    │
-                    └── KAT veto ────────┘
-                                               └──► Peephole JIT diff vs XMRig
-                                               └──► TUI redesign
-                                               └──► CLI/config polish
-                                               └──► Prometheus endpoint
-                                               └──► Superscalar scheduling
-                                               └──► PGO unblock
-                                               └──► Handshake/TLS tests
+Phase 1 (Short-term) ──────────────► Phase 2 (Medium-term) ─────────────► Phase 3 (Long-term)
+• Fix Exporter data race             • Reuse workers for dataset        • QEMU Docker & GHA CI
+• Centralize CMake flags             • Mock stratum socket tests        • Stratum V2 integration
+• Private NR math validations       • Fuzz stratum JSON parser         • JIT cache line tuning
 ```
 
-1. **Resolve JIT literal pool corruption:** Fixed by expanding the JIT instructions buffer size in `static.S` to 32,768 bytes. Fast Newton-Raphson division/sqrt math evaluated and verified 100% correct, but kept OFF by default to preserve baseline A53 FPU execution throughput.
-2. **Re-measure scaling:** Completed. A worker count sweep (1-8 threads) confirmed linear scaling up to 8 threads with minimal memory bus contention (Policy A_pinned achieves 25.28 H/s).
-3. **Peephole JIT disassembly comparison:** The remaining path to audit individual opcodes against XMRig.
-4. **TUI redesign & Prometheus metrics:** Redesigned and integrated TUI and HTTP endpoint fully deployed.
+### Phase 1: Short-term / Immediate (Security & Thread Safety)
+*   **Tasks:**
+    1. Replace `MetricsExporter` detached thread with a joinable thread; fix the destructor socket shutdown block.
+    2. Audit compile definitions and restrict flag scopes to `PRIVATE` in `CMakeLists.txt`.
+    3. Ensure Windows privilege check degradations are warning-only.
+*   **Expected Outcomes:** Elimination of shutdown segmentation faults when Prometheus is enabled. Safe build flag separation under LTO compiler optimizations.
+*   **Rationale:** Resolving thread safety issues and compile-time flag clobbering prevents unstable execution and unblocks developer profiling.
 
----
+### Phase 2: Medium-term (Microarchitectural Performance & Test Coverage)
+*   **Tasks:**
+    1. Re-engineer `MiningEngine` to reuse existing worker threads for dataset initialization via a synchronization barrier.
+    2. Write a mock TCP server to test Stratum V1 / CryptoNote pool handshakes, timeouts, and failovers under CTest.
+    3. Write fuzzing targets to validate `armrx::json` against malformed payloads.
+    4. Benchmark NEON Argon2 `permute_block_neon` on the Cortex-A53 and clean or enable it.
+*   **Expected Outcomes:** Elimination of thread-spawning latency during seed key changes. Hardened network parsing. Automated validation of pool failover states.
+*   **Rationale:** Eliminates resource overhead and guarantees that the client can survive hostile or malformed network payloads during pool operations.
 
-## Reference documents
-
-| Doc | Scope | Status |
-|-----|-------|--------|
-| [`ROADMAP.md`](ROADMAP.md) | Completed/remaining checklist | Active |
-| [`docs/next_phase_v3.md`](docs/next_phase_v3.md) | Comprehensive Phase 3 plan (v3) | Active — detailed reference |
-| [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived Phase 1/2 plan (post-review v2) | **Archived** — superseded by v3 |
-| [`docs/archived/next_phase.md`](docs/archived/next_phase.md) | v1 of above | **Archived** — superseded by v2 |
-| [`docs/archived/plan_v1.md`](docs/archived/plan_v1.md) | v1 of master plan (261 lines) | **Archived** — superseded by this document |
-| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | JIT instruction-count gap closure | Active reference |
-| [`docs/beyond-parity.md`](docs/beyond-parity.md) | Post-parity scaling optimization | Active reference (v2) |
-| [`docs/tui_usability_plan.md`](docs/tui_usability_plan.md) | TUI redesign, CLI ergonomics, Prometheus surface | Active reference |
-| [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction postmortem | Reference |
-| [`docs/jit-buffer-size-audit.md`](docs/jit-buffer-size-audit.md) | JIT buffer size analysis and security audit | Reference |
-| [`OPTIMIZATION_REFERENCE.md`](OPTIMIZATION_REFERENCE.md) | Historical log of every optimization tried | Reference |
-
----
-
-## How to use this plan
-
-1. **Starting work?** Read the active priority list above. Pick the highest-ranked item that isn't blocked.
-2. **Need details?** Follow the "Detail doc" link to the specialized plan.
-3. **Updating status?** Edit `ROADMAP.md` (completed/remaining checklist) and the active priority table in this file. Keep specialized docs consistent.
-4. **Archiving a doc?** Move it to `docs/archived/` and update the reference table above.
+### Phase 3: Long-term (CI/CD Automation & Stratum V2)
+*   **Tasks:**
+    1. Deploy QEMU AArch64 container environments on GitHub Actions CI.
+    2. Implement native Stratum V2 protocol support to minimize data payload transfers.
+    3. Benchmark JIT compiler instruction alignments to minimize CPU cache eviction rates.
+*   **Expected Outcomes:** Zero-manual-setup build automation. Highly optimized network performance on latency-constrained pool setups.
+*   **Rationale:** Scalable build infrastructure enables future community contributions, and Stratum V2 ensures optimal network throughput for low-bandwidth environments.

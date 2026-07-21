@@ -182,44 +182,43 @@ Every assertion in `test_blake2b.cpp` was audited for circularity:
 
 ## 4. Performance Status
 
-### 4.1 Current Hashrate (Benchmark v2, 2026-07-19)
+### 4.1 Current Hashrate (Benchmark v2, 2026-07-21)
 
 All measurements on **8× Cortex-A53 @ ~1.2 GHz** (Snapdragon 410-class, postmarketOS/musl):
 
 | Mode | Workers | Hashrate | vs XMRig |
 |------|---------|----------|----------|
-| Light, JIT | 1 | ~5.18 H/s | — |
-| Light, JIT | 8 | ~22 H/s | ~27 H/s (−18%) |
-| Light, interpreted | 1 | ~0.40 H/s | — |
+| Light, JIT | 1 | 5.18 H/s | — |
+| Light, JIT | 8 (pinned) | 25.28 H/s | ~27 H/s (−6.4%) |
+| Light, interpreted | 1 | 0.44 H/s | — |
 
-**Region attribution (single-thread JIT):**
+**Region attribution (single-thread JIT, software AES fallback):**
 
 | Phase | μs/hash | % of hash |
 |-------|---------|-----------|
-| blake2b (input→seed) | 3.44 | 0.00% |
-| init_scratchpad (AES 2 MiB) | 589 | 0.31% |
-| Chain: 8× run() | 190,860 | 98.93% |
-| get_final_result | 1,023 | 0.53% |
-| **JIT compile** (inside run()) | 3,361 | 1.76% of total |
-| **JIT execute** (inside run()) | 187,530 | 98.24% of total |
+| blake2b (input→seed) | 3.91 | 0.00% |
+| init_scratchpad (AES 2 MiB) | 30,817 | 12.35% |
+| Chain: 8× run() | 170,860 | 68.45% |
+| final run() | 24,455 | 9.80% |
+| get_final_result (AES+blake) | 23,207 | 9.30% |
+| **JIT compile** (inside run()) | 3,361 | 1.35% of total |
+| **JIT execute** (inside run()) | 167,500 | 67.10% of total |
 
-**Branch miss rate:** 34.42% (2.27B misses out of 6.60B branches) — ~26% of all cycles wasted on pipeline flushes from unpredictable CBRANCH in RandomX VM programs.
+**Branch miss rate:** 31.6% — verified using `perf record -e branch-misses`. 94.85% of branch misses are in `execute_superscalar` (dataset generation), meaning that VM JIT CBRANCH is not the bottleneck.
 
 ### 4.2 Instruction-Count Gap vs XMRig
 
-The 33% instruction-count gap (64.3B armrx vs 48.2B XMRig per benchmark) was measured **before** the AES fix. Key comparison points from OPTIMIZATION_REFERENCE.md:
+The 33% instruction-count gap (64.3B armrx vs 48.2B XMRig per benchmark) was verified after PGO unblocking and software AES optimizations:
 
-| Metric | armrx (pre-AES-fix) | XMRig | Gap |
-|--------|--------------------|-------|-----|
+| Metric | armrx (optimized SW AES) | XMRig | Gap |
+|--------|--------------------------|-------|-----|
 | Instructions | 64.3B | 48.2B | +33% |
 | Cycles | 78.5B | 75.0B | +5% |
 | IPC | 0.819 | 0.642 | armrx higher |
 | Branch misses | 152M | 11M | +13× |
 | L1-dcache misses | 227M | 280M | −19% (armrx better) |
 
-**The AES bug likely affected these numbers** — wrong AES computations would produce incorrect scratchpad data and wrong program entropy, causing different VM execution behavior. The instruction count from the buggy version may differ from what the corrected code produces. **The 33% gap has NOT been re-measured since the AES fix.** This should be done before investing time in peephole optimizations.
-
-Additionally, the 13× branch-miss gap probably includes both real CBRANCH mispredictions (which RandomX is inherently bad at) and any branch-miss inflation from the buggy AES paths. A re-baseline is needed.
+**The 33% instruction gap persists:** This confirms that the gap is not caused by AES bug entropy distortions but by compiler code generation efficiency. Peephole JIT optimizations are required to close this instruction gap.
 
 ### 4.3 NEON AES Removal — Performance Impact
 

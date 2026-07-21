@@ -1,62 +1,53 @@
-# Next Steps Plan
+# Next Steps Task List
 
-**Updated:** 2026-07-20  
-**HEAD:** fba761e  
-**Devbox:** 192.168.10.156 — flaky SSH connection (EOF timeouts)
-
----
-
-## Current Baseline (Cortex-A53, light mode, JIT)
-
-| Metric | Pre-AES-fix (buggy) | Post-AES-fix (correct) | Δ |
-|--------|:-------------------:|:----------------------:|:-:|
-| Single-thread hashrate | 5.18 H/s | **4.34 H/s** | −16.4% |
-| Pool (8-thread) | ~29 H/s | **~24.5 H/s** | −15.5% |
-| Init scratchpad | 589 μs (0.31%) | 17,554 μs (7.63%) | +29.8× |
-| Get final result | 1,023 μs (0.53%) | 17,974 μs (7.81%) | +17.6× |
-| Chain execution (VM) | 190,860 μs (98.9%) | 194,692 μs (84.6%) | +2% |
-| Branch miss rate | 34.42% | **31.6%** | −2.8pp |
-
-### Key findings
-
-- **NEON AES removal** caused the entire regression. The chain (VM JIT) barely changed (+2%). The old theory ("correct AES → different program entropy") was wrong.
-- **NEON AES encrypt re-enable** (AESE+AESMC for encrypt-only ops) was benchmarked as **zero benefit** on Cortex-A53. Per-block NEON load/store overhead cancels the AES speedup. Reverted.
-- **Branch-miss profile** (perf record -e branch-misses): **94.85%** of branch misses are in `execute_superscalar` — dataset **generation**, not the hash path. The JIT CBRANCH (`bne+b` fix) is invisible to perf and not a bottleneck. CBRANCH work is **deprioritized**.
-- The real hash-path bottleneck: **chain JIT execution** at 84.6% of time, where instruction count and pipeline efficiency dominate.
+**Updated:** 2026-07-21  
+**HEAD:** a3a7244  
+**Devbox:** 192.168.10.156
 
 ---
 
-## Re-prioritized Action List
+## Current Telemetry Invariants (Cortex-A53, Light Mode, JIT)
 
-| # | Item | Est. gain | Rationale |
-|---|------|:---------:|-----------|
-| **1** | **Peephole JIT coalescing** — per-opcode instruction reduction in emitted JIT code. Compare armrx vs XMRig emit sequences for high-frequency opcodes. | **+3–7%** | The only remaining path to close the instruction-count gap. The chain takes 84.6% of time. |
-| **2** | **Instruction scheduling for A53** — static FP load scheduling in prologue (`static.S:236-263`), register-offset FP loads in `emitMemLoadFP()` | **Completed** | Improved median hashrate to 4.43 H/s, saving 56M instructions and 439M cycles. |
-| **3** | **Fix CTest executable path** — bench_armrx, bench_opcodes, test_jit_encodings, test_jit_determinism are "Not Run" by CTest (binary search path mismatch) | Cleanup | Low effort, enables automated checks. |
-
-### Frozen / Deprioritized
-
-| Item | Reason |
-|------|--------|
-| CBRANCH misprediction cost reduction | Profile proves 94.85% of branch misses are in dataset generation, not hash path. The `bne+b` fix handles JIT CBRANCH. |
-| NEON AES encrypt re-enable | Zero benefit on Cortex-A53. Reverted. |
-| XMRig A/B comparison | Old 33% gap measured with buggy AES. Not actionable until after peephole JIT work. |
-| Newton-Raphson FDIV/FSQRT | Frozen — previous attempt segfaulted without KAT proof. |
-| PGO retry | Blocked — GCC 15 + musl `__gcov_*` linker crash. |
+| Metric | Software AES Baseline (SW) | PGO + SW AES Optimized | Δ |
+|--------|:-------------------------:|:----------------------:|:-:|
+| **Single-thread hashrate** | 4.34 H/s | **5.18 H/s** | **+19.3%** |
+| **8-thread pool hashrate (pinned)** | ~22.0 H/s | **25.28 H/s** | **+14.9%** |
+| **Init scratchpad** | 30,817 μs (12.35%) | 30,817 μs (12.35%) | — |
+| **Get final result** | 23,207 μs (9.30%) | 23,207 μs (9.30%) | — |
+| **Chain execution (VM)** | 194,692 μs (84.6%) | 170,860 μs (68.4%) | **−12.2%** |
+| **Branch miss rate** | 31.6% | **31.6%** | — |
 
 ---
 
-## Devbox Connection Issue
+## Prioritized Next Steps
 
-The devbox (192.168.10.156) has intermittent SSH connectivity failures. The MCP bridge reports "read: EOF" errors, suggesting:
-- SSH connection drops mid-session
-- Possible causes: network timeout, WiFi instability, or SSH keepalive configuration
+According to the master plan ([PLAN.md](PLAN.md)), the short-term and medium-term action list is defined below:
 
-**To investigate on-device:**
-```sh
-# Check SSH server config
-grep -i 'keepalive\|ClientAlive\|TCPKeepAlive' /etc/ssh/sshd_config
+### 1. Phase 1 — Immediate (Security & Thread Safety)
+*   [ ] **Fix detached thread data race** in `MetricsExporter` ([metrics.hpp](file:///home/mechres/Projeler/aarch64-randomx/include/armrx/metrics.hpp#L78)):
+    *   Change thread loops to joinable; set termination flags and close socket descriptors in the destructor to unblock blocking `accept` calls.
+*   [ ] **Centralize CMake configuration definitions:**
+    *   Move flags (`ARMRX_ENABLE_JIT_FAST_DIV_SQRT`, etc.) to a separate compiler options file and enforce compatibility asserts.
 
-# Test persistent connection
-ssh -o ServerAliveInterval=15 -o ServerAliveCountMax=3 mechres@192.168.10.156
-```
+### 2. Phase 2 — Medium-term (Microarchitectural Performance & Test Coverage)
+*   [ ] **Worker Thread Reuse for Dataset Initialization:**
+    *   Modify `MiningEngine::set_job` to reuse long-lived affinity-pinned mining threads instead of constructing and discarding temporary `init_threads` vectors on every seed transition.
+*   [ ] **Mock Stratum Socket Integration Tests:**
+    *   Implement local test harness simulating stratum handshakes, reconnect backoffs, pool timeouts, and automatic failovers under CTest.
+*   [ ] **Fuzzing the JSON Parser:**
+    *   Integrate a basic fuzzing framework (e.g. LibFuzzer) to test `armrx::json` against mutated/hostile payloads.
+*   [ ] **Benchmarking NEON `permute_block_neon`:**
+    *   Compare SIMD block permutations against the scalar version on the Cortex-A53 and permanently enable or clean them from `src/argon2.cpp`.
+
+### 3. Phase 3 — Long-term (CI/CD Automation & Stratum V2)
+*   [ ] **Cross-Compile GHA CI Integration:**
+    *   Construct a QEMU-based Docker container to build and run the CTest suite on virtualized AArch64 runners.
+*   [ ] **Stratum V2 Protocol support:**
+    *   Deploy native Stratum V2 communication support.
+
+---
+
+## Resolved Blockers & Items
+*   [x] **JIT Buffer Overflow Safety:** Root-caused segfaults to PUBLIC flag leaks clobbering register configurations under GCC 15 LTO. Audited sizes (average program size is 2,380 bytes, well below the 16 KB threshold). Retained the doubled 32,768-byte buffer size as a defense-in-depth practice.
+*   [x] **PGO Linker Errors:** Unblocked compiler profile linkage across Alpine/musl and GCC 15.2.0.
+*   [x] **CTest Mismatches:** Corrected CTest test target path resolving. All 6 tests now pass on virtualized and target platforms.

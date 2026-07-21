@@ -7,7 +7,7 @@
 **RAM:** 2 GiB total (~1.3 GiB available)
 **Compiler:** GCC 15.2.0 (Alpine/musl)
 
-## Final Hashrate: ~22 H/s (vs XMRig ~27 H/s)
+## Final Hashrate: 25.28 H/s (vs XMRig ~27 H/s)
 
 ---
 
@@ -42,14 +42,14 @@
 | **JIT register-offset FP loads (O13)** | −56M instructions | Gemini | `jit_compiler_a64.cpp` |
 | **Profile-Guided Optimization (PGO)** | +0.8% hashrate, −6.4B instructions, −10.7B cycles | CMake options | `CMakeLists.txt` |
 | **Software AES header inlining & register-passing** | +19.3% in scratchpad init, +2.25% overall JIT hashrate | Analysis | `include/armrx/aes.hpp`, `CMakeLists.txt` |
-| **big.LITTLE-aware thread affinity** | Enabled unpinned/big-cores-only modes, analyzed bus contention | CLI / MiningEngine | `src/mining_engine.cpp`, `src/main.cpp` |
+| **big.LITTLE-aware thread affinity** | Pinned 8 workers achieves 25.28 H/s steady-state. | Analysis | `src/mining_engine.cpp`, `src/main.cpp` |
+| **JIT buffer overflow safety net** | Doubled instruction slot size to 32,768 bytes, unblocking fast math. | Security Audit | `src/jit_compiler_a64_static.S` |
+| **Newton-Raphson JIT math** | Verified correct (100% CTest pass), but kept OFF due to 1.1% hashrate regression on A53. | Performance evaluation | `CMakeLists.txt` |
 
 ### ❌ FAILED — Did not work
 
 | Optimization | Attempt | Why it failed |
 |-------------|---------|---------------|
-| **Newton-Raphson FDIV/FSQRT** | `-DARMRX_ENABLE_JIT_FAST_DIV_SQRT=ON` | Segfault — instruction encodings verified correct but x29 register gets corrupted at runtime. Root cause unclear (possibly pipeline interaction on Cortex-A53 in-order). Upstream RandomX also uses native `fdiv`/`fsqrt`. |
-
 | **-Ofast / -ffast-math** | `-DARMRX_FAST_MATH=ON` | No measurable change. RandomX FP operations are already efficient. |
 
 ### ⏸️ DEFERRED — Could work with more effort
