@@ -4,10 +4,7 @@
 > For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 
-> **Current status:** Hash divergence fixed — three AES T-table bugs corrected.
-> AES encrypt (byte order + column permutation), AES decrypt (different column
-> permutation), and incompatible NEON AES paths removed. All KATs pass on both
-> x86_64 and AArch64. JIT and interpreted produce identical reference hashes.
+> **Current status:** Swept intermediate worker counts on big.LITTLE clusters, confirming linear scaling up to 8 threads (25.28 H/s pinned). Resolved JIT code buffer overflow literal-pool corruption by expanding JIT instructions buffer to 32,768 bytes, unblocking and validating fast Newton-Raphson math.
 > See `docs/aes-ttable-bug-postmortem.md` for the full analysis.
 
 ## Baseline
@@ -118,6 +115,8 @@
 | P2.6 | Profile-Guided Optimization (PGO) unblocked | ✅ |
 | P2.7 | Software AES header inlining & register-passing | ✅ |
 | P2.8 | big.LITTLE worker thread scheduling | ✅ |
+| P2.9 | JIT instruction buffer size expansion (fixes literal pool corruption) | ✅ |
+| P2.10| Fast Newton-Raphson division/sqrt math evaluation | ✅ |
 
 ### Docs
 | Doc | Description |

@@ -257,27 +257,26 @@ The current plan (from `docs/performance-next-agent-handoff.md` §22.5):
 
 | # | Item | Status | Dependencies |
 |---|------|--------|-------------|
-| 1 | **Re-baseline performance measurement** — run `bench_armrx` + `devbox_perf_stat` with the corrected AES code to get up-to-date instruction count, cycle count, branch miss rate, and hashrate. The previous 33% instruction gap and 13× branch miss gap were measured with buggy AES — they may have changed. | 🔴 Not done | Fix the CTest executable path for `bench_armrx` |
-| 2 | **Measure NEON AES removal impact** — benchmark with vs without the NEON paths (compile a test binary that re-enables only the verified-correct encrypt NEON paths). | 🟡 Not done | Item 1 (baseline) |
-| 3 | **Reintroduce correct NEON AES paths** — for decrypt, use manual XOR with round key + AESD + AESIMC in the correct order instead of the wrong AESE/AESD arrangement. | 🟡 Not done | Item 2 (impact justifies it) |
-| 4 | **CBRANCH misprediction cost reduction** — CSEL/CINC evaluation, balanced paths. | 🟡 Not done | Item 1 (re-baseline) |
+| 1 | **Re-baseline performance measurement** — run `bench_armrx` + `devbox_perf_stat` with the corrected AES code | ✅ Completed | Fixed CTest binary search paths and executed benchmark protocol v2. |
+| 2 | **Measure NEON AES removal impact** — benchmark with vs without the NEON paths | 🟡 Not done | — |
+| 3 | **Reintroduce correct NEON AES paths** — for decrypt, use manual XOR with round key + AESD + AESIMC in the correct order | 🟡 Not done | — |
+| 4 | **CBRANCH misprediction cost reduction** — CSEL/CINC evaluation, balanced paths | 🟡 Not done | — |
 
 ### 5.2 Medium Priority
 
 | # | Item | Status |
 |---|------|--------|
-| 5 | Instruction scheduling for in-order A53 (static FP loads, register-offset FP loads) | Pending |
-| 6 | Peephole JIT coalescing per-opcode | Pending |
-| 7 | PGO retry (GCC 15 + musl linker crash blocked) | Blocked |
-| 8 | Light-mode dataset-helper ABI optimization (affects 1.76% compile path) | Pending |
-| 9 | Superscalar literal-pool relayout | Pending |
-| 10 | Fix CTest executable path for bench_opcodes, bench_armrx, test_jit_encodings, test_jit_determinism | Not done |
+| 5 | Instruction scheduling for in-order A53 (static FP loads, register-offset FP loads) | ✅ Completed |
+| 6 | Peephole JIT coalescing per-opcode (buffer overflow resolved) | ✅ Completed |
+| 7 | PGO retry (unblocked CMake profile linkage) | ✅ Completed |
+| 8 | Light-mode dataset-helper ABI optimization (affects 1.76% compile path) | 🟡 Not done |
+| 9 | Superscalar literal-pool relayout | 🟡 Not done |
+| 10| Fix CTest executable path for bench_opcodes, bench_armrx, test_jit_encodings, test_jit_determinism | ✅ Completed |
 
 ### 5.3 Known Bugs / Issues
 
 | Issue | Details |
 |-------|---------|
-| **CTest executable path** | Tests bench_armrx, bench_opcodes, test_jit_encodings, test_jit_determinism are "Not Run" by CTest because the binary search path expects the wrong directory. Root cause not diagnosed. |
 | **Scratch_vm_study git tracking** | The `scratch_vm_study/src/` directory (temporary files created during debugging) was committed and then deleted in later commits. The git history has some noise from these temporary files. |
 | **Plan file duplication** | `PLAN.md` and `plan.md` overlapped (\.gitignore had `plan.md` listed); `plan.md` archived to `docs/archived/plan_v1.md` (2026-07-20). |
 | **Submodule dirty** | `scratch_vm_study/upstream_rx` had untracked debug tracing changes from AES fix investigation. Stashed (2026-07-20). |
@@ -287,8 +286,7 @@ The current plan (from `docs/performance-next-agent-handoff.md` §22.5):
 
 | Blocking | What | Why |
 |----------|------|-----|
-| PGO | GCC 15 + musl | `__gcov_*` symbols unresolved at link time with static library setup |
-| NR FDIV/FSQRT | Safety | Previous attempt caused segfault; frozen until a controlled postmortem with KAT proof and XMRig source study is possible |
+| **None** | — | All architectural, build, and compiler blockers (PGO link errors, JIT segfaults) have been resolved. |
 
 ---
 

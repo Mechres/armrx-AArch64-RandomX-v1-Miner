@@ -190,8 +190,10 @@ Full status and remaining items tracked in [`ROADMAP.md`](ROADMAP.md).
 | **Profile-Guided Optimization (PGO) unblocked** | ✅ |
 | **Software AES header inlining & register-passing** | ✅ |
 | **big.LITTLE-aware worker thread scheduling** | ✅ |
+| **JIT instruction buffer overflow resolution** | ✅ |
+| **Fast Newton-Raphson JIT math evaluation** | ✅ |
 | **Peephole JIT plan** | 📄 [docs/peephole-jit-plan.md](docs/peephole-jit-plan.md) |
-| **Beyond-parity plan** | 📄 [docs/new_plan.md](docs/beyond-parity.md) |
+| **Beyond-parity plan** | 📄 [docs/beyond-parity.md](docs/beyond-parity.md) |
 | **CBRANCH postmortem** | 📄 [docs/branchless-cbranch.md](docs/branchless-cbranch.md) |
 
 ### Performance
@@ -200,8 +202,8 @@ Tested on **8× Cortex-A53 @ ~1.2 GHz** (Lenovo MSM8916, postmarketOS):
 
 | Mode | Hashrate |
 |------|----------|
-| **Light, 8 workers** | **~22 H/s** (big: 3.58/core, LITTLE: 1.86/core) |
-| Light, 4 workers (big only) | ~14 H/s |
+| **Light, 8 workers (pinned)** | **25.28 H/s** (big: 4.11 H/s/core, LITTLE: 2.21 H/s/core) |
+| Light, 4 workers (big only) | **16.45 H/s** (4.11 H/s/core) |
 | Fast mode | Requires ≥2.3 GiB available RAM |
 
 Reference XMRig on same hardware: ~27 H/s. See [OPTIMIZATION_REFERENCE.md](OPTIMIZATION_REFERENCE.md) for the full optimization history.

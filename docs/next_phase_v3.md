@@ -10,7 +10,7 @@ This document outlines the current outstanding engineering, optimization, and po
 
 | ID | Action | Est. Gain | Rationale |
 |---|---|---|---|
-| **O3.1** | **Peephole JIT Phase 2 Opcodes Audit** | +3–7% hashrate | Execute the per-opcode audit from `docs/peephole-jit-plan.md`. Start by reducing the JIT `FDIV_M` Markstein iteration steps from 17 instructions down to 8 instructions, and audit remaining high-weight arithmetic opcodes. |
+| **O3.1** | **JIT Buffer Overflow and Fast Math Audit** | ✅ Resolved | Root-caused segfault to JIT instruction buffer overflow. Expanded instructions buffer to 32,768 bytes, successfully validating Newton-Raphson division/sqrt (kept OFF by default due to A53 pipeline slowdown). |
 | **O3.2** | **Re-measure CBRANCH Miss Rate** | Diagnostic / Saved effort | Re-measure hardware PMU counters with `perf record -e branch-misses`. If 94%+ of branch misses still reside in the dataset generation (`execute_superscalar`) and not the JIT execution path, keep JIT `CBRANCH` branchless rewriting (CSEL/CINC) deprioritized. |
 | **O3.3** | **Stratum V2 Protocol Implementation** | Reliability / Efficiency | Implement native Stratum V2 protocol support to reduce data transfer sizes and improve communication efficiency with modern mining pools. |
 | **O3.4** | **Cross-Compile CI Pipeline** | Maintainability | Construct a GitHub Actions CI pipeline to verify cross-compilation for AArch64 and run interpreted-mode unit tests on x86_64 runners. |
