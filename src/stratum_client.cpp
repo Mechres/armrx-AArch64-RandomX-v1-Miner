@@ -469,8 +469,8 @@ void StratumClient::handle_notify(const std::string& line) {
     Job job;
     job.job_id        = job_id;
     job.block_template = hex_to_bytes(blob_hex);
-    job.nonce_offset  = 39; // Monero: nonce at byte 39 of blob
-    job.nonce_size    = 4;
+    job.nonce_offset  = nonce_offset_;
+    job.nonce_size    = nonce_size_;
 
     if (!seed_hex.empty()) {
         job.seed_key = hex_to_bytes(seed_hex);
@@ -641,8 +641,8 @@ void StratumClient::process_cryptonote_job(const std::string& job_id,
     Job job;
     job.job_id = job_id;
     job.block_template = hex_to_bytes(blob_hex);
-    job.nonce_offset = 39; // Monero: nonce at byte 39 of blob
-    job.nonce_size = 4;
+    job.nonce_offset = nonce_offset_;
+    job.nonce_size = nonce_size_;
 
     if (!seed_hex.empty()) {
         job.seed_key = hex_to_bytes(seed_hex);

@@ -75,12 +75,12 @@ public:
             ::close(fd);
             server_fd_ = -1;
         });
-        thread_.detach();
     }
 
     ~MetricsExporter() {
         running_ = false;
         if (server_fd_ >= 0) ::shutdown(server_fd_, SHUT_RDWR);
+        if (thread_.joinable()) thread_.join();
     }
 
     MetricsExporter(const MetricsExporter&) = delete;

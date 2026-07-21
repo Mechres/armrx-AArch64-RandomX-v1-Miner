@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-07-21 — PLAN.md Verification Pass and Phase 1 Fixes
+
+- **Verified `PLAN.md` against current HEAD and corrected stale items**:
+  - §2.3 "JIT Memory Page Recycling" rested on a false premise — `allocMemoryPages` is called once per worker thread (`JitCompilerA64` ctor, via `VirtualMachine`), not per JIT compile. Marked "investigated, not an issue" instead of left as an open task.
+  - §4.2 "Unified Compilation Flag Invariants" cited a crash caused by `ARMRX_JIT_FAST_DIV_SQRT` being `PUBLIC`; that flag was already changed to `PRIVATE` (commit `b814c17e`, see `docs/jit-buffer-size-audit.md`). Downgraded from a Phase 1 safety fix to an opportunistic cleanup.
+  - §3.3 "Windows Privilege Least-Privilege Alignment" — the project has no Windows build support anywhere (`_WIN32`/`_MSC_VER`/`__CYGWIN__` only appear in `virtual_memory.c`, inherited from upstream RandomX), and the caller (`MappedMemory`) already degrades gracefully on `NULL`. Reclassified from "security fix" to "dead code."
+  - §1.1/§1.2 tightened with exact current-code details (both stratum nonce call sites; the precise remaining gap in `MetricsExporter`'s thread lifecycle).
+  - Rewrote §5's phase roadmap so tasks are grouped by actual effort/risk instead of by original topic area.
+- **Implemented Phase 1 (quick, low-risk fixes)**:
+  - `include/armrx/metrics.hpp`: removed `thread_.detach()`; destructor now calls `thread_.join()` after `shutdown()`, closing the exit-time use-after-free window where the detached socket thread could run past `MetricsExporter`/`main()` teardown.
+  - `include/armrx/stratum_client.hpp`, `src/stratum_client.cpp`: added `nonce_offset_`/`nonce_size_` members (Monero defaults 39/4) and a `set_nonce_config()` setter; both hardcoded call sites (`handle_notify` for Stratum V1, `process_cryptonote_job` for CryptoNote) now read from one source of truth.
+  - `src/virtual_memory.c`: added a header comment marking the `_WIN32`/`__CYGWIN__` branches as vestigial/unreachable in this Linux-only project, rather than surgically deleting them out of a file that interleaves Windows/Apple/BSD paths in the same functions.
+  - Verified on x86_64 dev sandbox: `cmake --build build -j` clean, `ctest --test-dir build --output-on-failure` 3/3 passing (`armrx_tests`, `test_mining`, `bench_armrx`) — interpreted-only build, JIT excluded.
+  - Verified on real AArch64 hardware (device at 192.168.10.156, via direct SSH since the devbox MCP tools weren't wired into this session): native `cmake --build` clean, `ctest` 6/6 passing, including the JIT-only `bench_opcodes`/`test_jit_encodings`/`test_jit_determinism` that don't build on x86_64.
+
 ## 2026-07-21 — JIT Buffer Overflow Resolution and Newton-Raphson Evaluation
 
 - **Conducted JIT Safety Audit & Expanded JIT Buffer** (`src/jit_compiler_a64_static.S`, `docs/jit-buffer-size-audit.md`):

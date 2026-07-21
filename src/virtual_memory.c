@@ -26,6 +26,13 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// This file is ported from upstream RandomX and keeps its original multi-platform
+// #ifdef structure. armrx only builds for Linux (CMakeLists.txt has no Windows/MSVC
+// target, and MappedMemory's fallback path elsewhere calls POSIX mmap/madvise
+// unconditionally), so every _WIN32/__CYGWIN__ branch below is dead and never
+// compiled by this project. Left in place rather than surgically stripped, since
+// the branches are intertwined with the Apple/BSD paths this project DOES build.
+
 #if defined(_WIN32) || defined(__CYGWIN__)
 #include <windows.h>
 #else

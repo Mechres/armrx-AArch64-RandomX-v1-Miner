@@ -98,6 +98,16 @@ public:
      */
     void set_reconnect_config(unsigned max_retries = 10, unsigned base_delay_ms = 1000);
 
+    /**
+     * Override where the pool-supplied nonce lives within the block template blob.
+     * Defaults to Monero's layout (offset 39, 4 bytes). Only needed for alternative
+     * RandomX-based chains with a different blob format.
+     */
+    void set_nonce_config(std::size_t offset, std::size_t size) {
+        nonce_offset_ = offset;
+        nonce_size_ = size;
+    }
+
     [[nodiscard]] bool is_connected() const { return connected_.load(); }
 
     /** Returns the number of consecutive reconnect attempts since last clean connect. */
@@ -158,6 +168,11 @@ private:
     std::string session_id_;
     std::string extra_nonce1_;      // Pool-assigned nonce prefix (hex)
     std::size_t extra_nonce2_size_{4}; // Extra nonce 2 length in bytes
+
+    // Nonce field location within the block template blob. Monero defaults;
+    // overridable via set_nonce_config() for other RandomX-based chains.
+    std::size_t nonce_offset_{39};
+    std::size_t nonce_size_{4};
 
     mutable std::mutex send_mutex_;
     mutable std::atomic<std::uint64_t> request_id_{1};
