@@ -3,6 +3,8 @@
 This document serves as the master plan and improvement roadmap for the `armrx` RandomX AArch64 miner. It details structural architecture upgrades, microarchitectural performance optimizations, quality assurance steps, developer experience (DX) refinements, and a phased execution schedule.
 
 > **Verification pass (2026-07-21):** every item below was re-checked against current HEAD (`61899d7`) before this revision. Two items turned out to rest on stale premises and were corrected in place rather than silently dropped — see §2.3 and §4.2. See also `docs/audit-20260721-cross-reference.md` for a broader doc-vs-code cross-reference conducted the same day; check it before assuming any *other* project doc (`ROADMAP.md`, `STATUS_REPORT.md`, `NEXT_STEPS.md`) is current.
+>
+> **Critical fix landed mid-Phase-2 (2026-07-21):** implementing §2.1 surfaced a pre-existing, severe fast-mode dataset-corruption bug (silently zero-filling most of any multi-threaded dataset build) plus a project-wide `assert()`-silently-disabled-under-`-DNDEBUG` issue in the test suite. Both fixed; see `docs/fast-mode-dataset-corruption-postmortem.md` for the full account and §2.1 below for the summary.
 
 ---
 
@@ -24,23 +26,31 @@ This document serves as the master plan and improvement roadmap for the `armrx` 
     2. Propagate these configuration fields from `PoolConfig` down through `StratumClient` and into the generated `Job` instances, updating **both** call sites above so they stay in sync.
 *   **Implemented (deviated from the letter of the plan, not the intent):** `Job` already carried `nonce_offset`/`nonce_size` fields, so a separate `NonceMetadata` struct would have been a redundant wrapper around two `std::size_t`s. Instead, added `nonce_offset_`/`nonce_size_` members directly to `StratumClient` (Monero defaults 39/4) plus a `set_nonce_config()` setter; both call sites now read from that single source of truth. No `PoolConfig`/CLI plumbing was added since nothing downstream needs to override it yet — can be wired up later if an alternative chain actually needs it.
 
-### 1.3 Monolithic Main Coordination
+### 1.3 Monolithic Main Coordination — ✅ Done (2026-07-21)
 *   **Bottleneck:** [main.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/main.cpp) spans 800+ lines, mixing CLI argument parsing, JSON configuration deserialization, signal handlers, interactive TUI hooks, metrics endpoints, and thread pooling setup.
 *   **Refactoring:**
     1. Extract argument parsing into a dedicated `CommandLineParser` class.
     2. Move miner state coordination, signals, and worker-pool lifecycles into a single `MinerApp` runner module.
+*   **Implemented:** `CommandLineParser` (`include/armrx/cli_parser.hpp`, `src/cli_parser.cpp`) parses argv into a `MinerOptions` struct after applying config-file defaults, in the same precedence order as before; handles `--help`/`--version`/invalid-arg by printing and returning a `ParsedArgs{should_exit, exit_code}`. `MinerApp` (`include/armrx/miner_app.hpp`, `src/miner_app.cpp`) owns signal handling and the four run modes (init-cache, JIT dump, local benchmark, pool mining) as private methods called from `run()`. `main.cpp` is now 10 lines: parse, construct `MinerApp`, run.
+*   **Verified:** local build clean, `--help`/`--version`/invalid-arg output byte-identical to the pre-refactor binary (diffed directly), exit codes preserved for every early-return path (including the `--pool`/`--wallet` validation, which needed a fix mid-refactor — see below). 3/3 local ctest passing. On-device: clean build, `--version` confirms `AArch64 JIT: enabled`, full 6-test ctest run in progress.
+*   **Caught during self-review:** the first draft of `run_pool_mining()` swallowed the wallet/pool-list validation's `return 64;` into a plain `return;`, which would have silently changed that failure's exit code from 64 to the fallthrough `cpu.aarch64 ? 0 : 2`. Fixed by moving the validation back into `run()` before calling `run_pool_mining()`, mirroring the existing fast-mode-memory-check pattern in the same function.
 
 ---
 
 ## 2. Performance & Resource Optimization
 
-### 2.1 CPU Core Reuse for Dataset Initialization
+### 2.1 CPU Core Reuse for Dataset Initialization — ✅ Done (2026-07-21)
 *   **Bottleneck:** During seed change shifts, [mining_engine.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/mining_engine.cpp#L171-L185) creates a temporary vector of threads `init_threads` to initialize the 2080 MiB dataset in parallel, joins them, and discards them. Spawning new OS threads under CPU contention incurs significant scheduling latency and invalidates cache states.
 *   **Optimization:** Reuse the existing long-lived mining worker threads. Integrate a synchronization barrier (using `std::barrier` or condition variables) inside `MiningEngine` to desynchronize mining loops during a job transition, partition the dataset ranges, and utilize the existing CPU-affinity-pinned threads to populate the dataset.
+*   **Implemented:** used a manual mutex/counter/`condition_variable` handshake instead of `std::barrier` — `std::barrier` has no clean cancellation path, and `stop()` racing a live fast-mode seed rotation (SIGINT mid-rebuild) would otherwise leave `set_job()` waiting forever for workers that already exited via `while(running_)`. `set_job()`'s wait predicate includes `!running_`, and `stop()` notifies the CV after flipping `running_` false, so that race resolves cleanly (verified — see below). A generation counter (`dataset_init_generation_`, same idiom as the existing `job_generation_`/`local_gen`) drives worker participation instead of a boolean pending flag, so each worker participates exactly once per rebuild with no reset-window race. Falls back to the original temp-thread behavior when no persistent workers exist yet (the first job, set before `start()`).
+*   **Bug found and fixed during implementation — not a regression, but a pre-existing correctness bug surfaced by this work:** writing the correctness test for this feature uncovered that `MiningEngine`'s multi-threaded dataset build (both this new path and the original temp-thread code it's alongside) has been calling `initialize_dataset()` with the wrong output span — passing the full dataset buffer instead of each thread's own sub-span — silently corrupting most of any fast-mode dataset built with more than one thread. See `docs/fast-mode-dataset-corruption-postmortem.md` for the full writeup; this also surfaced that `assert()` was silently compiled out under the project's default Release build (`-DNDEBUG`), so the test suite hadn't actually been checking its assertions.
+*   **Verified:** x86_64 (31 GiB RAM) — full local `ctest` 3/3, both new fast-mode tests fully exercised (not skipped). AArch64 on-device (Cortex-A53, ~1.8 GiB RAM, built with `-DARMRX_DISABLE_LTO=ON` — see the postmortem for why) — full `ctest` 6/6, with the two fast-mode tests correctly skipped via a memory-availability guard (the device can't fit fast mode at all, confirmed via the miner's own `--mode=fast` check).
 
-### 2.2 Argon2d Cache SIMD Evaluation
+### 2.2 Argon2d Cache SIMD Evaluation — ✅ Done, NEON enabled (2026-07-21)
 *   **Bottleneck:** The NEON implementation of the Argon2 `gb` permutation function in [argon2.cpp](file:///home/mechres/Projeler/aarch64-randomx/src/argon2.cpp#L199-L200) is currently disabled using `#if 0`.
 *   **Optimization:** Conduct a comparative micro-benchmark on the Cortex-A53 to measure if vector load/store instructions (`vld1q_u64`/`vst1q_u64`) suffer from memory gather penalties during diagonal permutations. If a net performance gain is verified, permanently enable `permute_block_neon`; otherwise, clean the codebase by removing the dead code.
+*   **Implemented:** added a permanent `argon2_compress` micro-benchmark to `tests/bench_armrx.cpp` (§"3b. Argon2 compression") since the suite had no benchmark for the cache-init hot path at all. Measured on-device (Cortex-A53, pinned to core 0), reproduced twice: **scalar 11.87 μs/compress (84,218 compress/s) vs NEON 9.95 μs/compress (100,533 compress/s) — a consistent ~16% latency reduction, ~19% throughput gain.** No gather penalty observed on the diagonal step (which already falls back to scalar `gb()` there — see the code comment on why). Flipped the guard from `#if 0 // defined(__aarch64__) && defined(__ARM_NEON)` to the real `#if defined(__aarch64__) && defined(__ARM_NEON)`, permanently enabling `permute_block_neon` on AArch64+NEON builds; x86_64 and non-NEON ARM builds still take the scalar path via the existing `#else` branch.
+*   **Verified:** correctness is unusually well-covered here — `Argon2dCache::initialize()` (which calls `permute_block` ~786k times for the default 262144-block/3-pass config) directly determines every RandomX hash output, so the existing KAT suite (`armrx_tests`) is itself the regression test for this change, not just a smoke test. Passed 6/6 on-device ctest (`armrx_tests`, `test_mining`, `bench_armrx`, `bench_opcodes`, `test_jit_encodings`, `test_jit_determinism`) with NEON enabled.
 
 ### 2.3 JIT Memory Page Recycling — Investigated, Not an Issue
 *   **Original claim:** `allocMemoryPages` is executed on every JIT compilation run, requesting virtual memory allocations from the OS kernel.
@@ -106,15 +116,16 @@ Phase 1 (Short-term) ──────────────► Phase 2 (Medi
 *   **Verified on real AArch64 hardware (2026-07-21):** the devbox MCP tools weren't wired into this session, so validated over direct SSH instead (same steps `devbox_sync`/`devbox_build`/`devbox_test` would run) — `rsync` to the device, native `cmake --build`, then `ctest`. All 6/6 tests passed, including the JIT-only `bench_opcodes`, `test_jit_encodings`, and `test_jit_determinism` that don't even compile on x86_64: `armrx_tests` 25.5s, `test_mining` 10.8s, `bench_armrx` 296.0s, `bench_opcodes` 215.7s, `test_jit_encodings` 53.9s, `test_jit_determinism` 11.0s.
 *   **Rationale:** All three were small, mechanical, and didn't require design decisions — good first tasks with no open questions.
 
-### Phase 2: Medium-term (Structural Refactors & Test Coverage)
+### Phase 2: Medium-term (Structural Refactors & Test Coverage) — in progress (2026-07-21)
 *   **Tasks:**
-    1. Split `main.cpp` (§1.3) into a `CommandLineParser` and a `MinerApp` runner.
-    2. Re-engineer `MiningEngine` to reuse existing worker threads for dataset initialization via a synchronization barrier (§2.1).
+    1. ✅ Split `main.cpp` (§1.3) into a `CommandLineParser` and a `MinerApp` runner.
+    2. ✅ Re-engineer `MiningEngine` to reuse existing worker threads for dataset initialization via a mutex/counter/condition_variable handshake (§2.1) — also surfaced and fixed a pre-existing critical dataset-corruption bug along the way, see `docs/fast-mode-dataset-corruption-postmortem.md`.
     3. Write a mock TCP server to test Stratum V1 / CryptoNote pool handshakes, timeouts, and failovers under CTest (§3.2).
     4. Write fuzzing targets to validate `armrx::json` against malformed payloads (§3.1).
-    5. Benchmark NEON Argon2 `permute_block_neon` on the Cortex-A53 and either enable it or delete the dead `#if 0` block (§2.2).
+    5. ✅ Benchmark NEON Argon2 `permute_block_neon` on the Cortex-A53 and either enable it or delete the dead `#if 0` block (§2.2) — benchmarked, NEON wins, enabled.
 *   **Expected Outcomes:** Smaller, testable `main.cpp`. Elimination of thread-spawning latency during seed key changes. Hardened network parsing. Automated validation of pool failover states.
 *   **Rationale:** These require real design/measurement work (barrier synchronization, mock socket harness, a genuine A/B benchmark) rather than mechanical fixes, so they follow the Phase 1 quick wins.
+*   **Unplanned but consequential:** §2.1's own correctness test caught a critical, pre-existing dataset-corruption bug unrelated to the reuse-workers feature itself — see §2.1 above and the dedicated postmortem doc. Also surfaced two infrastructure gaps worth carrying forward: `assert()` was silently compiled out project-wide under the default Release build (`-DNDEBUG`) until fixed with `-UNDEBUG` on the two affected test targets, and the on-device Cortex-A53 devbox (~1.8 GiB RAM) cannot fit RandomX fast mode at all — any future fast-mode test/benchmark work needs the same memory-availability guard used in `tests/test_mining.cpp` (`fast_mode_fits_on_this_host()`).
 
 ### Phase 3: Long-term (CI/CD Automation, Protocol Work & Opportunistic Cleanup)
 *   **Tasks:**
