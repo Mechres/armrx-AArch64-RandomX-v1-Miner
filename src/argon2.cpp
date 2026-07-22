@@ -196,7 +196,7 @@ static void permute_block_neon(Argon2Block& block) {
 #endif // __aarch64__ && __ARM_NEON
 
 void permute_block(Argon2Block& block) {
-#if 0 // defined(__aarch64__) && defined(__ARM_NEON)
+#if defined(__aarch64__) && defined(__ARM_NEON)
     permute_block_neon(block);
 #else
     for (unsigned row = 0; row < 8; ++row) permute_16(block.data() + 16U * row);

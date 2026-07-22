@@ -210,6 +210,23 @@ void bench_dataset_helpers() {
     print_result(r_init);
 }
 
+void bench_argon2_compress() {
+    print_header("3b. Argon2 compression (Argon2dCache::initialize hot path)");
+
+    // Chain compress calls (each feeding the next) so the compiler can't
+    // elide the work and so this mirrors the dependent-block chain that
+    // Argon2dCache::initialize walks during real cache init.
+    armrx::Argon2Block a{};
+    armrx::Argon2Block b{};
+    for (std::size_t i = 0; i < a.size(); ++i) { a[i] = i; b[i] = i * 3 + 1; }
+
+    constexpr std::size_t kSamples = 5000;
+    auto r_compress = sample_benchmark("argon2_compress (single block)", kSamples, 200, [&] {
+        a = armrx::argon2_compress(a, b);
+    }, "compress", 1.0);
+    print_result(r_compress);
+}
+
 void bench_region_attribution() {
     print_header("4. Region attribution — hash pipeline phases");
 
@@ -516,6 +533,7 @@ int main(int argc, char** argv) {
         bench_blake2b();
         bench_aes_primitives();
         bench_dataset_helpers();
+        bench_argon2_compress();
     }
 
     if (run_all || attribution_only) {
