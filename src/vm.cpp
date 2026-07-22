@@ -4,6 +4,7 @@
 #include "armrx/dataset.hpp"
 #include "armrx/aes_generator.hpp"
 #include "armrx/assert.hpp"
+#include "armrx/randomx_config.hpp"
 #include <algorithm>
 #include <bit>
 #include <cfenv>
@@ -98,11 +99,6 @@ static inline std::uint64_t load64(const void* src) {
 static inline void store64(void* dst, std::uint64_t val) {
     std::memcpy(dst, &val, 8);
 }
-
-constexpr std::uint32_t kScratchpadL1Mask = 16376U;
-constexpr std::uint32_t kScratchpadL2Mask = 262136U;
-constexpr std::uint32_t kScratchpadL3Mask = 2097144U;
-constexpr std::uint32_t kScratchpadL3Mask64 = 2097088U;
 
 static inline std::byte* getScratchpadAddress(const InstructionByteCode& ibc, std::byte* scratchpad) {
     std::uint32_t addr = (static_cast<std::uint32_t>(*ibc.isrc) + static_cast<std::uint32_t>(ibc.imm)) & ibc.memMask;

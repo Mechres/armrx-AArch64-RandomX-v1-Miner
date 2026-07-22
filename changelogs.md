@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-22 — Consolidated Duplicated AES Round-Key and Scratchpad-Mask Constants
+
+- **AES round-key constants** (`src/aes_generator.cpp`, `src/aes_hash.cpp`): confirmed numerically that `aes_generator.cpp`'s `key0..key3`/`key4r0..key4r7` and `aes_hash.cpp`'s `key1r_0..key1r_3`/`key4r_0..key4r_7` were the exact same 12 RandomX-spec round-key blocks encoded two different ways (raw byte-array literals vs. `build_aes_block()` from big-endian words) before touching any code. Extracted to a new `include/armrx/aes_keys.hpp` (`kAesGen1RKey0..3`, `kAesGen4RKey0..7`); both files now share one definition. `aes_hash.cpp`'s own unique `hash_state_*`/`hash_xkey_*` constants stay local but now reuse the header's `build_aes_key()` helper instead of a second copy of it.
+- **Scratchpad L3 mask constants** (`include/armrx/randomx_config.hpp`, `src/vm.cpp`, `src/jit_compiler_a64.cpp`): `vm.cpp`'s four `kScratchpadL*Mask` constants and `jit_compiler_a64.cpp`'s separately hardcoded `ScratchpadL3Mask` literal are now all derived from one `scratchpad_mask()` constexpr helper, with the exact prior literal values confirmed numerically before landing. Also collapsed `jit_compiler_a64.cpp`'s three independent `Log2(RANDOMX_SCRATCHPAD_L3)` re-derivations into a single named `ScratchpadL3Log2` constant.
+- Both changes are pure constant-sourcing refactors with zero intended behavior change — verified by comparing KAT/JIT hash output byte-for-byte before and after, not just running the test suite and trusting green. `ctest` 4/4 on x86_64 (interpreter path), 7/7 on-device (JIT path, including `test_jit_encodings`/`test_jit_determinism`, the tests that would catch a JIT byte-code regression from this class of change).
+- This completes `PLAN.md` §5 item E's constant-dedup list (item 3, `kCompileHandlers[256]`, remains optional/lowest-priority and undone).
+
 ## 2026-07-22 — Fixed Both Documented Pool-Failover Gaps
 
 See `docs/pool-failover-deadlock-postmortem.md` for the full writeup (updated in place, not a new doc). Summary:

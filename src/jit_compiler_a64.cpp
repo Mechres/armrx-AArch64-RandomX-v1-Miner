@@ -62,7 +62,7 @@ static constexpr uint32_t RANDOMX_SCRATCHPAD_L2      = 262144U;     // 256 KiB (
 static constexpr uint32_t RANDOMX_SCRATCHPAD_L1      = 16384U;      // 16 KiB (no armrx equivalent)
 static constexpr uint32_t CacheLineSize              = 64U;
 static constexpr uint32_t CacheSize                  = static_cast<uint32_t>(armrx::kRandomXCacheBytes);
-static constexpr uint32_t ScratchpadL3Mask           = 2097144U;    // (RANDOMX_SCRATCHPAD_L3 / 8 - 1) * 8
+static constexpr uint32_t ScratchpadL3Mask           = static_cast<uint32_t>(armrx::kScratchpadL3Mask);
 static constexpr uint32_t RegisterNeedsDisplacement   = 5U;
 static constexpr uint32_t ConditionMask               = 0xFFU;       // (1 << RANDOMX_JUMP_BITS) - 1
 static constexpr int      ConditionOffset             = 8;           // RANDOMX_JUMP_OFFSET
@@ -128,6 +128,11 @@ static const size_t CalcDatasetItemSize =
 constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
 
 template<typename T> static constexpr size_t Log2(T value) { return (value > 1) ? (Log2(value / 2) + 1) : 0; }
+
+// Computed once here instead of at each of its 3 call sites below — same
+// value (21), just a single source of truth instead of three independent
+// re-derivations of Log2(RANDOMX_SCRATCHPAD_L3).
+static constexpr uint32_t ScratchpadL3Log2 = static_cast<uint32_t>(Log2(RANDOMX_SCRATCHPAD_L3));
 
 JitCompilerA64::JitCompilerA64()
 	: code((uint8_t*) allocMemoryPages(CodeSize + CalcDatasetItemSize))
@@ -218,10 +223,10 @@ void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos)
 	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
 
 	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((ScratchpadL3Log2 - 1) << 10), code, codePos);
 
 	// ubfx x20, x10, #38, #width
-	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + Log2(RANDOMX_SCRATCHPAD_L3) - 1) << 10), code, codePos);
+	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + ScratchpadL3Log2 - 1) << 10), code, codePos);
 
 	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
 	emitV2AesTweak(*this, flags, codePos);
@@ -1254,7 +1259,7 @@ void JitCompilerA64::h_ISTORE(Instruction& instr, uint32_t& codePos)
 	constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
 	constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 	constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
-	constexpr uint32_t andInstrL3 = t | ((Log2(RANDOMX_SCRATCHPAD_L3) - 4) << 10);
+	constexpr uint32_t andInstrL3 = t | ((ScratchpadL3Log2 - 4) << 10);
 
 	emit32((instr.getModCond() < StoreL3Condition) ? (instr.getModMem() ? andInstrL1 : andInstrL2) : andInstrL3, code, k);
 
