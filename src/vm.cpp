@@ -518,81 +518,49 @@ void VirtualMachine::h_NOP(const Instruction& /*instr*/, int /*i*/, InstructionB
     ibc.type = InstructionType::NOP;
 }
 
-// Dispatch table: maps each opcode (0-255) to its compile handler.
-// Opcode ranges and ceil_X constants match the RandomX v1 spec.
+// Dispatch table: maps each opcode (0-255) to its compile handler. Derived
+// from instruction_weights.hpp's RANDOMX_FREQ_*/REPN/WT macros -- the same
+// mechanism jit_compiler_a64.cpp uses to build its own 256-entry opcode
+// table (see INST_HANDLE there) -- instead of an independently hand-written
+// literal list of 256 handler pointers. The two tables encode the same
+// opcode-to-instruction-type map (a correctness-critical invariant: the JIT
+// and interpreter must dispatch every opcode identically), so building both
+// from the one spec-derived frequency table means they can no longer
+// silently drift apart from a typo in either hand-maintained copy.
+#include "instruction_weights.hpp"
+#define INST_HANDLE(x) REPN(&VirtualMachine::h_##x, WT(x))
+
 const VirtualMachine::CompileHandler VirtualMachine::kCompileHandlers[256] = {
-    /*  0-15 */ &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
-    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
-    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
-    &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS, &VirtualMachine::h_IADD_RS,
-    /* 16-22 */ &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M,
-    &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M, &VirtualMachine::h_IADD_M,
-    /* 23-38 */ &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
-    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
-    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
-    &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R, &VirtualMachine::h_ISUB_R,
-    /* 39-45 */ &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M,
-    &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M, &VirtualMachine::h_ISUB_M,
-    /* 46-61 */ &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
-    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
-    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
-    &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R, &VirtualMachine::h_IMUL_R,
-    /* 62-65 */ &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M, &VirtualMachine::h_IMUL_M,
-    /* 66-69 */ &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R, &VirtualMachine::h_IMULH_R,
-    /* 70    */ &VirtualMachine::h_IMULH_M,
-    /* 71-74 */ &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R, &VirtualMachine::h_ISMULH_R,
-    /* 75    */ &VirtualMachine::h_ISMULH_M,
-    /* 76-83 */ &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP,
-    &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP, &VirtualMachine::h_IMUL_RCP,
-    /* 84-85 */ &VirtualMachine::h_INEG_R, &VirtualMachine::h_INEG_R,
-    /* 86-100 */ &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
-    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
-    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
-    &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R, &VirtualMachine::h_IXOR_R,
-    /*101-105 */ &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M, &VirtualMachine::h_IXOR_M,
-    &VirtualMachine::h_IXOR_M,
-    /*106-113 */ &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R,
-    &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R, &VirtualMachine::h_IROR_R,
-    /*114-115 */ &VirtualMachine::h_IROL_R, &VirtualMachine::h_IROL_R,
-    /*116-119 */ &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R, &VirtualMachine::h_ISWAP_R,
-    /*120-123 */ &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R, &VirtualMachine::h_FSWAP_R,
-    /*124-139 */ &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
-    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
-    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
-    &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R, &VirtualMachine::h_FADD_R,
-    /*140-144 */ &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M, &VirtualMachine::h_FADD_M,
-    &VirtualMachine::h_FADD_M,
-    /*145-160 */ &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
-    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
-    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
-    &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R, &VirtualMachine::h_FSUB_R,
-    /*161-165 */ &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M, &VirtualMachine::h_FSUB_M,
-    &VirtualMachine::h_FSUB_M,
-    /*166-171 */ &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R,
-    &VirtualMachine::h_FSCAL_R, &VirtualMachine::h_FSCAL_R,
-    /*172-203 */ &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R, &VirtualMachine::h_FMUL_R,
-    /*204-207 */ &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M, &VirtualMachine::h_FDIV_M,
-    /*208-213 */ &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R,
-    &VirtualMachine::h_FSQRT_R, &VirtualMachine::h_FSQRT_R,
-    /*214-238 */ &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH, &VirtualMachine::h_CBRANCH,
-    &VirtualMachine::h_CBRANCH,
-    /*239    */ &VirtualMachine::h_CFROUND,
-    /*240-255 */ &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
-    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
-    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
-    &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE, &VirtualMachine::h_ISTORE,
+    INST_HANDLE(IADD_RS)
+    INST_HANDLE(IADD_M)
+    INST_HANDLE(ISUB_R)
+    INST_HANDLE(ISUB_M)
+    INST_HANDLE(IMUL_R)
+    INST_HANDLE(IMUL_M)
+    INST_HANDLE(IMULH_R)
+    INST_HANDLE(IMULH_M)
+    INST_HANDLE(ISMULH_R)
+    INST_HANDLE(ISMULH_M)
+    INST_HANDLE(IMUL_RCP)
+    INST_HANDLE(INEG_R)
+    INST_HANDLE(IXOR_R)
+    INST_HANDLE(IXOR_M)
+    INST_HANDLE(IROR_R)
+    INST_HANDLE(IROL_R)
+    INST_HANDLE(ISWAP_R)
+    INST_HANDLE(FSWAP_R)
+    INST_HANDLE(FADD_R)
+    INST_HANDLE(FADD_M)
+    INST_HANDLE(FSUB_R)
+    INST_HANDLE(FSUB_M)
+    INST_HANDLE(FSCAL_R)
+    INST_HANDLE(FMUL_R)
+    INST_HANDLE(FDIV_M)
+    INST_HANDLE(FSQRT_R)
+    INST_HANDLE(CBRANCH)
+    INST_HANDLE(CFROUND)
+    INST_HANDLE(ISTORE)
+    INST_HANDLE(NOP)
 };
 
 void VirtualMachine::compile_program() {

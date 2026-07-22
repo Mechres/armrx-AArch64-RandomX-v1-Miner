@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-07-22 — Derived kCompileHandlers[256] from instruction_weights.hpp
+
+- `src/vm.cpp`'s hand-written 256-entry `kCompileHandlers` dispatch table (73 lines of manually-counted opcode ranges) is now built from `instruction_weights.hpp`'s `RANDOMX_FREQ_*`/`REPN`/`WT` macros via `INST_HANDLE(x)`, mirroring the identical pattern `jit_compiler_a64.cpp` already uses to build its own 256-entry opcode table. Confirmed the hand-written ranges matched the frequency table's values exactly, in the same order, before making the change. The JIT and interpreter's opcode-to-instruction-type maps are a correctness-critical invariant (both must dispatch every opcode identically); building both from the one spec-derived table means a typo in either hand-maintained copy can no longer cause silent drift between them.
+- Verified: KAT hashes byte-identical before/after on both x86_64 (interpreter path) and on-device (JIT path). `ctest` 4/4 on x86_64, 7/7 on-device including `test_jit_encodings`/`test_jit_determinism`.
+- This completes all 3 items in `PLAN.md` §5 item E — the full constant-dedup list from the prior handoff is now done.
+
 ## 2026-07-22 — Consolidated Duplicated AES Round-Key and Scratchpad-Mask Constants
 
 - **AES round-key constants** (`src/aes_generator.cpp`, `src/aes_hash.cpp`): confirmed numerically that `aes_generator.cpp`'s `key0..key3`/`key4r0..key4r7` and `aes_hash.cpp`'s `key1r_0..key1r_3`/`key4r_0..key4r_7` were the exact same 12 RandomX-spec round-key blocks encoded two different ways (raw byte-array literals vs. `build_aes_block()` from big-endian words) before touching any code. Extracted to a new `include/armrx/aes_keys.hpp` (`kAesGen1RKey0..3`, `kAesGen4RKey0..7`); both files now share one definition. `aes_hash.cpp`'s own unique `hash_state_*`/`hash_xkey_*` constants stay local but now reuse the header's `build_aes_key()` helper instead of a second copy of it.
