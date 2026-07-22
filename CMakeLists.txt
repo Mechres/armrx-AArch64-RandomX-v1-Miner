@@ -154,7 +154,7 @@ if(ARMRX_ENABLE_TSAN)
     message(STATUS "ThreadSanitizer enabled")
 endif()
 
-add_executable(armrx src/main.cpp)
+add_executable(armrx src/main.cpp src/cli_parser.cpp src/miner_app.cpp)
 target_link_libraries(armrx PRIVATE armrx_core)
 
 if(ARMRX_BUILD_TESTS)
