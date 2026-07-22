@@ -61,18 +61,24 @@ This document serves as the master plan and improvement roadmap for the `armrx` 
 
 ## 3. Code Quality, Testing & Security
 
-### 3.1 Hardened Network Parsing & Fuzzing
+### 3.1 Hardened Network Parsing & Fuzzing — ✅ Fuzz target done (2026-07-22); SAX rewrite not pursued
 *   **Vulnerability:** The stratum JSON parser in `armrx::json` relies on custom string search procedures (`find`, `get_string`). A compromised mining pool could exploit this by sending nested arrays, malformed unicode control characters, or oversized string payloads to crash the worker thread or overflow stack variables.
 *   **Mitigation:** 
     1. Establish a fuzzing target using LibFuzzer to stream mutated payloads to `StratumClient::handle_line`.
     2. Re-engineer the JSON module to use a hardened, non-allocating SAX parser with strict input length checks.
+*   **Implemented (item 1, deviated from the letter per an explicit scope decision):** `tests/fuzz_json.cpp` fuzzes `armrx::json`'s full public API surface (`get_string`/`get_raw`/`get_array_first`/`get_str_array`/`get_object`/`get_array_element`/`escape`) directly, rather than through the private `StratumClient::handle_line` — the mock Stratum tests (§3.2) already exercise `handle_line` with valid protocol messages, so this harness's scope is specifically "hostile bytes crash the parser module," matching the actual threat (a compromised pool's replies flow through `armrx::json` regardless of which caller invokes it). Gated behind a new `ARMRX_BUILD_FUZZERS` CMake option (default `OFF`, Clang-only — `-fsanitize=fuzzer` isn't supported by GCC, which the rest of this project builds with; a clear `FATAL_ERROR` fires at configure time if enabled with the wrong compiler). Compiles `src/json.cpp` directly into the fuzz binary rather than linking `armrx_core`, sidestepping any GCC/Clang object-compatibility question entirely, since that module has no other dependencies.
+*   **Item 2 (SAX rewrite) not pursued:** over 2.5M fuzz executions (two runs, 61s + 121s) found zero crashes and zero ASAN findings against the current hand-rolled parser. Given that result, rewriting the parser is not justified right now — revisit only if the fuzzer (run for longer, or with a larger corpus) ever finds something.
+*   **Verified:** confirmed the `ARMRX_BUILD_FUZZERS=ON` + default (GCC) compiler combination fails cleanly at configure time with a clear message. Built and ran with `-DCMAKE_CXX_COMPILER=clang++`: two clean fuzzing passes (942K + 1.57M executions), zero findings. Confirmed the default `ARMRX_BUILD_FUZZERS=OFF` GCC build path is entirely unaffected — local `ctest` 4/4 unchanged.
 
-### 3.2 Automated Stratum Protocol Testing
+### 3.2 Automated Stratum Protocol Testing — ✅ Done (2026-07-22)
 *   **Coverage Gap:** The test suite has no coverage for networking protocols, socket reconnect loops, or pool failovers.
 *   **Strategy:** Build a local test harness `test_pool_protocol.cpp` using a mock TCP socket. It must simulate:
     *   Stratum V1 / CryptoNote subscribe handshakes.
     *   Simulated connection drops to verify that `StratumClient` executes exponential backoff.
     *   Pool timeout failures to verify that `PoolManager` seamlessly migrates workers to the next configured fallback pool.
+*   **Implemented:** `tests/test_pool_protocol.cpp` — a loopback POSIX-socket mock server scripts 5 scenarios: Stratum V1 full flow (reached via AUTO's real CryptoNote-first-then-fallback negotiation), CryptoNote full flow, reconnect-backoff exhaustion (via `StratumClient::set_reconnect_config()`, fast/deterministic timing), multi-pool failover (real `PoolManager` production backoff timing, ~31s), and malformed-input robustness.
+*   **Critical bug found and fixed while building this exact test:** `PoolManager::tick()` self-deadlocked (locked `stratum_mutex_` for its whole body, then called `connect_to_current()` — which locks the same non-recursive mutex again — from inside that scope) the first time real multi-pool failover actually completed its cooldown and tried to reconnect. This is a documented core feature (README's "automatic failover after 5 retries with a 2s cooldown") that would have permanently frozen the miner's pool-management loop on first use in any real multi-`--pool=` deployment where the first pool went down. See `docs/pool-failover-deadlock-postmortem.md` for the full account, including a second (non-blocking, documented-not-fixed) finding about stale-reconnect-thread join latency during failover, and a documented (also not fixed) gap where a pool unreachable from process startup never triggers failover at all.
+*   **Verified:** x86_64 local `ctest` 4/4. AArch64 on-device full `ctest` 7/7 (`test_pool_protocol` 64.6s) — the on-device run's tighter timing (slower CPU, more scheduling jitter) initially surfaced the stale-join latency finding via a real, informative test failure (not a hang), accommodated by widening the test's own timeout budget before this final confirming run.
 
 ### 3.3 Windows Code Path — Dead Weight, Not a Live Vulnerability — ✅ Annotated (2026-07-21)
 *   **Original claim:** In [virtual_memory.c](file:///home/mechres/Projeler/aarch64-randomx/src/virtual_memory.c#L212), Windows builds query `SeLockMemoryPrivilege`, and denial should degrade gracefully instead of failing.
@@ -98,13 +104,16 @@ This document serves as the master plan and improvement roadmap for the `armrx` 
 ## 5. Future-Proof Roadmap
 
 ```
-Phase 1 (Short-term) ──────────────► Phase 2 (Medium-term) ─────────────► Phase 3 (Long-term)
-✅ Fix Exporter join-on-destroy      • main.cpp → CommandLineParser +   • QEMU Docker & GHA CI
-✅ Abstract Stratum nonce metadata     MinerApp split                  • Stratum V2 integration
-✅ Annotate dead Windows alloc path  • Reuse workers for dataset       • Opportunistic CMake flag
-   (all three done 2026-07-21)      • Mock stratum socket tests         centralization (no longer
-                                      • Fuzz stratum JSON parser          crash-motivated, see §4.2)
-                                      • Resolve Argon2 NEON permute
+Phase 1 (Short-term) ──────────────► Phase 2 (Medium-term) ─────────────► Phase 3 (superseded — see below)
+✅ Fix Exporter join-on-destroy      ✅ main.cpp → CommandLineParser +   C. Perf re-baseline + branch-miss
+✅ Abstract Stratum nonce metadata      MinerApp split                     re-measurement (not started)
+✅ Annotate dead Windows alloc path  ✅ Reuse workers for dataset        D. AES key / scratchpad-mask
+   (all three done 2026-07-21)      ✅ Mock stratum socket tests            constant consolidation (not
+                                     ✅ Fuzz stratum JSON parser            started)
+                                     ✅ Resolve Argon2 NEON permute       (QEMU CI / Stratum V2 deferred
+   (all five done 2026-07-22 —         to backlog, deprioritized)
+    2 critical prod bugs found
+    & fixed along the way)
 ```
 
 ### Phase 1: Short-term / Immediate (Correctness — quick, low-risk fixes) — ✅ Done (2026-07-21)
@@ -116,18 +125,31 @@ Phase 1 (Short-term) ──────────────► Phase 2 (Medi
 *   **Verified on real AArch64 hardware (2026-07-21):** the devbox MCP tools weren't wired into this session, so validated over direct SSH instead (same steps `devbox_sync`/`devbox_build`/`devbox_test` would run) — `rsync` to the device, native `cmake --build`, then `ctest`. All 6/6 tests passed, including the JIT-only `bench_opcodes`, `test_jit_encodings`, and `test_jit_determinism` that don't even compile on x86_64: `armrx_tests` 25.5s, `test_mining` 10.8s, `bench_armrx` 296.0s, `bench_opcodes` 215.7s, `test_jit_encodings` 53.9s, `test_jit_determinism` 11.0s.
 *   **Rationale:** All three were small, mechanical, and didn't require design decisions — good first tasks with no open questions.
 
-### Phase 2: Medium-term (Structural Refactors & Test Coverage) — in progress (2026-07-21)
+### Phase 2: Medium-term (Structural Refactors & Test Coverage) — ✅ Done (2026-07-22)
 *   **Tasks:**
     1. ✅ Split `main.cpp` (§1.3) into a `CommandLineParser` and a `MinerApp` runner.
     2. ✅ Re-engineer `MiningEngine` to reuse existing worker threads for dataset initialization via a mutex/counter/condition_variable handshake (§2.1) — also surfaced and fixed a pre-existing critical dataset-corruption bug along the way, see `docs/fast-mode-dataset-corruption-postmortem.md`.
-    3. Write a mock TCP server to test Stratum V1 / CryptoNote pool handshakes, timeouts, and failovers under CTest (§3.2).
-    4. Write fuzzing targets to validate `armrx::json` against malformed payloads (§3.1).
+    3. ✅ Write a mock TCP server to test Stratum V1 / CryptoNote pool handshakes, timeouts, and failovers under CTest (§3.2) — also surfaced and fixed a critical `PoolManager` self-deadlock, see `docs/pool-failover-deadlock-postmortem.md`.
+    4. ✅ Write fuzzing targets to validate `armrx::json` against malformed payloads (§3.1) — 2.5M+ executions, zero findings.
     5. ✅ Benchmark NEON Argon2 `permute_block_neon` on the Cortex-A53 and either enable it or delete the dead `#if 0` block (§2.2) — benchmarked, NEON wins, enabled.
 *   **Expected Outcomes:** Smaller, testable `main.cpp`. Elimination of thread-spawning latency during seed key changes. Hardened network parsing. Automated validation of pool failover states.
 *   **Rationale:** These require real design/measurement work (barrier synchronization, mock socket harness, a genuine A/B benchmark) rather than mechanical fixes, so they follow the Phase 1 quick wins.
-*   **Unplanned but consequential:** §2.1's own correctness test caught a critical, pre-existing dataset-corruption bug unrelated to the reuse-workers feature itself — see §2.1 above and the dedicated postmortem doc. Also surfaced two infrastructure gaps worth carrying forward: `assert()` was silently compiled out project-wide under the default Release build (`-DNDEBUG`) until fixed with `-UNDEBUG` on the two affected test targets, and the on-device Cortex-A53 devbox (~1.8 GiB RAM) cannot fit RandomX fast mode at all — any future fast-mode test/benchmark work needs the same memory-availability guard used in `tests/test_mining.cpp` (`fast_mode_fits_on_this_host()`).
+*   **Unplanned but consequential:** two of Phase 2's own correctness tests each caught a critical, pre-existing production bug unrelated to the feature/coverage they were written for — §2.1's dataset-reinit test found the fast-mode dataset corruption bug (`docs/fast-mode-dataset-corruption-postmortem.md`), and §3.2's mock failover scenario found the `PoolManager::tick()` self-deadlock (`docs/pool-failover-deadlock-postmortem.md`). Also surfaced, along the way: `assert()` was silently compiled out project-wide under the default Release build (`-DNDEBUG`) until fixed with `-UNDEBUG` on the affected test targets; the on-device Cortex-A53 devbox (~1.8 GiB RAM) cannot fit RandomX fast mode at all, so any future fast-mode test/benchmark work needs the same memory-availability guard used in `tests/test_mining.cpp` (`fast_mode_fits_on_this_host()`); and two documented-but-not-fixed pool-failover gaps (a pool dead from process startup never triggers failover; failover can be delayed up to ~30s more by a stale reconnect thread's blocking join) — see the failover postmortem for both.
 
-### Phase 3: Long-term (CI/CD Automation, Protocol Work & Opportunistic Cleanup)
+### Phase 3 — superseded (2026-07-22): CI/CD and Stratum V2 deprioritized, replaced with performance re-baseline + targeted cleanup
+
+The original Phase 3 (QEMU AArch64 CI, Stratum V2, generic "JIT tuning") is not a current priority. Replaced with a narrower, code-verified set of next steps — re-checked against current HEAD rather than restated from the (partly stale) `docs/audit-20260721-cross-reference.md`, several of whose findings turned out to already be resolved: the `generateProgram`/`generateProgramLight` duplication the audit flagged is gone (`emitPrologueMix`/`emitSpMix2` are now shared, `jit_compiler_a64.cpp:192-228`), the dangerous `getCode()` raw-executable-pointer accessor is deleted (only `getCodeSize()` remains), and `MetricsExporter`'s raw `std::cerr` usage is already routed through `ARMRX_LOG_*`.
+
+**C. Fresh performance re-baseline + branch-miss re-measurement (data-gathering, not yet started).** Every existing perf number in `NEXT_STEPS.md`/`ROADMAP.md`/`STATUS_REPORT.md` predates this session's changes (Argon2 NEON, worker-thread dataset reuse, the fast-mode dataset-corruption fix, the pool-failover deadlock fix). The old audit's branch-miss finding ("94.85% of misses in `execute_superscalar`, not the per-hash JIT path") was itself pre-AES-fix data, flagged by the audit as possibly stale, never re-confirmed. Plan: re-run `perf stat -e instructions,cycles,branches,branch-misses ./build/bench_armrx` on-device for real current numbers. **Decision gate:** only proceed to any CSEL/peephole JIT work (`docs/peephole-jit-plan.md`, `docs/branchless-cbranch.md` — the latter's own prior attempt ended inconclusively) if the fresh data shows meaningful miss concentration in the actual per-hash JIT path, not dataset generation.
+
+**D. Small, low-risk maintainability fixes (not yet started), same bug class as the two critical fixes found this session (duplicated logic silently drifting apart):**
+1. Consolidate AES round-key constants — duplicated in two different literal encodings across `src/aes_generator.cpp` and `src/aes_hash.cpp`; extract to one header (e.g. `include/armrx/aes_keys.hpp`), KAT-gated.
+2. Unify scratchpad L3 mask constants — `vm.cpp`'s `kScratchpadL3Mask`/`kScratchpadL3Mask64` vs. `jit_compiler_a64.cpp`'s three separate `Log2(RANDOMX_SCRATCHPAD_L3)` re-derivations. Lower urgency (already covered by the JIT/interpreter equivalence KAT).
+3. (Optional, lowest priority) Derive `kCompileHandlers[256]` (`vm.cpp:527`) from `instruction_weights.hpp`'s existing weight/REP macros instead of a hand-maintained 73-line table.
+
+**Explicitly deferred (backlog only):** QEMU AArch64 GitHub Actions CI (§4.1), Stratum V2 protocol support, `ARMRX_JIT_FAST_DIV_SQRT` CMake flag centralization (§4.2, already low priority), `STATUS_REPORT.md` regeneration.
+
+### Phase 3 (original, superseded — kept for reference)
 *   **Tasks:**
     1. Deploy QEMU AArch64 container environments on GitHub Actions CI (§4.1).
     2. Implement native Stratum V2 protocol support to minimize data payload transfers.

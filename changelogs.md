@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-07-22 — Phase 2 Complete: JSON Parser Fuzzing
+
+- **Added a LibFuzzer harness for `armrx::json`** (`tests/fuzz_json.cpp`, PLAN.md §3.1): fuzzes the module's full public API (`get_string`/`get_raw`/`get_array_first`/`get_str_array`/`get_object`/`get_array_element`/`escape`) directly, since the mock Stratum tests already exercise `handle_line`'s dispatch logic with valid messages — this harness's scope is specifically "hostile bytes crash the parser module."
+- **New opt-in CMake option `ARMRX_BUILD_FUZZERS`** (default `OFF`, Clang-only — `-fsanitize=fuzzer` isn't supported by the GCC toolchain the rest of the project builds with). Configuring with it enabled under the default GCC compiler fails cleanly at configure time with a `FATAL_ERROR` explaining the Clang requirement. Compiles `src/json.cpp` directly into the fuzz binary rather than linking `armrx_core`, sidestepping any question of GCC/Clang object compatibility (that module has no other project dependencies).
+- **Result: two clean fuzzing passes (942K + 1.57M executions, 61s + 121s), zero crashes, zero ASAN findings.** Given that, PLAN.md §3.1's second mitigation option (rewriting the parser as a hardened SAX parser) is not pursued for now — the fuzzing evidence doesn't currently justify it.
+- Verified: default GCC build (`ARMRX_BUILD_FUZZERS=OFF`) unaffected — local `ctest` 4/4 unchanged. `-DCMAKE_CXX_COMPILER=clang++ -DARMRX_BUILD_FUZZERS=ON` builds and runs `fuzz_json` cleanly, independent of `armrx_core`.
+- **This completes PLAN.md Phase 2** (all 5 tasks now done: `main.cpp` split, worker-thread dataset reuse, mock Stratum tests, JSON fuzzing, Argon2 NEON). Two of Phase 2's own correctness/coverage tasks each caught a critical pre-existing production bug along the way (fast-mode dataset corruption; `PoolManager` failover self-deadlock — see their respective postmortems). PLAN.md's Phase 3 (originally QEMU CI + Stratum V2 + generic JIT tuning) is deprioritized per direction and replaced with a narrower, code-verified next-steps plan: a fresh on-device performance re-baseline/branch-miss re-measurement, and two small constant-deduplication cleanups (AES round keys, scratchpad L3 mask) — same bug class as this session's two critical fixes. See PLAN.md §5 for the full replacement plan.
+
+## 2026-07-22 — Critical Fix: PoolManager Failover Self-Deadlock; Mock Stratum Protocol Tests
+
+See `docs/pool-failover-deadlock-postmortem.md` for the full writeup. Summary:
+
+- **Added mock Stratum protocol test suite** (`tests/test_pool_protocol.cpp`, PLAN.md §3.2): a loopback POSIX-socket mock server scripting 5 scenarios — Stratum V1 full flow (via AUTO's real CryptoNote-first-then-fallback negotiation), CryptoNote full flow, reconnect-backoff exhaustion, multi-pool failover, and malformed-input robustness. Zero networking test coverage existed before this.
+- **Fixed a critical self-deadlock in `PoolManager::tick()`** (`src/pool_manager.cpp`): `tick()` held `stratum_mutex_` for its entire body and called `connect_to_current()` — which locks the same non-recursive mutex again — from inside that scope. Any real multi-pool failover event (a documented core feature: "automatic failover after 5 retries with a 2s cooldown") would permanently freeze the miner's pool-management loop the moment it tried to reconnect to the next pool. Found because `test_pool_failover()` hung indefinitely on first run; fixed by deferring the `connect_to_current()` call until after `tick()`'s lock is released.
+- **Two additional findings, documented but not fixed (out of this test-writing task's scope):** (1) a pool unreachable from process startup (vs. one that connects then drops) never triggers failover at all, since `reconnect_loop()` is only armed by a connection that was previously up going down; (2) `connect_to_current()`'s replacement of the old `StratumClient` can block for up to ~30s more (beyond the already-real ~31s backoff) joining a reconnect thread mid-sleep for a doomed retry — invisible on a fast x86_64 sandbox, but directly surfaced by the on-device run's tighter timing via a real test failure (not a hang), and accommodated by widening the test's own timeout budget.
+- Verified: x86_64 local `ctest` 4/4. AArch64 on-device full `ctest` 7/7, including `test_pool_protocol`'s 5 scenarios (64.6s).
+
 ## 2026-07-21 — Critical Fix: Fast-Mode Dataset Corruption, Plus Test-Suite Assertion and Build Fixes
 
 See `docs/fast-mode-dataset-corruption-postmortem.md` for the full writeup. Summary:
