@@ -19,13 +19,15 @@ for the full evidence/reasoning behind each item; this is the short-list view.
 | **Init scratchpad** | 30,817 μs (12.35%) | 30,817 μs (12.35%) | — |
 | **Get final result** | 23,207 μs (9.30%) | 23,207 μs (9.30%) | — |
 | **Chain execution (VM)** | 194,692 μs (84.6%) | 170,860 μs (68.4%) | **−12.2%** |
-| **Branch miss rate** | 31.6% | **31.08%** (re-measured 2026-07-22) | **essentially unchanged** |
+| **Branch miss rate (aggregate, `bench_armrx` no flags)** | 31.6% | **31.08%** (re-measured 2026-07-22) | **essentially unchanged** |
+| **Branch miss rate (isolated `--full-hash-only`, i.e. the real mining hot path)** | — | **2.4%** (measured 2026-07-22) | — |
 
-The branch-miss rate has not moved despite everything landed since the original
-measurement (PGO, JIT scheduling, the AES fix, Argon2 NEON, worker-thread dataset
-reuse, two critical concurrency fixes, three constant-dedup refactors) — see
-`PLAN.md` Phase 3 item C for the full re-baseline and why CBRANCH work remains
-the top performance lever, gated on an explicit go-ahead.
+The aggregate 31.08% figure does **not** represent the mining hot path — see
+`docs/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining
+hot path" section. It's 94.93% driven by `bench_armrx --attribution-only`'s
+non-representative interpreted-mode comparison run. The real hot path's rate
+(2.4%) costs only ~0.1–0.16% of cycles to misprediction — CBRANCH work has
+been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 
 ---
 
@@ -60,13 +62,15 @@ the top performance lever, gated on an explicit go-ahead.
     (no log line, no `--help` mention). Decide: flip the default, or at least log
     which mode is active at startup.
 
-### 5. Performance — gated on explicit go-ahead, not started
-*   [ ] **CBRANCH / JIT branch-misprediction cost reduction** — `jit_compiler_a64.cpp`.
-    31.08% branch-miss rate, ~8.6–11.9% of cycles lost to misprediction, unchanged by
-    every optimization landed so far. `docs/branchless-cbranch.md`'s one prior CSEL
-    attempt was inconclusive. Security-sensitive JIT hot-path surgery (wrong CBRANCH
-    semantics → wrong hash) — needs its own scoped effort with the full validation
-    protocol in `docs/performance-next-agent-handoff.md` §19 if greenlit.
+### 5. Performance — closed (2026-07-22), no further CBRANCH work planned
+*   [x] ~~CBRANCH / JIT branch-misprediction cost reduction~~ — implemented the CSEL
+    rewrite, measured it cleanly (apples-to-apples `perf stat`, old code rebuilt fresh
+    for a fair baseline), and reverted: +46% branch-misses, flat hashrate, a net
+    regression not an improvement. Separately found the 31.08% aggregate figure that
+    justified this work doesn't represent the mining hot path — the isolated hot path's
+    real rate is 2.4%, costing ~0.1–0.16% of cycles, not the previously-estimated
+    ~8.6–11.9%. Full account in `docs/branchless-cbranch.md`. No further JIT
+    branch-encoding work is planned on this basis.
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.
@@ -77,6 +81,7 @@ the top performance lever, gated on an explicit go-ahead.
 ---
 
 ## Resolved Since Last Snapshot (2026-07-22)
+*   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.
 *   [x] Both documented pool-failover gaps (dead-at-startup pool never failing over; up to ~30s stale-reconnect-thread-join delay) — `src/pool_manager.cpp`, `src/stratum_client.cpp`.
 *   [x] AES round-key constants consolidated into `include/armrx/aes_keys.hpp`.

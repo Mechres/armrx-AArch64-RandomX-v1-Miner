@@ -11,7 +11,7 @@
 
 - **Hardware:** Lenovo MSM8916 / Snapdragon 410, 8× Cortex-A53 @ ~1.2 GHz, 2 GiB RAM (postmarketOS, Linux 6.12, GCC 15.2 / musl).
 - **Hashrate:** ~5.2 H/s single-thread, ~28–29 H/s 8 workers light mode.
-- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. Branch miss rate **31.08%** (re-measured 2026-07-22, essentially unchanged from the original 34.42%/31.6% baselines despite everything landed since — inherent RandomX CBRANCH unpredictability). IPC 0.708 on A53.
+- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC 0.708 on A53. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 
 ---
@@ -160,8 +160,8 @@
 
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
-| **P4** | **Reduce JIT execution branch-misprediction cost** — 31.08% branch miss rate on A53 (re-measured 2026-07-22), costing ~8.6–11.9% of total cycles, unchanged by everything landed since the original measurement. Evaluate CSEL for CBRANCH, balanced path costs, instruction scheduling for in-order pipeline. | `jit_compiler_a64.cpp` | ~+5–15% | 🟡 Medium | Still the #1 lever. Gated on explicit go-ahead — security-sensitive JIT hot-path surgery, same bug class as this session's two critical fixes. See `PLAN.md` Phase 3 item C and `docs/performance-next-agent-handoff.md` §19 for the required validation protocol before starting. |
-| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | Downgraded from ~15–20%. Region attribution shows 98.24% of time is in execution. Per-opcode savings modest vs branch-miss waste. See benchmark v2 findings. |
+| ~~P4~~ | ~~Reduce JIT execution branch-misprediction cost (CSEL for CBRANCH)~~ | `jit_compiler_a64.cpp` | — | — | **Closed 2026-07-22 — implemented, measured, reverted.** CSEL gave +46% branch-misses and flat hashrate vs. the existing `bne`/`b`, not an improvement (BTB-aliasing: the JIT buffer regenerates every hash, so no encoding trick fixes the predictor-history problem). Separately found the 31.08% figure this item's "~8.6–11.9% of cycles" estimate was based on doesn't represent the mining hot path at all — the isolated hot path's real miss rate is 2.4%, costing ~0.1–0.16% of cycles. See `docs/branchless-cbranch.md`. No further CBRANCH JIT work planned. |
+| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | Re-evaluate this estimate too — it was framed relative to the same now-corrected 31% branch-miss baseline ("modest vs branch-miss waste"). Not otherwise touched this session. |
 
 ### Open decision (not a bug)
 

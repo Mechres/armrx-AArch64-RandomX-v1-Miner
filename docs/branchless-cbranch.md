@@ -225,6 +225,81 @@ Within that resolvable ~54% (`--sort=symbol`, top entries):
 justified — it's a real, non-trivial, cleanly-attributed contributor, not a shot in the
 dark — but it is not the *only* lever, and shouldn't be oversold as one.
 
+## CSEL tried, measured, and reverted (2026-07-22) — a small net regression
+
+Implemented item 3 below in full: `ands xTemp, dst, mask` (same bitmask
+encoding as the existing `tst`, but with a real destination so the masked
+value is available, not just flags) → `adr` the fallthrough address → `adr`
+the backward target → `csel` between them → single unconditional `br`. Only
+`x19`/`x20` are genuinely free scratch registers in this JIT's fixed
+allocation (`src/jit_compiler_a64_static.S`'s "Register allocation" block) —
+**`x18` is explicitly reserved** ("platform register, don't touch it"),
+contradicting this doc's own earlier assumption that it might be usable.
+
+Caught one real bug via the KAT test before ever benchmarking: the `csel`'s
+`Rn`/`Rm` register fields were transposed (`Rm` is bits 20-16, `Rn` is bits
+9-5 — easy to get backwards), which silently inverted which address got
+selected when the branch condition was met. The JIT hash was simply wrong
+until fixed — exactly the failure mode `docs/performance-next-agent-handoff.md`
+§19's "run KATs before benchmarking" step exists to catch.
+
+Once correct, a clean **apples-to-apples** `perf stat` comparison (same tool,
+same `--full-hash-only` workload, old `bne`/`b` code rebuilt fresh in a
+separate directory for a fair baseline — not compared against an earlier
+number captured under `perf record`'s higher sampling overhead) showed CSEL
+is a net regression, not an improvement:
+
+| | `bne`/`b` (current) | CSEL (reverted) | Δ |
+|---|---|---|---|
+| Hashrate | 4.48 h/s | 4.47 h/s | flat (noise) |
+| Instructions | 74.80B | 75.45B | +0.87% |
+| Cycles | 98.77B | 99.09B | +0.32% |
+| Branch-misses | 14.1M | 20.7M | **+46%** |
+| Branch-miss rate | 2.40% | 3.51% | worse |
+
+Consistent with the BTB-aliasing caveat above: since the JIT buffer is
+regenerated every hash, no encoding trick fixes the underlying predictor-
+history problem — the extra indirect `br` just gives the predictor one more
+thing to guess wrong, for the cost of 2 more always-executed instructions.
+**Reverted** to `bne`/`b` (`git checkout` back to the `e563112` state).
+
+## The 31.08% figure does not represent the mining hot path (found 2026-07-22)
+
+Getting a fair CSEL baseline required isolating `bench_armrx --full-hash-only`,
+which showed a branch-miss rate of only **2.4%** — nothing like the 31.08%
+figure that has justified CBRANCH-focused work across multiple sessions.
+Running `perf stat` on each of `bench_armrx`'s three sections separately and
+summing reproduces the historical aggregate almost exactly (169.35B
+instructions, 224.68B cycles, 7.80B branches, 2.43B misses, 31.12% rate vs.
+the reported 31.08%), confirming the reconciliation is sound:
+
+| Section | Branches | Misses | Local rate | Share of total misses |
+|---|---|---|---|---|
+| `--full-hash-only` (the actual mining hot path) | 589M | 14.1M | 2.4% | **0.58%** |
+| `--micro-only` | 472M | 109M | 23.1% | 4.49% |
+| `--attribution-only` | 6.74B | 2.31B | 34.2% | **94.93%** |
+
+`--attribution-only` includes a 30-sample **interpreted-mode** comparison run
+(reported as "JIT speedup: 11.37×") that never executes during real JIT
+mining on AArch64 — the interpreter's dispatch-table branching is inherently
+far more mispredictable than JIT'd code, and it (plus that section's own
+internal phase-timing sub-benchmarks) dominates the aggregate. 94.93% is
+nearly identical to the old audit's much-cited "94.85% in Superscalar" claim
+— strong evidence that claim measured this same real phenomenon but
+misattributed it to Superscalar dataset generation rather than the actual
+cause.
+
+**Real-world impact, recalculated**: 14.1M mispredictions on the actual hot
+path at an 8–11 cycle penalty costs only **~0.11–0.16% of total cycles** —
+not the "~8.6–11.9%" previously estimated by applying the diluted 31% rate
+uniformly to the whole workload. **CBRANCH misprediction was never a
+meaningful real-world performance lever on this hardware.** This closes the
+CBRANCH investigation started in this file — no further JIT branch-encoding
+work is justified by the data. If `bench_armrx`'s aggregate branch-miss
+number is ever cited again, isolate `--full-hash-only` first, or caveat that
+the default (no-flag) run's PMU counters are dominated by non-representative
+benchmark code, not the mining hot path.
+
 ## Next Steps for Future Attempts
 
 1. ~~**Profile first**: Run `perf stat` on the working build to isolate actual
@@ -233,9 +308,11 @@ dark — but it is not the *only* lever, and shouldn't be oversold as one.
 
 2. **Debug the bne+b encoding**: Build a minimal test case that emits just
    the CBRANCH sequence into a small code buffer and single-steps through it
-   with GDB to verify the branch targets.
+   with GDB to verify the branch targets. *(Superseded — the real bug in a
+   related encoding, found 2026-07-22, was a transposed register field in
+   `csel`, caught directly by the KAT test instead; no GDB session needed.)*
 
-3. **Alternative approach — CSEL**: Instead of branching, use conditional
+3. ~~**Alternative approach — CSEL**~~: Instead of branching, use conditional
    select to compute the next instruction offset:
    ```
    add xD, xD, imm
@@ -244,9 +321,11 @@ dark — but it is not the *only* lever, and shouldn't be oversold as one.
    csel xTarget, xCurrent, xCbrTarget, ne
    br xTarget
    ```
-   This requires a free register for the target PC, which may not be available
-   (x18 is free but using it for computed goto adds a BR instruction that may
-   have its own pipeline cost).
+   **Done and reverted (2026-07-22) — see the section above.** Measured a net
+   regression (more instructions, more cycles, 46% more branch-misses, flat
+   hashrate), not an improvement. `x18` is NOT free, contrary to what this
+   item originally assumed — see `src/jit_compiler_a64_static.S`'s register
+   allocation comment block.
 
 4. **Alternative approach — Invert branch direction**: Place the jump target
    immediately after the CBRANCH and use `bne` to skip it (forward, predicted

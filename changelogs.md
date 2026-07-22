@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-22 — CBRANCH CSEL: Implemented, Measured, Reverted; Root-Caused the 31.08% Figure
+
+Closes the CBRANCH investigation started earlier the same day (see the "Precise Branch-Miss Attribution + Test Hardening" entry below):
+
+- **Implemented the CSEL-based CBRANCH rewrite** `docs/branchless-cbranch.md` had sketched (`ands` for the masked value/flags, two `adr`s to compute both possible next-PC values, `csel` to pick one, single unconditional `br`). Caught one real bug via the KAT test before ever benchmarking: `csel`'s `Rn`/`Rm` register fields were transposed, silently inverting which address got selected — the JIT hash was simply wrong until fixed. Once correct (`ctest` 8/8 on-device), a clean apples-to-apples `perf stat` comparison (old `bne`/`b` code rebuilt fresh in a separate directory for a fair baseline, not compared against a number captured under different measurement overhead) showed CSEL is a **net regression**: +0.87% instructions, +0.32% cycles, **+46% branch-misses**, hashrate flat. **Reverted** to `bne`/`b` (`git checkout` back to `e563112`).
+- **Root-caused the 31.08% branch-miss figure** that's justified CBRANCH-focused work across multiple sessions: it does not represent the mining hot path. Isolating `bench_armrx --full-hash-only` shows only **2.4%**. Running `perf stat` on each of `bench_armrx`'s three sections separately and summing reproduces the historical 31.08% aggregate almost exactly, confirming the reconciliation — the aggregate is **94.93%** driven by `--attribution-only`'s non-representative 30-sample interpreted-mode comparison run (never executed during real JIT mining), which is nearly identical to the old audit's "94.85% in Superscalar" claim — strong evidence that claim measured the same phenomenon but misattributed its cause. Recalculated real-world impact: ~0.11–0.16% of cycles lost to CBRANCH misprediction on the actual hot path, not the previously-estimated ~8.6–11.9%.
+- **Conclusion: CBRANCH misprediction was never a meaningful real-world performance lever on this hardware.** No further JIT branch-encoding work is planned on this basis. Full account in `docs/branchless-cbranch.md`; `PLAN.md`, `ROADMAP.md`, `NEXT_STEPS.md` updated to close out this item.
+
 ## 2026-07-22 — CBRANCH Precise Branch-Miss Attribution + Test Hardening
 
 Prep work for CBRANCH JIT hot-path changes, done before touching any production code:
