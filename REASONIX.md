@@ -26,6 +26,7 @@
 | Build | `cmake --build build -j` |
 | Test | `ctest --test-dir build --output-on-failure` |
 | Cross-build (x86_64) | Same configure/build; JIT files excluded automatically |
+| On-device (GCC 15 + musl) | Add `-DARMRX_DISABLE_LTO=ON` to Configure — LTO currently fails to link the `armrx` executable on this toolchain (`vsnprintf`/`always_inline` error); not yet root-caused |
 
 ## Conventions
 

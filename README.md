@@ -58,6 +58,12 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+> [!WARNING]
+> On AArch64 with GCC 15 + musl (e.g. Alpine, the current on-device target toolchain), LTO fails to
+> link the `armrx` executable (`vsnprintf`/`always_inline` inlining error inside `lto-wrapper`). Add
+> `-DARMRX_DISABLE_LTO=ON` to the `cmake -S` command above until this is root-caused. Test/benchmark
+> targets (`bench_armrx`, `armrx_tests`, etc.) are unaffected and build fine either way.
+
 ### 2. Run Local Benchmarks
 ```sh
 # Perform cache initialization benchmarks

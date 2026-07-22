@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-07-22 — Fresh Performance Re-Baseline; Documented On-Device LTO Build Regression
+
+- **Re-measured branch-miss rate on-device** (Cortex-A53, `perf stat -e instructions,cycles,branches,branch-misses ./build/bench_armrx`): **31.08%**, essentially unchanged from the pre-PGO `NEXT_STEPS.md` baseline (31.6%) despite everything landed since (PGO, O12/O13, AES fix, Argon2 NEON, worker-thread dataset reuse, two critical bug fixes this session). ~8.6–11.9% of total cycles estimated lost to misprediction penalty. See `PLAN.md` §5 item C for the full numbers and reasoning on why the old "94.85% of misses are in dataset generation, not per-hash" claim doesn't transfer to this light-mode-only hardware. No JIT compiler code changed — data-gathering only, per the plan's decision gate; a recommendation is recorded but CBRANCH/peephole work has not been started.
+- **Found and documented (not root-caused) a real build regression**: the standard documented build command (no `-DARMRX_DISABLE_LTO=ON`) now fails to link the `armrx` executable on the on-device GCC15+musl toolchain, caused by the earlier `main.cpp` → `cli_parser.cpp`/`miner_app.cpp` split changing how LTO partitions that target. `README.md` and `REASONIX.md` updated with a note that `-DARMRX_DISABLE_LTO=ON` is currently required for on-device builds.
+
 ## 2026-07-22 — Phase 2 Complete: JSON Parser Fuzzing
 
 - **Added a LibFuzzer harness for `armrx::json`** (`tests/fuzz_json.cpp`, PLAN.md §3.1): fuzzes the module's full public API (`get_string`/`get_raw`/`get_array_first`/`get_str_array`/`get_object`/`get_array_element`/`escape`) directly, since the mock Stratum tests already exercise `handle_line`'s dispatch logic with valid messages — this harness's scope is specifically "hostile bytes crash the parser module."
