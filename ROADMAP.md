@@ -4,14 +4,14 @@
 > For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 
-> **Current status:** Swept intermediate worker counts on big.LITTLE clusters, confirming linear scaling up to 8 threads (25.28 H/s pinned). Resolved JIT code buffer overflow literal-pool corruption by expanding JIT instructions buffer to 32,768 bytes, unblocking and validating fast Newton-Raphson math.
-> See `docs/aes-ttable-bug-postmortem.md` for the full analysis.
+> **Current status (2026-07-22):** Two critical concurrency bugs found and fixed this session (fast-mode dataset corruption, `PoolManager` self-deadlock — see their postmortems in `docs/`), plus an on-device LTO build regression root-caused and fixed, both documented pool-failover gaps closed, and three constant-dedup refactors landed. A fresh codebase inspection (`PLAN.md` Phase 4) found one more real bug (a worker thread that can be permanently killed by a malformed job) and a config-parsing crash risk, both not yet fixed — see `NEXT_STEPS.md`.
+> See `docs/aes-ttable-bug-postmortem.md` for the AES fix analysis, and `docs/fast-mode-dataset-corruption-postmortem.md` / `docs/pool-failover-deadlock-postmortem.md` for this session's critical fixes.
 
 ## Baseline
 
 - **Hardware:** Lenovo MSM8916 / Snapdragon 410, 8× Cortex-A53 @ ~1.2 GHz, 2 GiB RAM (postmarketOS, Linux 6.12, GCC 15.2 / musl).
 - **Hashrate:** ~5.2 H/s single-thread, ~28–29 H/s 8 workers light mode.
-- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. Branch miss rate **34.42%** (inherent RandomX CBRANCH). IPC 0.708 on A53.
+- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. Branch miss rate **31.08%** (re-measured 2026-07-22, essentially unchanged from the original 34.42%/31.6% baselines despite everything landed since — inherent RandomX CBRANCH unpredictability). IPC 0.708 on A53.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 
 ---
@@ -126,17 +126,48 @@
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |
 | [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |
 
+## ✅ Completed — Phase 3 (This Session, 2026-07-22)
+
+| Item | Status |
+|------|--------|
+| `MiningEngine` worker-thread reuse for dataset init (barrier via mutex/counter/condition_variable) | ✅ |
+| **Critical fix:** fast-mode dataset corruption — wrong output span in multi-threaded `initialize_dataset()` calls (`docs/fast-mode-dataset-corruption-postmortem.md`) | ✅ |
+| Mock Stratum protocol test suite (`tests/test_pool_protocol.cpp`, 7 scenarios) | ✅ |
+| **Critical fix:** `PoolManager::tick()` self-deadlock on real multi-pool failover (`docs/pool-failover-deadlock-postmortem.md`) | ✅ |
+| Pool-failover gap: pool dead from process startup never triggering failover | ✅ |
+| Pool-failover gap: up to ~30s stale-reconnect-thread-join delay | ✅ |
+| LibFuzzer harness for `armrx::json` (2.5M+ executions, zero findings) | ✅ |
+| Argon2d NEON permutation benchmarked and enabled (~16% faster) | ✅ |
+| `main.cpp` split into `CommandLineParser` + `MinerApp` | ✅ |
+| On-device LTO build regression root-caused (Alpine `fortify-headers` + GCC LTO) and fixed | ✅ |
+| AES round-key constants consolidated (`include/armrx/aes_keys.hpp`) | ✅ |
+| Scratchpad L3 mask constants unified (`include/armrx/randomx_config.hpp`) | ✅ |
+| `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained | ✅ |
+
 ---
 
 ## 🔴 Remaining — Action List
+
+### Correctness (found 2026-07-22, `PLAN.md` Phase 4 — not yet fixed)
+
+| # | Item | Site | Severity | Notes |
+|---|------|------|----------|-------|
+| — | **`MiningEngine::worker_loop()` permanently kills a worker thread** on a bad nonce offset/size instead of skipping the job | `mining_engine.cpp:418-423` | 🔴 High | `return;` should match the `active = false;`-fallthrough pattern every neighboring error path uses. Pool-triggerable, silent hashrate degradation. |
+| — | **`config.cpp` numeric config-file fields unguarded against parse failure** | `config.cpp:18,63,66,69` | 🟡 Medium | `cli_parser.cpp` already guards the equivalent CLI flags; config-file path (which loads unconditionally on every launch) doesn't. Malformed default config crashes the miner. |
+| — | `MetricsExporter::server_fd_` data race (plain `int` across threads) | `metrics.hpp` | 🟢 Low | One-line fix: `std::atomic<int>`. |
 
 ### Performance
 
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
-| **P4** | **Reduce JIT execution branch-misprediction cost** — 34.42% branch miss rate on A53, costing ~26% of total cycles. Evaluate CSEL for CBRANCH, balanced path costs, instruction scheduling for in-order pipeline. | `jit_compiler_a64.cpp` | ~+5–15% | 🟡 Medium | New Priority 1 based on benchmark v2. CBRANCH is inherently unpredictable; focus on reducing *cost* of misprediction. |
+| **P4** | **Reduce JIT execution branch-misprediction cost** — 31.08% branch miss rate on A53 (re-measured 2026-07-22), costing ~8.6–11.9% of total cycles, unchanged by everything landed since the original measurement. Evaluate CSEL for CBRANCH, balanced path costs, instruction scheduling for in-order pipeline. | `jit_compiler_a64.cpp` | ~+5–15% | 🟡 Medium | Still the #1 lever. Gated on explicit go-ahead — security-sensitive JIT hot-path surgery, same bug class as this session's two critical fixes. See `PLAN.md` Phase 3 item C and `docs/performance-next-agent-handoff.md` §19 for the required validation protocol before starting. |
 | **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | Downgraded from ~15–20%. Region attribution shows 98.24% of time is in execution. Per-opcode savings modest vs branch-miss waste. See benchmark v2 findings. |
 
+### Open decision (not a bug)
+
+| # | Item | Site | Notes |
+|---|------|------|-------|
+| — | JIT buffer W^X vs RWX default | `virtual_memory.c` | Currently RWX by default unless `RANDOMX_FORCE_SECURE` is set at build time — real perf/security tradeoff, currently invisible to operators (no log line). Needs a decision, not just a fix. |
 
 ### Features
 
@@ -151,7 +182,7 @@
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
-| — | Phase-2 test suite expansion | 🟡 Medium | Property tests, malformed JSON, etc. |
+| — | Test coverage: `cli_parser.cpp`/`miner_app.cpp` (zero unit tests), direct `aes_hash.cpp` helper KATs, `tls_client.cpp`/`tui.cpp` | 🟡 Medium | See `PLAN.md` Phase 4 item E. |
 
 ---
 
