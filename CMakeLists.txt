@@ -211,6 +211,14 @@ if(ARMRX_BUILD_TESTS)
     add_executable(test_jit_determinism tests/test_jit_determinism.cpp)
     target_link_libraries(test_jit_determinism PRIVATE armrx_core)
     add_test(NAME test_jit_determinism COMMAND test_jit_determinism)
+
+    add_executable(test_jit_equivalence tests/test_jit_equivalence.cpp)
+    target_link_libraries(test_jit_equivalence PRIVATE armrx_core)
+    add_test(NAME test_jit_equivalence COMMAND test_jit_equivalence)
+    # A prior CBRANCH encoding bug caused an infinite loop that only showed up
+    # as a 120s hang (docs/branchless-cbranch.md) — bound this test explicitly
+    # so a future CBRANCH regression fails fast instead of hanging forever.
+    set_tests_properties(test_jit_equivalence PROPERTIES TIMEOUT 600)
     endif()
 endif()
 
@@ -262,6 +270,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
             set_property(TARGET bench_opcodes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_determinism PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_property(TARGET test_jit_equivalence PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         endif()
     endif()
 elseif(NOT ipo_supported)

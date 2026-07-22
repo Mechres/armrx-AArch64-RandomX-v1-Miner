@@ -82,12 +82,26 @@ The imm19 fix is correct and deployed; the `-0.5%` estimate remains
 unverified until Phase 1 `perf stat -e branch-misses` confirms the
 mispredict rate dropped on real hardware.
 
-### Unit test recommendation
+### Unit test recommendation — done (2026-07-22)
 
-Add a test that decodes the emitted `bne`/`b` bytes for a CBRANCH sequence
-and asserts the computed target address. This turns a "wait 120s for timeout"
-failure mode into an instant, localized assertion for any future branch-encoding
-changes (relevant for IROR_R/IROL_R `extr` or load-pair coalescing).
+~~Add a test that decodes the emitted `bne`/`b` bytes for a CBRANCH sequence
+and asserts the computed target address.~~ `tests/test_jit_encodings.cpp` now
+does exactly this. Getting it right required a new read-only
+`getCodeBytes()`/`getJitCodeBytes()` accessor (deliberately const-only, unlike
+the deleted mutable `getCode()` — see that function's own comment) and working
+around a real subtlety: `randomx_calculate_hash()` runs several chained
+internal rounds reusing the same JIT buffer (`emitPrologueMix` resets
+`codePos` each compile), so `JitDumpEntry`s from earlier rounds share offset
+numbers with — but point to memory since overwritten by — the final round.
+The test now only trusts the last contiguous run of entries, and locates the
+`bne` by its exact bit pattern rather than assuming a fixed position (the
+variable-length `add` sequence, including a NEON `smov`/`umov` literal-pool
+path, means the tst/bne/b tail isn't always at a fixed offset from the end of
+the entry). Also added `tests/test_jit_equivalence.cpp`: a JIT/interpreter
+equivalence sweep across many seeds×inputs (the existing KAT only checks 2
+fixed inputs). Both pass cleanly against the *current* CBRANCH implementation
+— this turns a "wait 120s for timeout" failure mode into an instant,
+localized assertion for any future branch-encoding change.
 
 ---
 
@@ -141,11 +155,81 @@ cause incorrect offsets in edge cases.
    This would be true for both the old and new code, but the old `beq` has
    tighter bounds checking due to its 19-bit offset limitation.
 
+## Precise attribution (2026-07-22) — the "profile first" step, finally done
+
+Every prior session recommended this exact step (`docs/audit-20260721-cross-reference.md`,
+`docs/archived/next_phase.md`, `docs/performance-next-agent-handoff.md` §22.6) but none had
+actually executed it — only aggregate `perf stat` counting existed, which gives a single
+branch-miss *count* with no attribution to *where* in the code the misses happen. This
+session ran `perf record -e branch-misses -c 10000 -- ./bench_armrx --full-hash-only`
+on-device (1423 samples, full run to completion) and `perf report --sort=dso`/`--sort=symbol`.
+
+**Method note:** the JIT-generated machine code lives in a runtime-allocated buffer, not
+the ELF's `.text` section, so `perf` can't symbolize it by name — it shows as a separate
+`[JIT] tid <N>` mapping (distinct from generic `[unknown]`) once perf finishes a *complete*
+(non-truncated) recording. An initial 150s-truncated capture mis-binned `[JIT]` samples into
+`[unknown]`, which is why the final numbers below differ from an earlier same-session
+estimate — always let `perf record` reach a clean exit before trusting the DSO breakdown.
+
+**Results (full-run capture, 1423 samples):**
+
+| Location | % of all samples |
+|---|---|
+| `[k]` kernel-space addresses | 46.03% |
+| `bench_armrx` (statically-compiled code) | 35.63% |
+| `[JIT] tid <N>` (JIT-generated code) | 10.54% |
+| `ld-musl-aarch64.so.1` | 7.52% |
+| `libgcc_s.so.1` / `[vdso]` | 0.28% |
+
+The 46% kernel-space bucket was checked against `strace -f -c` on the identical workload:
+**53 syscalls totaling 6.6ms** across the entire multi-second benchmark run (one-time
+`mmap`/`mprotect`/`munmap` at startup/teardown — `enableWriting()`/`enableExecution()`
+correctly no-op once `rwx_` is true, so no per-hash `mprotect` calls happen). With
+essentially zero real kernel-space work, the `[k]` bucket is almost certainly **PMU
+sampling skid** — this Cortex-A53 has no ARM SPE (Statistical Profiling Extension), so a
+branch-miss counter overflow interrupt can attribute its recorded PC to the interrupt
+handler itself before control returns to userspace, rather than to the instruction that
+actually caused the miss. This is a measurement artifact of this specific chip, not a real
+performance lever — treat the ~54% of samples landing in resolvable userspace code as the
+trustworthy signal.
+
+Within that resolvable ~54% (`--sort=symbol`, top entries):
+
+| Symbol | % of all samples |
+|---|---|
+| `armrx::Argon2dCache::initialize` | 12.44% |
+| `memcpy` | 6.32% |
+| `armrx::VirtualMachine::run` | 3.37% |
+| `permute_block_neon` | 3.23% |
+| `permute_16_neon` | 2.95% |
+| ~20 different `JitCompilerA64::h_*` handlers (JIT **compile**-time, not execution) | ~8–9% combined, each ≤1.12% |
+| `armrx::generate_superscalar` | 0.56% |
+
+**Two findings that matter for scoping this work:**
+
+1. **CBRANCH is confirmed to be the JIT compiler's *only* emitted data-dependent conditional
+   branch.** Grepping every `0x54xxxxxx` (B.cond) encoding in `jit_compiler_a64.cpp` finds
+   exactly two sites: `h_CBRANCH`'s `bne` (always emitted) and `h_CFROUND`'s `bne` (only
+   under `RANDOMX_FLAG_V2`, which isn't set in this benchmark and is 1/256 frequency even
+   when it is). So essentially all of the `[JIT]` 10.54% is attributable to CBRANCH
+   specifically — this is real signal, not diluted by some other opcode.
+2. **Superscalar is confirmed *not* the dominant contributor here** (`generate_superscalar`
+   at 0.56%, `execute_superscalar` not even in the top ~30 symbols) — this directly
+   contradicts the old audit's "94.85% of misses are in Superscalar" claim, at least for
+   this light-mode, full-hash workload on this hardware. `Argon2dCache::initialize` +
+   its NEON permute helpers (18.62% combined) are actually a *larger* single contributor
+   than CBRANCH's 10.54% — flagged for a future investigation, but out of scope for the
+   current CBRANCH-only effort per explicit direction (2026-07-22).
+
+**Bottom line: the "profile first" prerequisite is now satisfied.** CBRANCH work is
+justified — it's a real, non-trivial, cleanly-attributed contributor, not a shot in the
+dark — but it is not the *only* lever, and shouldn't be oversold as one.
+
 ## Next Steps for Future Attempts
 
-1. **Profile first**: Run `perf stat` on the working build to isolate actual
-   CBRANCH misprediction counts. The ROADMAP estimates +1-2% impact, but
-   this should be verified with real hardware counters.
+1. ~~**Profile first**: Run `perf stat` on the working build to isolate actual
+   CBRANCH misprediction counts.~~ Done above (2026-07-22) — use `perf record` with
+   symbol attribution, not just `perf stat`'s aggregate count.
 
 2. **Debug the bne+b encoding**: Build a minimal test case that emits just
    the CBRANCH sequence into a small code buffer and single-steps through it

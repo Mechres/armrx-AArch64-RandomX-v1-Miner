@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <span>
 #include "armrx/randomx_config.hpp"
 #include "armrx/program.hpp"
 #include "armrx/superscalar.hpp"
@@ -64,7 +65,15 @@ namespace armrx {
 
 		ProgramFunc* getProgramFunc() { return reinterpret_cast<ProgramFunc*>(code); }
 		DatasetInitFunc* getDatasetInitFunc();
-		size_t getCodeSize();
+		size_t getCodeSize() const;
+
+		// Read-only view of the emitted code buffer, for test/introspection use only
+		// (e.g. decoding a specific instruction's bytes via a JitDumpEntry's offset).
+		// Deliberately const-qualified and read-only, unlike the deleted getCode()
+		// accessor this project removed for handing out a raw mutable pointer to
+		// executable memory (docs/WX_Alignment_and_LITTLE_Core_Profiling.md) — a
+		// const view adds no new write-to-executable-memory capability.
+		[[nodiscard]] std::span<const uint8_t> getCodeBytes() const { return {code, getCodeSize()}; }
 
 		bool enableWriting();
 		bool enableExecution();

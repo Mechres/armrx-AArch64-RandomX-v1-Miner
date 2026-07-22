@@ -510,7 +510,7 @@ DatasetInitFunc* JitCompilerA64::getDatasetInitFunc()
 	return (DatasetInitFunc*)(code + (((uint8_t*)randomx_init_dataset_aarch64) - ((uint8_t*)randomx_program_aarch64)));
 }
 
-size_t JitCompilerA64::getCodeSize()
+size_t JitCompilerA64::getCodeSize() const
 {
 	return CodeSize;
 }

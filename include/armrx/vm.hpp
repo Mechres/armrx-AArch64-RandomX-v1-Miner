@@ -110,6 +110,10 @@ public:
         static const std::vector<JitDumpEntry> empty;
         return jit_ ? jit_->getJitDump() : empty;
     }
+    [[nodiscard]] std::span<const uint8_t> getJitCodeBytes() const {
+        static constexpr std::span<const uint8_t> empty;
+        return jit_ ? jit_->getCodeBytes() : empty;
+    }
 #endif
 
 private:
