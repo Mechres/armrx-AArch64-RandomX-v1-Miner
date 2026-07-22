@@ -1,5 +1,8 @@
 #include "armrx/mining_engine.hpp"
 #include "armrx/mining_common.hpp"
+#include "armrx/dataset.hpp"
+#include "armrx/vm.hpp"
+#include "armrx/memory.hpp"
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -7,6 +10,9 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <string>
+#include <utility>
 
 void test_target_comparison() {
     armrx::Target target1;
@@ -74,9 +80,206 @@ void test_mining_engine_lifecycle() {
               << engine.total_hashes() << " hashes and " << share_count.load() << " shares!\n";
 }
 
+// Covers PLAN.md §2.1: fast-mode seed-key rotation while workers are already
+// running now reuses the persistent, affinity-pinned mining threads to build
+// the new dataset (instead of spawning temporary threads). This test exercises
+// that live-reuse path (not the pre-start() fallback, which is unchanged) and
+// verifies the resulting dataset is correct.
+//
+// Verification strategy: RandomX "light mode" computes each dataset item
+// on the fly via generate_dataset_item() instead of reading a materialized
+// buffer (see VirtualMachine::dataset_read(), src/vm.cpp) — mathematically
+// guaranteed to equal the fast-mode value for the same seed. So instead of
+// building a second independent ~2080 MiB reference dataset (which briefly
+// needs 3x that size resident at once: job1's engine dataset, job2's engine
+// dataset, and the reference — found to reliably OOM-kill the ~1.8 GiB
+// on-device target hardware), cross-check the engine's fast-mode hashes
+// against a light-mode VM sharing only the (256 MiB) cache. Also a strictly
+// stronger check: it validates the actual fast/light equivalence invariant
+// fast mode exists to preserve, not just "did initialize_dataset() get
+// called with the right arguments".
+//
+// Skips (rather than fails) on hosts too memory-constrained to fit fast
+// mode at all — mirrors the same availability check MinerApp::run() applies
+// before ever attempting it (include/armrx/memory.hpp::choose_randomx_mode).
+// Found via a real on-device failure: a ~1.8 GiB devbox reports fast mode
+// needs 2338 MiB and refuses it through the normal CLI path, so forcing fast
+// mode directly here (bypassing that check, as MiningEngine's constructor
+// itself does not enforce it) reliably got the process OOM-killed while
+// building the dataset. Not a regression — fast mode was never actually
+// exercised at full scale on that device before this test existed.
+constexpr unsigned kFastModeTestThreads = 4;
+
+bool fast_mode_fits_on_this_host() {
+    const auto mem = armrx::available_memory();
+    const auto choice = armrx::choose_randomx_mode(mem.available_bytes, kFastModeTestThreads);
+    return choice.mode == armrx::RandomXMode::fast;
+}
+
+void test_fast_mode_dataset_reinit_via_workers() {
+    if (!fast_mode_fits_on_this_host()) {
+        std::cout << "[test_mining] test_fast_mode_dataset_reinit_via_workers SKIPPED "
+                     "(fast mode does not fit in available memory on this host)\n";
+        return;
+    }
+
+    constexpr unsigned kThreads = kFastModeTestThreads;
+    armrx::MiningEngine engine(armrx::RandomXMode::fast, kThreads);
+
+    armrx::Job job1;
+    job1.job_id = "job1";
+    job1.block_template.assign(76, std::byte{0});
+    job1.nonce_offset = 39;
+    job1.nonce_size = 4;
+    job1.seed_key = {std::byte{'s'}, std::byte{'e'}, std::byte{'e'}, std::byte{'d'}, std::byte{'1'}};
+    std::fill(job1.target.bytes.begin(), job1.target.bytes.end(), std::byte{0xff}); // accept every hash
+
+    std::mutex found_mutex;
+    std::vector<std::pair<std::string, std::pair<std::uint64_t, std::array<std::byte, 32>>>> found;
+
+    // First job, set before start(): no persistent workers exist yet, so this
+    // takes the unchanged temporary-thread fallback path.
+    engine.set_job(job1);
+    engine.start([&](const armrx::Job& j, std::uint64_t nonce, std::array<std::byte, 32> hash) {
+        std::lock_guard<std::mutex> lock(found_mutex);
+        found.emplace_back(j.job_id, std::make_pair(nonce, hash));
+    });
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    armrx::Job job2 = job1;
+    job2.job_id = "job2";
+    job2.seed_key = {std::byte{'s'}, std::byte{'e'}, std::byte{'e'}, std::byte{'d'}, std::byte{'2'}};
+
+    // Second job, set while workers are already running: this is the path
+    // that now reuses the persistent workers for the dataset rebuild.
+    engine.set_job(job2);
+
+    // Poll for at least one job2 share rather than guessing a fixed sleep:
+    // without JIT (this dev sandbox is x86_64), fast-mode hashing is
+    // interpreted and can take well over a second per hash, so a short fixed
+    // sleep here undercounts real hardware variance. Bounded by a generous
+    // timeout so a genuine regression still fails instead of hanging.
+    std::vector<std::pair<std::uint64_t, std::array<std::byte, 32>>> job2_samples;
+    const auto poll_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+    while (job2_samples.empty() && std::chrono::steady_clock::now() < poll_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::lock_guard<std::mutex> lock(found_mutex);
+        for (auto& [jid, nonce_hash] : found) {
+            if (jid == "job2") job2_samples.push_back(nonce_hash);
+        }
+    }
+    // Done with the engine — release its dataset/workers before allocating
+    // the (much smaller, but still non-trivial) light-mode reference cache,
+    // rather than holding two large allocations concurrently.
+    engine.stop();
+    assert(!job2_samples.empty());
+
+    // Independently build only the cache (256 MiB) for job2's seed — no
+    // materialized dataset needed for a light-mode reference.
+    armrx::Argon2dCache ref_cache;
+    ref_cache.initialize(job2.seed_key);
+
+    // Light mode: kRandOMXFlagFullMem intentionally omitted, so dataset_read()
+    // takes the generate_dataset_item()-on-the-fly path instead of expecting
+    // set_dataset() to have been called.
+    std::uint32_t flags = armrx::kRandOMXFlagHardAes;
+#ifdef ARMRX_HAVE_JIT
+    flags |= armrx::kRandOMXFlagJit;
+#endif
+    armrx::VirtualMachine ref_vm(flags);
+    ref_vm.set_cache(&ref_cache);
+
+    // Cross-check a sample of the engine's job2 (nonce, hash) pairs against
+    // the light-mode reference. A wrong per-thread range in the engine's fast-
+    // mode dataset build (off-by-one, wrong thread_id, a race in the mutex/cv
+    // handshake) would corrupt part of the materialized dataset, and the
+    // resulting fast-mode hash would then diverge from the light-mode value
+    // for the same seed/nonce — exactly what this catches.
+    constexpr std::size_t kMaxChecked = 8;
+    std::size_t checked = 0;
+    for (auto& [nonce, hash] : job2_samples) {
+        if (checked >= kMaxChecked) break;
+        std::vector<std::byte> block = job2.block_template;
+        for (std::size_t i = 0; i < job2.nonce_size; ++i) {
+            block[job2.nonce_offset + i] = static_cast<std::byte>((nonce >> (8 * i)) & 0xff);
+        }
+        std::array<std::byte, 32> ref_hash{};
+        armrx::randomx_calculate_hash(&ref_vm, block.data(), block.size(), ref_hash.data());
+        assert(ref_hash == hash);
+        ++checked;
+    }
+    assert(checked > 0);
+
+    std::cout << "[test_mining] test_fast_mode_dataset_reinit_via_workers passed ("
+              << checked << " nonces cross-checked against an independently built dataset)\n";
+}
+
+// Covers the stop()-vs-live-dataset-rebuild race identified while designing
+// §2.1: if stop() lands while set_job() is waiting on workers to finish a
+// fast-mode dataset rebuild, the wait must be released via the !running_
+// escape hatch rather than hang forever.
+//
+// Note on what "promptly" means here: set_job()'s own wait returns quickly
+// once notified (its predicate includes !running_), but stop()'s worker
+// t.join() calls can still take a while — a worker already mid-chunk inside
+// initialize_dataset() has no way to notice running_ went false until that
+// call returns, so stop() can legitimately take up to roughly one worker's
+// share of a full dataset rebuild in the worst case. That's an accepted,
+// bounded latency tradeoff (see PLAN.md §2.1), not a bug — this test's
+// assertion is "eventually returns", not "returns immediately". Kept to 2
+// iterations given each one pays the cost of a real fast-mode dataset build.
+//
+// Skips on hosts too memory-constrained to fit fast mode — see the matching
+// comment on fast_mode_fits_on_this_host() above.
+void test_stop_races_dataset_reinit() {
+    if (!fast_mode_fits_on_this_host()) {
+        std::cout << "[test_mining] test_stop_races_dataset_reinit SKIPPED "
+                     "(fast mode does not fit in available memory on this host)\n";
+        return;
+    }
+
+    constexpr unsigned kThreads = kFastModeTestThreads;
+    constexpr int kIterations = 2;
+
+    for (int iter = 0; iter < kIterations; ++iter) {
+        armrx::MiningEngine engine(armrx::RandomXMode::fast, kThreads);
+
+        armrx::Job job;
+        job.job_id = "job";
+        job.block_template.assign(76, std::byte{0});
+        job.nonce_offset = 39;
+        job.nonce_size = 4;
+        job.seed_key = {std::byte{'a'}};
+        std::fill(job.target.bytes.begin(), job.target.bytes.end(), std::byte{0xff});
+
+        engine.set_job(job);
+        engine.start([](const armrx::Job&, std::uint64_t, std::array<std::byte, 32>) {});
+
+        // Kick off a seed-changing set_job() on a background thread. Sleep
+        // past cache init (~0.5-0.6s, measured) before calling stop() below,
+        // so the race reliably lands while workers are mid dataset-rebuild
+        // (reusing workers) rather than during the unrelated cache-init
+        // phase that precedes it.
+        armrx::Job job2 = job;
+        job2.seed_key = {std::byte{'b'}, static_cast<std::byte>(iter)};
+        std::thread setter([&engine, job2] { engine.set_job(job2); });
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(700));
+        engine.stop(); // must eventually return, not hang forever
+
+        setter.join(); // must also eventually return once running_ is false
+    }
+
+    std::cout << "[test_mining] test_stop_races_dataset_reinit passed ("
+              << kIterations << " iterations, no hang)\n";
+}
+
 int main() {
     test_target_comparison();
     test_mining_engine_lifecycle();
+    test_fast_mode_dataset_reinit_via_workers();
+    test_stop_races_dataset_reinit();
     std::cout << "ALL MINING TESTS PASSED SUCCESSFULLY!\n";
     return 0;
 }

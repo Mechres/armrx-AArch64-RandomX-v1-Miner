@@ -144,6 +144,10 @@ void MiningEngine::stop() {
         return;
     }
     running_.store(false);
+    // Wake any set_job() call blocked waiting on workers to finish a live
+    // dataset rebuild — its wait predicate also checks !running_, but a
+    // condition_variable only re-checks the predicate when notified.
+    dataset_init_cv_.notify_all();
     for (auto& t : workers_) {
         if (t.joinable()) {
             t.join();
@@ -167,21 +171,58 @@ void MiningEngine::set_job(const Job& job) {
             ARMRX_LOG_INFO << "Initializing " << dataset_bytes / (1024U * 1024U) << " MiB dataset...";
             auto new_dataset = std::make_shared<MappedMemory>(dataset_bytes);
 
-            // Parallelize dataset initialization
-            unsigned int init_threads_count = std::max(1U, std::thread::hardware_concurrency());
-            std::vector<std::thread> init_threads;
-            std::uint64_t items_per_thread = randomx_dataset_item_count() / init_threads_count;
-            for (unsigned int i = 0; i < init_threads_count; ++i) {
-                std::uint64_t start_item = i * items_per_thread;
-                std::uint64_t count = (i == init_threads_count - 1)
-                    ? (randomx_dataset_item_count() - start_item)
-                    : items_per_thread;
-                init_threads.emplace_back([this, new_dataset, start_item, count]() {
-                    initialize_dataset(std::span<std::byte>(new_dataset->data(), new_dataset->size()), *shared_cache_, start_item, count);
-                });
-            }
-            for (auto& t : init_threads) {
-                t.join();
+            if (running_.load(std::memory_order_acquire) && num_workers_ > 0) {
+                // Live seed rotation: reuse the persistent, already
+                // affinity-pinned mining workers instead of spawning
+                // temporary unpinned threads that would compete with them
+                // for the same cores. See worker_loop() for the other half
+                // of this handshake.
+                {
+                    std::lock_guard<std::mutex> init_lock(dataset_init_mutex_);
+                    pending_dataset_ = new_dataset;
+                    pending_cache_ = shared_cache_;
+                    pending_items_per_thread_ = randomx_dataset_item_count() / num_workers_;
+                    dataset_init_remaining_ = num_workers_;
+                }
+                // Bump the generation counter to signal all workers exactly
+                // once — no boolean flag to reset, so no race window.
+                dataset_init_generation_.fetch_add(1, std::memory_order_release);
+                {
+                    std::unique_lock<std::mutex> wait_lock(dataset_init_mutex_);
+                    dataset_init_cv_.wait(wait_lock, [this] {
+                        return dataset_init_remaining_ == 0 || !running_.load(std::memory_order_acquire);
+                    });
+                }
+            } else {
+                // No persistent workers exist yet (e.g. the very first job,
+                // set before start()) — fall back to temporary threads across
+                // all hardware cores, same as before. This is a one-time
+                // startup cost with no live workers to reuse anyway.
+                unsigned int init_threads_count = std::max(1U, std::thread::hardware_concurrency());
+                std::vector<std::thread> init_threads;
+                std::uint64_t items_per_thread = randomx_dataset_item_count() / init_threads_count;
+                for (unsigned int i = 0; i < init_threads_count; ++i) {
+                    std::uint64_t start_item = i * items_per_thread;
+                    std::uint64_t count = (i == init_threads_count - 1)
+                        ? (randomx_dataset_item_count() - start_item)
+                        : items_per_thread;
+                    init_threads.emplace_back([this, new_dataset, start_item, count]() {
+                        // initialize_dataset() writes starting at output[0], not at
+                        // output[start_item] — it expects a buffer sized exactly for
+                        // `count` items. Passing the full buffer here (pre-existing
+                        // bug, found while adding §2.1's dataset-reinit test) made
+                        // every thread but the first overwrite the same starting
+                        // bytes instead of writing its own region, leaving most of
+                        // the dataset uninitialized. Must pass the correct sub-span.
+                        initialize_dataset(
+                            std::span<std::byte>(new_dataset->data() + start_item * kRandomXDatasetItemBytes,
+                                                  count * kRandomXDatasetItemBytes),
+                            *shared_cache_, start_item, count);
+                    });
+                }
+                for (auto& t : init_threads) {
+                    t.join();
+                }
             }
             shared_dataset_ = new_dataset;
             ARMRX_LOG_INFO << "Dataset initialization complete.";
@@ -289,12 +330,54 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
     std::uint64_t local_hashes = 0;
     std::uint64_t local_gen = 0;
+    std::uint64_t local_dataset_init_gen = 0;
     // Per-worker nonce: each worker gets thread_id + k * num_threads_
     std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
     std::vector<std::byte> block_input;
 
     while (running_.load(std::memory_order_relaxed)) {
+        // Live dataset (re)initialization: participate directly instead of
+        // letting set_job() spawn temporary threads. Checked first, ahead of
+        // the active/idle branch below, so idle workers pick this up within
+        // their existing sleep granularity and busy workers pick it up on
+        // their next loop iteration (once per hash). Generation-counter
+        // compare, not a boolean flag: guarantees this worker participates
+        // exactly once per set_job() dataset rebuild.
+        std::uint64_t current_dataset_init_gen = dataset_init_generation_.load(std::memory_order_acquire);
+        if (current_dataset_init_gen != local_dataset_init_gen) {
+            local_dataset_init_gen = current_dataset_init_gen;
+
+            std::shared_ptr<MappedMemory> target_dataset;
+            std::shared_ptr<Argon2dCache> target_cache;
+            std::uint64_t start_item = 0;
+            std::uint64_t count = 0;
+            {
+                std::lock_guard<std::mutex> lock(dataset_init_mutex_);
+                target_dataset = pending_dataset_;
+                target_cache = pending_cache_;
+                start_item = static_cast<std::uint64_t>(thread_id) * pending_items_per_thread_;
+                count = (thread_id == num_threads_ - 1)
+                    ? (randomx_dataset_item_count() - start_item)
+                    : pending_items_per_thread_;
+            }
+            // See the matching comment in set_job()'s temp-thread fallback:
+            // initialize_dataset() writes relative to output[0], so this must
+            // be the sub-span at this worker's own item range, not the full
+            // dataset buffer.
+            initialize_dataset(
+                std::span<std::byte>(target_dataset->data() + start_item * kRandomXDatasetItemBytes,
+                                      count * kRandomXDatasetItemBytes),
+                *target_cache, start_item, count);
+            {
+                std::lock_guard<std::mutex> lock(dataset_init_mutex_);
+                if (--dataset_init_remaining_ == 0) {
+                    dataset_init_cv_.notify_all();
+                }
+            }
+            continue;
+        }
+
         // Lock-free job check: only acquire mutex when generation counter changes
         std::uint64_t current_gen = job_generation_.load(std::memory_order_acquire);
         if (current_gen != local_gen) {

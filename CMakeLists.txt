@@ -159,13 +159,25 @@ target_link_libraries(armrx PRIVATE armrx_core)
 
 if(ARMRX_BUILD_TESTS)
     enable_testing()
+    # -UNDEBUG: these two test executables verify correctness with plain
+    # assert() (including the RandomX KATs in test_blake2b.cpp). The default
+    # build type is Release, which defines NDEBUG and silently compiles every
+    # assert() out — the test would report success without checking anything.
+    # Force assert() to stay live here regardless of overall build type; this
+    # only affects these two translation units, not armrx_core/armrx itself.
     add_executable(armrx_tests tests/test_blake2b.cpp)
     target_link_libraries(armrx_tests PRIVATE armrx_core)
+    target_compile_options(armrx_tests PRIVATE -UNDEBUG)
     add_test(NAME armrx_tests COMMAND armrx_tests)
 
     add_executable(test_mining tests/test_mining.cpp)
     target_link_libraries(test_mining PRIVATE armrx_core)
+    target_compile_options(test_mining PRIVATE -UNDEBUG)
     add_test(NAME test_mining COMMAND test_mining)
+    # Builds several full-size (~2080 MiB) fast-mode datasets to cover the
+    # live worker-reuse dataset-rebuild path (PLAN.md §2.1) — generous ceiling
+    # so a genuine hang fails loudly instead of blocking CI/ctest forever.
+    set_tests_properties(test_mining PROPERTIES TIMEOUT 900)
 
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)

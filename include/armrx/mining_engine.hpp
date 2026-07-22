@@ -7,6 +7,7 @@
 #include <thread>
 #include <vector>
 #include <mutex>
+#include <condition_variable>
 #include <functional>
 #include <memory>
 #include <chrono>
@@ -156,6 +157,27 @@ private:
     std::shared_ptr<Argon2dCache> shared_cache_;
     std::shared_ptr<MappedMemory> shared_dataset_; // Huge-page backed dataset for safe concurrent access
     std::vector<std::byte> current_seed_key_;
+
+    // Dataset (re)initialization coordination — while the engine is already
+    // running, a fast-mode seed-key change lets the persistent, already
+    // affinity-pinned mining workers build the new dataset directly instead
+    // of spawning temporary unpinned threads (see PLAN.md §2.1). This is a
+    // separate mutex from job_mutex_ deliberately: set_job() holds job_mutex_
+    // for its entire duration (including the wait below), so workers must be
+    // able to participate without ever needing to acquire job_mutex_.
+    //
+    // Uses the same monotonic-generation-counter idiom as job_generation_/
+    // local_gen below rather than a boolean flag: each worker tracks its own
+    // local_dataset_init_gen and only participates once per bump, so there is
+    // no reset step and no race window where a worker could see a stale
+    // "pending" flag and redo its chunk a second time.
+    std::mutex dataset_init_mutex_;
+    std::condition_variable dataset_init_cv_;
+    std::atomic<std::uint64_t> dataset_init_generation_{0};
+    unsigned dataset_init_remaining_{0};             // guarded by dataset_init_mutex_
+    std::shared_ptr<MappedMemory> pending_dataset_;  // guarded by dataset_init_mutex_
+    std::shared_ptr<Argon2dCache> pending_cache_;    // guarded by dataset_init_mutex_
+    std::uint64_t pending_items_per_thread_{0};      // guarded by dataset_init_mutex_
 
     // CPU core ordering: fastest cores first (big.LITTLE-aware)
     std::vector<unsigned int> core_order_;
