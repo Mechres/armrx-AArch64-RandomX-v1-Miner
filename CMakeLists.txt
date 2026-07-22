@@ -242,6 +242,18 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
     message(STATUS "LTO/IPO is supported and enabled")
     set_property(TARGET armrx_core PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
     set_property(TARGET armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    # Alpine/musl's fortify-headers package wraps libc calls (e.g. vsnprintf, reached via
+    # std::to_string(double) -> libstdc++'s __to_xstring) in `extern` + `always_inline`
+    # functions. Under LTO, GCC can't always prove it holds the sole authoritative
+    # definition of an extern always_inline function, so it hard-errors instead of
+    # emitting an out-of-line call ("function body can be overwritten at link time").
+    # Confirmed via bisection this is unrelated to any armrx code path or the
+    # cli_parser.cpp/miner_app.cpp split (reproduces identically on the pre-split
+    # tree); it is purely this toolchain/libc combination. -flto-partition=one does
+    # NOT fix it either (verified), so this isn't a WHOPR partitioning artifact.
+    # Disabling fortify only on the one target that hits this, rather than dropping
+    # LTO project-wide, keeps the rest of the build's hardening intact.
+    target_compile_options(armrx PRIVATE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
     if(ARMRX_BUILD_TESTS)
         set_property(TARGET armrx_tests PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET test_mining PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

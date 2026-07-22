@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-07-22 — Root-Caused and Fixed the On-Device LTO Build Regression
+
+- **Root-caused the on-device LTO link failure** (`CMakeLists.txt`) previously documented but not root-caused, and initially misattributed to the `main.cpp` → `cli_parser.cpp`/`miner_app.cpp` split. Bisection disproved that: building the pre-split commit (`d7ca542`) reproduces the identical failure, and forcing `-flto-partition=one` (single WHOPR partition) does not fix it either — ruling out LTO partitioning as the mechanism entirely.
+- **Actual cause:** Alpine's `fortify-headers` package wraps libc calls (`vsnprintf`, reached via `std::to_string(double)` → libstdc++'s `__to_xstring`) in `extern`+`always_inline` functions incompatible with GCC LTO — GCC hard-errors ("function body can be overwritten at link time") instead of emitting an out-of-line call. Confirmed via `apk info`/`/var/log/apk.log` that the on-device toolchain was upgraded `gcc-15.2.0-r6 → r8` on 2026-07-13, well before this session — the bug has been latent since then, just not previously hit by a from-scratch LTO build of the `armrx` executable target specifically.
+- **Fixed**: scoped `-U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0` to just the `armrx` target when LTO is enabled, rather than disabling LTO project-wide via the existing `ARMRX_DISABLE_LTO` option. Verified on-device: the standard documented build command (LTO on, no workaround flag) now links `armrx` cleanly and `ctest` passes 7/7.
+- Removed the now-stale `-DARMRX_DISABLE_LTO=ON` workaround notes from `README.md` and `REASONIX.md`; corrected the misattribution in `PLAN.md` §5 item C and `docs/fast-mode-dataset-corruption-postmortem.md`.
+
 ## 2026-07-22 — Fresh Performance Re-Baseline; Documented On-Device LTO Build Regression
 
 - **Re-measured branch-miss rate on-device** (Cortex-A53, `perf stat -e instructions,cycles,branches,branch-misses ./build/bench_armrx`): **31.08%**, essentially unchanged from the pre-PGO `NEXT_STEPS.md` baseline (31.6%) despite everything landed since (PGO, O12/O13, AES fix, Argon2 NEON, worker-thread dataset reuse, two critical bug fixes this session). ~8.6–11.9% of total cycles estimated lost to misprediction penalty. See `PLAN.md` §5 item C for the full numbers and reasoning on why the old "94.85% of misses are in dataset generation, not per-hash" claim doesn't transfer to this light-mode-only hardware. No JIT compiler code changed — data-gathering only, per the plan's decision gate; a recommendation is recorded but CBRANCH/peephole work has not been started.
