@@ -317,42 +317,34 @@ void test_reconnect_backoff_exhaustion() {
 
 // ── Scenario 4: PoolManager multi-pool failover.
 //
-// Important finding while building this test: PoolManager::tick()'s failover
-// only ever triggers from reconnect_attempts() reaching 5 — and that counter
-// is driven by StratumClient's reconnect_loop(), which is only started by
-// reader_thread_fn() noticing a connection that WAS UP go down. If a pool's
-// very first connect() attempt fails outright (nothing listening, refused),
-// that failure is caught synchronously inside PoolManager::connect_to_current()
-// and just logged; reconnect_loop() is never started, reconnect_attempts()
-// stays 0 forever, and tick() never fails over. A first-configured pool that
-// is simply unreachable from the start will NOT trigger failover to the next
-// pool in the list — only a pool that connects successfully and then drops
-// mid-session does. This test exercises the actually-reachable path (accept,
-// succeed, then drop); the unreachable-from-the-start gap is a real behavior
-// worth being aware of but is outside this test-writing task's scope to fix.
+// This test originally caught the tick()/connect_to_current() self-deadlock
+// (docs/pool-failover-deadlock-postmortem.md) and, while investigating it,
+// surfaced two further gaps — both since fixed (2026-07-22):
 //
-// Real production backoff timing applies here (1s,2s,4s,8s,16s delays before
-// each of the 5 attempts, ~31s cumulative — PoolManager::connect_to_current()
-// hardcodes set_reconnect_config(5, 1000) with no override), so this is the
-// slowest scenario in the file by design, not a bug.
+// 1. A pool whose very first connect() attempt fails outright (nothing
+//    listening, refused) never used to trigger failover: reconnect_loop() is
+//    only armed by reader_thread_fn() noticing a connection that WAS UP go
+//    down, so reconnect_attempts() stayed 0 forever for a pool dead from
+//    process startup. Fixed in PoolManager::tick() by tracking a separate
+//    sync_retry_count_ for this case, using StratumClient::reconnect_loop_active()
+//    (not reconnect_attempts()==0, which can't distinguish "never armed" from
+//    "armed but hasn't incremented yet") to tell the two cases apart. Covered
+//    by test_failover_from_pool_dead_at_startup() below.
+// 2. connect_to_current() replacing the old StratumClient via
+//    `stratum_ = std::make_unique<...>()` destroys the OLD object first, and
+//    ~StratumClient() joins its reconnect_thread_ — which, at the moment
+//    failover triggers, is very likely mid-sleep for a doomed retry. Used to
+//    block up to kMaxBackoffMs (30s) since reconnect_enabled_.store(false)
+//    doesn't wake a thread blocked in plain sleep_for(). Fixed by switching
+//    reconnect_loop()'s sleep to a condition_variable::wait_for() that wakes
+//    immediately when disconnect() notifies it. Covered by
+//    test_disconnect_interrupts_reconnect_backoff() below.
 //
-// Second finding, also documented rather than fixed (not blocking, unlike the
-// tick()/connect_to_current() deadlock this test originally caught — see
-// docs/pool-failover-deadlock-postmortem.md): connect_to_current() replaces
-// the old StratumClient via `stratum_ = std::make_unique<...>()`. That
-// assignment destroys the OLD object first, and ~StratumClient() joins its
-// reconnect_thread_ — which, at the moment failover triggers, is very likely
-// mid `sleep_for()` for what would have been a 6th (already-doomed) retry,
-// sleeping up to kMaxBackoffMs (30s). reconnect_enabled_.store(false) in the
-// destructor doesn't wake a thread already inside sleep_for(); the join()
-// blocks until that sleep elapses naturally. So the *actual* reconnect to the
-// next pool can be delayed by up to ~30s beyond the already-real ~31s backoff
-// before it even starts — observed directly on-device (slower, more loaded
-// hardware makes this far more visible than on a fast x86_64 sandbox). The
-// timeouts below are sized generously to absorb this; a tighter fix would
-// need reconnect_loop()'s sleep to be interruptible (e.g. a condition_variable
-// instead of sleep_for), which is a real design change beyond this
-// test-writing task's scope.
+// Real production backoff timing still applies here (1s,2s,4s,8s,16s delays
+// before each of the 5 attempts, ~31s cumulative — PoolManager::connect_to_current()
+// hardcodes set_reconnect_config(5, 1000) with no override), so this remains
+// the slowest scenario in the file by design, not a bug — it's just no longer
+// inflated by the ~30s stale-join delay on top.
 
 void test_pool_failover() {
     std::uint16_t first_port = 0;
@@ -380,9 +372,10 @@ void test_pool_failover() {
 
     std::atomic<bool> good_pool_connected{false};
     std::thread good_pool_server([&] {
-        // Generous: ~31s real backoff + up to ~30s stale-thread join block
-        // (see comment above) + handshake + on-device scheduling margin.
-        int c = accept_one(good_listen_fd, /*timeout_ms=*/150000);
+        // ~31s real backoff + handshake + on-device scheduling margin. No
+        // longer needs to absorb the stale-thread-join delay on top (fixed —
+        // see the comment above).
+        int c = accept_one(good_listen_fd, /*timeout_ms=*/60000);
         if (c < 0) return; // test will fail via the wait_until below
         std::string line;
         bool got = server_recv_line(c, line);
@@ -404,13 +397,12 @@ void test_pool_failover() {
 
     first_pool_server.join();
 
-    // Drive tick() roughly once per second, matching MinerApp's real usage
-    // pattern, until failover completes or a generous timeout elapses. See
-    // the stale-thread-join comment above for why this needs to be large.
+    // Drive tick() until failover completes or a generous timeout elapses
+    // (real ~31s backoff + handshake + on-device scheduling margin).
     bool failed_over = wait_until([&] {
         mgr.tick();
         return good_pool_connected.load();
-    }, std::chrono::seconds(150));
+    }, std::chrono::seconds(60));
 
     assert(failed_over);
     assert(mgr.current_pool_name() == ("127.0.0.1:" + std::to_string(good_port)));
@@ -421,7 +413,110 @@ void test_pool_failover() {
     std::cout << "[test_pool_protocol] test_pool_failover passed\n";
 }
 
-// ── Scenario 5: malformed/partial JSON from the server doesn't crash the
+// ── Scenario 5: a pool that's unreachable from the very first connect()
+//    attempt (connection refused at process startup — never completes even
+//    one handshake, unlike test_pool_failover's connect-then-drop scenario)
+//    must still eventually fail over to the next pool. Regression test for
+//    gap #1 in the comment above test_pool_failover(). ──
+
+void test_failover_from_pool_dead_at_startup() {
+    // "Dead" pool: bind + listen, then close immediately so nothing is
+    // listening on dead_port — connect() gets ECONNREFUSED synchronously,
+    // exactly like a pool that's down from the moment the miner starts.
+    std::uint16_t dead_port = 0;
+    {
+        int fd = listen_on_ephemeral_port(dead_port);
+        ::close(fd);
+    }
+
+    std::uint16_t good_port = 0;
+    int good_listen_fd = listen_on_ephemeral_port(good_port);
+
+    std::atomic<bool> good_pool_connected{false};
+    std::thread good_pool_server([&] {
+        int c = accept_one(good_listen_fd, /*timeout_ms=*/10000);
+        if (c < 0) return; // test will fail via the wait_until below
+        std::string line;
+        bool got = server_recv_line(c, line);
+        if (!got) { ::close(c); return; }
+        const auto id = armrx::json::get_raw(line, "id");
+        server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                             "\"result\":{\"id\":\"sess0\"}}");
+        good_pool_connected.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        ::close(c);
+    });
+
+    std::vector<armrx::PoolConfig> pools = {
+        {"127.0.0.1", dead_port, false},
+        {"127.0.0.1", good_port, false},
+    };
+    armrx::PoolManager mgr(pools, "test_wallet", "x");
+    mgr.connect(); // fails synchronously against the dead pool
+    assert(!mgr.is_connected());
+
+    bool failed_over = wait_until([&] {
+        mgr.tick();
+        return good_pool_connected.load();
+    }, std::chrono::seconds(10));
+
+    assert(failed_over);
+    assert(mgr.current_pool_name() == ("127.0.0.1:" + std::to_string(good_port)));
+
+    mgr.disconnect();
+    good_pool_server.join();
+    ::close(good_listen_fd);
+    std::cout << "[test_pool_protocol] test_failover_from_pool_dead_at_startup passed\n";
+}
+
+// ── Scenario 6: disconnect() wakes reconnect_loop() immediately instead of
+//    blocking for the remainder of its current backoff sleep. Regression
+//    test for gap #2 in the comment above test_pool_failover(). ──
+
+void test_disconnect_interrupts_reconnect_backoff() {
+    std::uint16_t port = 0;
+    int listen_fd = listen_on_ephemeral_port(port);
+
+    std::thread server([&] {
+        int c = accept_one(listen_fd);
+        if (c < 0) return;
+        std::string line;
+        if (server_recv_line(c, line)) {
+            const auto id = armrx::json::get_raw(line, "id");
+            server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                                 "\"result\":{\"id\":\"sess0\"}}");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ::close(c); // drop mid-session — arms reconnect_loop()
+        ::close(listen_fd); // subsequent reconnect attempts fail fast (refused)
+    });
+
+    armrx::StratumClient client("127.0.0.1", port, "test_wallet", "x");
+    // Long base delay so the backoff sleep this test interrupts is clearly
+    // longer than the time budget asserted below.
+    client.set_reconnect_config(/*max_retries=*/10, /*base_delay_ms=*/5000);
+    client.connect();
+    server.join();
+
+    // Wait for reader_thread_fn() to notice the drop and arm reconnect_loop(),
+    // then let it get well into its 5s backoff sleep.
+    bool armed = wait_until([&] { return client.reconnect_loop_active(); },
+                            std::chrono::seconds(2));
+    assert(armed);
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+
+    const auto start = std::chrono::steady_clock::now();
+    client.disconnect();
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+
+    // Without the fix, disconnect()'s join() would block for most of the
+    // remaining ~4.7s of the backoff sleep. With it, the condition_variable
+    // notify wakes reconnect_loop() immediately.
+    assert(elapsed < std::chrono::seconds(2));
+    std::cout << "[test_pool_protocol] test_disconnect_interrupts_reconnect_backoff passed\n";
+}
+
+// ── Scenario 7: malformed/partial JSON from the server doesn't crash the
 //    client or wedge the reader thread — a subsequent valid message must
 //    still be processed correctly afterward. ──
 
@@ -495,6 +590,8 @@ int main() {
     test_cryptonote_full_flow();
     test_reconnect_backoff_exhaustion();
     test_malformed_input_robustness();
+    test_disconnect_interrupts_reconnect_backoff();
+    test_failover_from_pool_dead_at_startup();
     test_pool_failover(); // slowest scenario (~30s real backoff) — run last
 
     std::cout << "ALL POOL PROTOCOL TESTS PASSED SUCCESSFULLY!\n";

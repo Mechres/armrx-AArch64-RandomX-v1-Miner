@@ -85,6 +85,7 @@ void PoolManager::connect_to_current() {
 bool PoolManager::connect() {
     current_idx_ = 0;
     failover_cooldown_ = 0;
+    sync_retry_count_ = 0;
     connect_to_current();
     return is_connected();
 }
@@ -118,12 +119,40 @@ void PoolManager::tick() {
 
         if (!stratum_->is_connected() && failover_cooldown_ == 0) {
             const auto retries = stratum_->reconnect_attempts();
-            if (retries >= 5) {
-                // Failover to next pool
-                current_idx_ = (current_idx_ + 1) % pools_.size();
-                failover_cooldown_ = 2;
-                ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+            if (retries > 0 || stratum_->reconnect_loop_active()) {
+                // The async reconnect_loop() is either live and counting its
+                // own retries, or alive but hasn't incremented yet (still in
+                // its very first backoff sleep) — either way, a connection
+                // that succeeded once and then dropped. Let it drive failover
+                // on its own real backoff schedule; don't race ahead of it.
+                sync_retry_count_ = 0;
+                if (retries >= 5) {
+                    current_idx_ = (current_idx_ + 1) % pools_.size();
+                    failover_cooldown_ = 2;
+                    ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+                }
+            } else {
+                // No async reconnect_loop has ever run for this connection
+                // attempt — the pool was unreachable synchronously in
+                // connect_to_current() (DNS failure, connection refused).
+                // reconnect_loop() is only ever armed by the reader thread
+                // noticing a previously live connection go down, so a pool
+                // dead from process startup would otherwise never fail over.
+                // Drive our own retry count for this case with the same
+                // 5-retries/2s-cooldown policy.
+                ++sync_retry_count_;
+                if (sync_retry_count_ >= 5) {
+                    current_idx_ = (current_idx_ + 1) % pools_.size();
+                    failover_cooldown_ = 2;
+                    sync_retry_count_ = 0;
+                    ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+                } else {
+                    // Retry the same (still-current) pool after a short cooldown.
+                    failover_cooldown_ = 2;
+                }
             }
+        } else if (stratum_->is_connected()) {
+            sync_retry_count_ = 0;
         }
 
         if (failover_cooldown_ > 0) {

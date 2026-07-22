@@ -71,6 +71,12 @@ private:
     std::vector<PoolEntry> pools_;
     unsigned current_idx_ = 0;
     unsigned failover_cooldown_ = 0;
+    // Retry counter for pools that are unreachable from the very first connect
+    // attempt (DNS failure, connection refused) — StratumClient::reconnect_attempts()
+    // stays 0 forever in that case, since reconnect_loop() is only ever armed by
+    // the reader thread noticing a *previously live* connection drop. Tracked here
+    // so a pool that's dead from process startup still eventually fails over.
+    unsigned sync_retry_count_ = 0;
 
     std::string wallet_;
     std::string password_;

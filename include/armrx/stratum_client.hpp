@@ -113,6 +113,17 @@ public:
     /** Returns the number of consecutive reconnect attempts since last clean connect. */
     [[nodiscard]] unsigned reconnect_attempts() const { return reconnect_attempts_; }
 
+    /**
+     * Whether the background reconnect_loop() is currently running for this
+     * connection attempt. reconnect_attempts() alone can't distinguish "the
+     * loop hasn't incremented its counter yet" (still in its first backoff
+     * sleep) from "the loop never started at all" (e.g. connect() threw
+     * synchronously and no reader thread ever ran to notice a drop and arm
+     * it) — callers that need that distinction (PoolManager's failover logic)
+     * should check this instead of inferring it from reconnect_attempts()==0.
+     */
+    [[nodiscard]] bool reconnect_loop_active() const { return reconnect_loop_active_.load(); }
+
 private:
     // --- networking helpers ---
     void reader_thread_fn();
@@ -199,7 +210,13 @@ private:
     unsigned base_delay_ms_{1000};
     std::atomic<unsigned> reconnect_attempts_{0};
     std::atomic<bool> reconnect_enabled_{true};
+    std::atomic<bool> reconnect_loop_active_{false};
     std::thread reconnect_thread_;
+    // Lets disconnect() wake reconnect_loop() immediately instead of leaving it
+    // blocked in sleep_for() for up to kMaxBackoffMs before the destructor's
+    // join() can return.
+    std::mutex reconnect_cv_mutex_;
+    std::condition_variable reconnect_cv_;
 
     // Share result counters (written by reader thread, read by main thread)
     std::atomic<std::uint64_t> shares_accepted_{0};

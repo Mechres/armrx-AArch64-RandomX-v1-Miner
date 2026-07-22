@@ -227,6 +227,7 @@ void StratumClient::connect() {
 
 void StratumClient::disconnect() {
     reconnect_enabled_.store(false);
+    reconnect_cv_.notify_all();
     close_connection();
     if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
         reconnect_thread_.join();
@@ -418,6 +419,10 @@ void StratumClient::reader_thread_fn() {
         if (reconnect_thread_.joinable() && std::this_thread::get_id() != reconnect_thread_.get_id()) {
             reconnect_thread_.join();
         }
+        // Set before spawning (not inside reconnect_loop() itself) so there's
+        // no window where the thread exists but reconnect_loop_active() still
+        // reads false.
+        reconnect_loop_active_.store(true);
         reconnect_thread_ = std::thread(&StratumClient::reconnect_loop, this);
     } else {
         if (error_callback_) {
@@ -698,12 +703,29 @@ void StratumClient::keepalive_loop() {
 }
 
 void StratumClient::reconnect_loop() {
+    // Cleared on every exit path (success return, retries-exhausted break,
+    // or the while condition simply going false) so
+    // PoolManager::tick() can tell "no reconnect attempt is in flight"
+    // apart from "reconnect_attempts() just hasn't incremented yet".
+    struct ActiveGuard {
+        std::atomic<bool>& flag;
+        ~ActiveGuard() { flag.store(false); }
+    } active_guard{reconnect_loop_active_};
+
     unsigned delay = base_delay_ms_;
     while (reconnect_enabled_.load()) {
         // Cap delay at max backoff
         if (delay > kMaxBackoffMs) delay = kMaxBackoffMs;
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        {
+            // wait_for re-checks the predicate against reconnect_enabled_ (an
+            // atomic) before ever blocking, so a disconnect() that stores false
+            // and notifies before this point is never missed — this doesn't need
+            // the store itself to happen under reconnect_cv_mutex_.
+            std::unique_lock<std::mutex> lk(reconnect_cv_mutex_);
+            reconnect_cv_.wait_for(lk, std::chrono::milliseconds(delay),
+                                    [this] { return !reconnect_enabled_.load(); });
+        }
 
         if (!reconnect_enabled_.load()) break;
 

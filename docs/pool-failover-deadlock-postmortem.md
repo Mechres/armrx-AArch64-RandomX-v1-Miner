@@ -1,7 +1,7 @@
 # Pool Failover Self-Deadlock Postmortem
 
 **Date:** 2026-07-22
-**Status:** Fixed, verified on both x86_64 and AArch64 (on-device)
+**Status:** Fixed, verified on both x86_64 and AArch64 (on-device). Both follow-up gaps below (AUTO-fallback, stale-reconnect-thread join) also since fixed the same day.
 **Discovered while:** writing PLAN.md §3.2's mock Stratum protocol tests (`tests/test_pool_protocol.cpp`)
 
 ---
@@ -79,26 +79,33 @@ No behavioral change to the ordering of state reads/writes — only the point at
 3. Traced the exact call chain (`tick()` → `connect_to_current()`, both taking `stratum_mutex_`) and confirmed the non-recursive self-lock via direct code reading — no debugger needed, the mutex nesting is visible directly in the two adjacent functions once you're looking for it.
 4. Applied the fix; re-ran the same test — `test_pool_failover` now completes in ~64s total (dominated by the real 5-attempt exponential backoff timing: 1+2+4+8+16 = 31s, plus handshake overhead), matching expected production timing with no hang.
 
-## Also found while building the same test (documented, not fixed — out of scope)
+## Also found while building the same test — both since fixed (2026-07-22)
 
-1. **AUTO-fallback gap:** `PoolManager::tick()`'s failover only triggers via `StratumClient::reconnect_attempts()` reaching 5, and that counter is only ever incremented inside `reconnect_loop()`, which is only *started* by `reader_thread_fn()` noticing a connection that was previously up go down. If the very *first* pool in a configured list is unreachable from the start (connection refused immediately, not merely dropped after connecting), `StratumClient::connect()` throws synchronously before ever starting a reader thread — `reconnect_loop()` never starts, `reconnect_attempts()` stays 0 forever, and `tick()`'s failover condition is never met. A first-configured pool that is simply down from process startup will never trigger failover to the next pool in the list; only a pool that connects successfully and later drops does.
+1. **AUTO-fallback gap — fixed.** `PoolManager::tick()`'s failover originally only triggered via `StratumClient::reconnect_attempts()` reaching 5, and that counter is only ever incremented inside `reconnect_loop()`, which is only *started* by `reader_thread_fn()` noticing a connection that was previously up go down. If the very *first* pool in a configured list is unreachable from the start (connection refused immediately, not merely dropped after connecting), `StratumClient::connect()` throws synchronously before ever starting a reader thread — `reconnect_loop()` never starts, `reconnect_attempts()` stays 0 forever, and `tick()`'s failover condition was never met.
 
-2. **Stale-reconnect-thread join latency:** even after the deadlock fix, `connect_to_current()`'s `stratum_ = std::make_unique<StratumClient>(...)` reassignment destroys the OLD `StratumClient` first, and `~StratumClient()` joins its `reconnect_thread_` — which, at the moment failover triggers, is very likely mid-`sleep_for()` for what would have been a doomed 6th retry, sleeping up to `kMaxBackoffMs` (30s). `reconnect_enabled_.store(false)` in the destructor doesn't wake a thread already inside `sleep_for()`; the join blocks until that sleep elapses naturally. So the *actual* reconnect to the next pool can be delayed by up to ~30s beyond the already-real ~31s backoff before it even starts. This was invisible on the fast x86_64 sandbox (total scenario time ~64s, comfortably under a 60s test budget by luck of the timing) but became directly visible on-device: the first on-device test run failed with `"handshake timed out"` after the mock server's own accept-timeout budget (60s) was exceeded by the combined ~31s backoff + up to ~30s stale-join delay. Fixed *the test* by widening its timeout budget (150s wait, 300s ctest `TIMEOUT`) to accommodate this real, if suboptimal, production latency — not by changing production code. A tighter production fix would need `reconnect_loop()`'s sleep to be interruptible (e.g. a `condition_variable` instead of `sleep_for()`), which is a real design change beyond this test-writing task's scope.
+   Fix: added `StratumClient::reconnect_loop_active()`, a flag set (from the *spawning* thread, before the reconnect thread starts — no race window) whenever `reconnect_loop()` is running, and cleared on every exit path. `PoolManager::tick()` now checks this flag rather than inferring "never armed" from `reconnect_attempts()==0` — that inference is unsound on its own, since a live `reconnect_loop()` also reads 0 during its very first backoff sleep, before its first increment. (An earlier draft of this fix used `reconnect_attempts()==0` directly and raced ahead of the real 1s/2s/4s/8s/16s backoff whenever `tick()` was polled faster than once per second — caught by `test_pool_failover` unexpectedly completing in under a second instead of the real ~31s, a good example of "a test finishing suspiciously fast is still a finding".) When `reconnect_loop_active()` is false and `reconnect_attempts()` is 0, `PoolManager` now drives its own `sync_retry_count_` with the same 5-retries/2s-cooldown policy, retrying the same pool before rotating. Covered by `test_failover_from_pool_dead_at_startup` in `tests/test_pool_protocol.cpp`.
 
-Both are real behaviors worth knowing about but weren't part of this test-writing task's scope to fix — flagged here for future prioritization.
+2. **Stale-reconnect-thread join latency — fixed.** `connect_to_current()`'s `stratum_ = std::make_unique<StratumClient>(...)` reassignment destroys the OLD `StratumClient` first, and `~StratumClient()` joins its `reconnect_thread_` — which, at the moment failover triggers, is very likely mid-sleep for what would have been a doomed 6th retry, previously blocking up to `kMaxBackoffMs` (30s) since `reconnect_enabled_.store(false)` doesn't wake a thread inside plain `sleep_for()`.
+
+   Fix: `reconnect_loop()`'s sleep is now `std::condition_variable::wait_for()` against a `reconnect_cv_`, woken immediately by `disconnect()`'s `reconnect_cv_.notify_all()` right after it stores `reconnect_enabled_ = false`. `wait_for()`'s predicate re-checks the atomic flag before ever blocking, so there's no lost-wakeup race even without holding the cv's mutex around the store. Covered by `test_disconnect_interrupts_reconnect_backoff` in `tests/test_pool_protocol.cpp`, and `test_pool_failover`'s timeouts were tightened back down (150s → 60s) now that the extra ~30s no longer applies.
 
 ## Files Changed
 
 | File | Change |
 |------|--------|
-| `src/pool_manager.cpp` | Fixed the `tick()`/`connect_to_current()` self-deadlock by releasing `stratum_mutex_` before the deferred reconnect call |
-| `tests/test_pool_protocol.cpp` | New file (PLAN.md §3.2): 5 mock-Stratum scenarios, including the one that caught this bug; timeouts sized to absorb the stale-join latency described above |
-| `CMakeLists.txt` | `test_pool_protocol`'s ctest `TIMEOUT` raised to 300s for the same reason |
+| `src/pool_manager.cpp` | Fixed the `tick()`/`connect_to_current()` self-deadlock by releasing `stratum_mutex_` before the deferred reconnect call. Later: added `sync_retry_count_`-driven retry/failover for pools unreachable from process startup. |
+| `include/armrx/pool_manager.hpp` | Added `sync_retry_count_` member. |
+| `src/stratum_client.cpp` | Later: `reconnect_loop()`'s sleep switched to an interruptible `condition_variable::wait_for()`; added `reconnect_loop_active_` tracking. |
+| `include/armrx/stratum_client.hpp` | Later: added `reconnect_loop_active()` accessor, `reconnect_cv_`/`reconnect_cv_mutex_`/`reconnect_loop_active_` members. |
+| `tests/test_pool_protocol.cpp` | New file (PLAN.md §3.2): 5 mock-Stratum scenarios, including the one that caught this bug. Later: 2 more scenarios added for the two gaps above (7 total). |
+| `CMakeLists.txt` | `test_pool_protocol`'s ctest `TIMEOUT` raised to 300s for the stale-join latency (kept as a safety margin even after the fix). |
 
 ## Verification
 
-- **x86_64 (local):** full `ctest` 4/4 passing, including `test_pool_protocol`'s 5 scenarios. Positive confirmation: the exact same test hung indefinitely before the deadlock fix and passes cleanly after it.
-- **AArch64 (on-device):** full `ctest` 7/7 passing, including `test_pool_protocol`'s 5 scenarios with the widened timeout budget. First on-device attempt (before widening the timeout) surfaced the stale-join latency finding above via a real, informative failure — not a hang — confirming the deadlock fix itself was solid even when the test's own timeout was too tight.
+- **Original deadlock fix — x86_64 (local):** full `ctest` 4/4 passing, including `test_pool_protocol`'s 5 scenarios. Positive confirmation: the exact same test hung indefinitely before the deadlock fix and passes cleanly after it.
+- **Original deadlock fix — AArch64 (on-device):** full `ctest` 7/7 passing, including `test_pool_protocol`'s 5 scenarios with the (then-)widened timeout budget. First on-device attempt (before widening the timeout) surfaced the stale-join latency finding above via a real, informative failure — not a hang — confirming the deadlock fix itself was solid even when the test's own timeout was too tight.
+- **Both follow-up gaps' fixes — x86_64 (local):** full `ctest` 4/4 passing, `test_pool_protocol` now 7 scenarios (36s total, down from the timeout-inflated numbers above), including the two new regression tests.
+- **Both follow-up gaps' fixes — AArch64 (on-device):** full `ctest` 7/7 passing, `test_pool_protocol` 36s. Confirmed `test_pool_failover` still exercises the real ~31s exponential backoff (1s/2s/4s/8s/16s) rather than short-circuiting it — an earlier draft of the AUTO-fallback fix had a race that caused exactly that (see gap #1's writeup above), caught before landing by the same "why did this pass so fast" instinct as this postmortem's own lessons below.
 
 ## Lessons
 

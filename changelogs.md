@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-22 — Fixed Both Documented Pool-Failover Gaps
+
+See `docs/pool-failover-deadlock-postmortem.md` for the full writeup (updated in place, not a new doc). Summary:
+
+- **Fixed the AUTO-fallback gap**: a pool unreachable from process startup (DNS failure, connection refused before any handshake) never used to trigger failover, since `StratumClient::reconnect_loop()` is only armed by the reader thread noticing a *previously live* connection drop — a pool dead from the start never gets that chance, so `reconnect_attempts()` stayed 0 forever. Added `StratumClient::reconnect_loop_active()` (set synchronously before the reconnect thread spawns, cleared on every exit path) so `PoolManager::tick()` can distinguish "no reconnect loop has ever run" from "one is running but hasn't incremented its counter yet" — the naive `reconnect_attempts()==0` check can't tell these apart, and an earlier draft that used it directly raced ahead of the real exponential backoff (caught because `test_pool_failover` finished in under a second instead of ~31s — a test passing suspiciously fast is still a finding). `PoolManager` now tracks its own `sync_retry_count_` for the never-armed case, using the same 5-retries/2s-cooldown policy.
+- **Fixed the stale-reconnect-thread join latency**: `connect_to_current()` destroying the old `StratumClient` used to block up to `kMaxBackoffMs` (30s) in `~StratumClient()`'s join, since `reconnect_loop()`'s `sleep_for()` can't be woken early. Switched to `std::condition_variable::wait_for()` against a new `reconnect_cv_`, woken by `disconnect()` right after it disables the loop — no lost-wakeup race since the predicate re-checks the atomic flag before ever blocking.
+- **New test coverage** (`tests/test_pool_protocol.cpp`, now 7 scenarios): `test_failover_from_pool_dead_at_startup` and `test_disconnect_interrupts_reconnect_backoff`. `test_pool_failover`'s timeouts tightened back down (150s → 60s wait, matching the ~31s real backoff without the now-eliminated ~30s stale-join padding).
+- Verified: x86_64 local `ctest` 4/4 (`test_pool_protocol` 36s). AArch64 on-device full `ctest` 7/7 (`test_pool_protocol` 36s), confirming `test_pool_failover` still exercises the genuine 1s/2s/4s/8s/16s backoff rather than short-circuiting it.
+
 ## 2026-07-22 — Root-Caused and Fixed the On-Device LTO Build Regression
 
 - **Root-caused the on-device LTO link failure** (`CMakeLists.txt`) previously documented but not root-caused, and initially misattributed to the `main.cpp` → `cli_parser.cpp`/`miner_app.cpp` split. Bisection disproved that: building the pre-split commit (`d7ca542`) reproduces the identical failure, and forcing `-flto-partition=one` (single WHOPR partition) does not fix it either — ruling out LTO partitioning as the mechanism entirely.
