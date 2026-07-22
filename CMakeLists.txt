@@ -16,6 +16,7 @@ add_compile_definitions(ARMRX_VERSION="${PROJECT_VERSION}"
 
 option(ARMRX_ENABLE_NATIVE "Tune for the compiler host CPU" OFF)
 option(ARMRX_BUILD_TESTS "Build unit tests" ON)
+option(ARMRX_BUILD_FUZZERS "Build libFuzzer harnesses (requires Clang; PLAN.md §3.1)" OFF)
 option(ARMRX_JIT_PROFILE "Enable per-hash JIT profiling (adds 3 clock_gettime syscalls per hash)" OFF)
 option(ARMRX_ENABLE_JIT_FAST_DIV_SQRT "Enable fast Newton-Raphson JIT FDIV and FSQRT" OFF)
 option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OFF)
@@ -211,6 +212,26 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_jit_determinism PRIVATE armrx_core)
     add_test(NAME test_jit_determinism COMMAND test_jit_determinism)
     endif()
+endif()
+
+# LibFuzzer harness for armrx::json (PLAN.md §3.1). Opt-in and Clang-only —
+# -fsanitize=fuzzer isn't supported by GCC, which is what the rest of this
+# project builds with. Compiles src/json.cpp directly (that module has no
+# dependency on the rest of armrx_core) rather than linking against the
+# GCC-built armrx_core static library, avoiding any question of GCC/Clang
+# object compatibility entirely. Not part of the default ctest run — fuzzing
+# is exploratory/unbounded, invoke the binary directly with -max_total_time=N.
+if(ARMRX_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR
+            "ARMRX_BUILD_FUZZERS requires Clang (-fsanitize=fuzzer is not supported by GCC). "
+            "Reconfigure with -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang.")
+    endif()
+    add_executable(fuzz_json tests/fuzz_json.cpp src/json.cpp)
+    target_include_directories(fuzz_json PRIVATE include)
+    target_compile_features(fuzz_json PRIVATE cxx_std_20)
+    target_compile_options(fuzz_json PRIVATE -fsanitize=fuzzer,address -g -O1)
+    target_link_options(fuzz_json PRIVATE -fsanitize=fuzzer,address)
 endif()
 
 # Enable Interprocedural Optimization (LTO) if supported
