@@ -104,24 +104,38 @@ void PoolManager::submit_share(const Job& job, std::uint64_t nonce,
 }
 
 void PoolManager::tick() {
-    std::lock_guard<std::mutex> lock(stratum_mutex_);
-    if (!stratum_) return;
+    // connect_to_current() acquires stratum_mutex_ itself (its slow blocking
+    // stratum_->connect() call runs deliberately unlocked). It must never be
+    // called while already holding that mutex — std::mutex is non-recursive,
+    // so relocking it here would self-deadlock this thread permanently the
+    // first time a real failover cooldown elapsed. Read/mutate the failover
+    // state under the lock, but defer the actual reconnect call until after
+    // the lock_guard's scope ends.
+    bool should_reconnect_now = false;
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
+        if (!stratum_) return;
 
-    if (!stratum_->is_connected() && failover_cooldown_ == 0) {
-        const auto retries = stratum_->reconnect_attempts();
-        if (retries >= 5) {
-            // Failover to next pool
-            current_idx_ = (current_idx_ + 1) % pools_.size();
-            failover_cooldown_ = 2;
-            ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+        if (!stratum_->is_connected() && failover_cooldown_ == 0) {
+            const auto retries = stratum_->reconnect_attempts();
+            if (retries >= 5) {
+                // Failover to next pool
+                current_idx_ = (current_idx_ + 1) % pools_.size();
+                failover_cooldown_ = 2;
+                ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+            }
+        }
+
+        if (failover_cooldown_ > 0) {
+            --failover_cooldown_;
+            if (failover_cooldown_ == 0) {
+                should_reconnect_now = true;
+            }
         }
     }
 
-    if (failover_cooldown_ > 0) {
-        --failover_cooldown_;
-        if (failover_cooldown_ == 0) {
-            connect_to_current();
-        }
+    if (should_reconnect_now) {
+        connect_to_current();
     }
 }
 

@@ -183,6 +183,18 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
     add_test(NAME bench_armrx COMMAND bench_armrx)
 
+    # Mock Stratum protocol tests (PLAN.md §3.2) — loopback TCP, no hardware
+    # dependency. test_pool_failover() dominates: ~31s real production
+    # backoff timing plus up to ~30s more from a stale reconnect thread's
+    # blocking join in PoolManager::connect_to_current() (see the comment on
+    # that scenario in the test file) — generous ceiling for slower/loaded
+    # on-device hardware.
+    add_executable(test_pool_protocol tests/test_pool_protocol.cpp)
+    target_link_libraries(test_pool_protocol PRIVATE armrx_core)
+    target_compile_options(test_pool_protocol PRIVATE -UNDEBUG)
+    add_test(NAME test_pool_protocol COMMAND test_pool_protocol)
+    set_tests_properties(test_pool_protocol PROPERTIES TIMEOUT 300)
+
     # Opcode frequency benchmark (not part of regular CTest; invoke manually)
     # JIT-only — uses JitDumpEntry/setJitDumpEnabled/getJitDump (ARMRX_HAVE_JIT)
     if(ARMRX_HAVE_JIT)

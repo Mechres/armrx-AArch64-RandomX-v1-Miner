@@ -1,0 +1,502 @@
+/**
+ * Mock Stratum protocol integration tests (PLAN.md §3.2).
+ *
+ * Runs a minimal loopback TCP server (raw POSIX sockets, no new dependency)
+ * that scripts realistic pool message sequences against a real StratumClient
+ * / PoolManager, covering the wire-protocol paths that had zero test
+ * coverage before this file: Stratum V1 and CryptoNote handshakes, the
+ * CryptoNote-first-then-fallback-to-V1 AUTO negotiation, reconnect with
+ * exponential backoff, multi-pool failover, and malformed-input robustness.
+ *
+ * Uses the polling-with-timeout pattern established in tests/test_mining.cpp
+ * rather than fixed sleeps, since that session found fixed-sleep guesses
+ * produce flaky tests under real hardware/scheduling variance.
+ */
+
+#include "armrx/stratum_client.hpp"
+#include "armrx/pool_manager.hpp"
+#include "armrx/config.hpp"
+#include "armrx/log.hpp"
+#include "armrx/json.hpp"
+
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+
+namespace {
+
+// ── Minimal server-side socket helpers (deliberately separate from
+//    StratumClient's own read_line/write_all — this is the "hostile/real
+//    pool" side of the wire, so it must not share implementation with the
+//    code under test). ──────────────────────────────────────────────────
+
+int listen_on_ephemeral_port(std::uint16_t& out_port) {
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    assert(fd >= 0);
+    int opt = 1;
+    ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    struct sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = ::htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0; // kernel picks an ephemeral port
+    int rc = ::bind(fd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr));
+    assert(rc == 0);
+    rc = ::listen(fd, 4);
+    assert(rc == 0);
+    socklen_t len = sizeof(addr);
+    ::getsockname(fd, reinterpret_cast<struct sockaddr*>(&addr), &len);
+    out_port = ::ntohs(addr.sin_port);
+    return fd;
+}
+
+int accept_one(int listen_fd, int timeout_ms = 5000) {
+    struct timeval tv{};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    ::setsockopt(listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    struct sockaddr_in client{};
+    socklen_t client_len = sizeof(client);
+    return ::accept(listen_fd, reinterpret_cast<struct sockaddr*>(&client), &client_len);
+}
+
+// Reads one newline-terminated line from a connected client socket.
+// Returns false on EOF/error/timeout.
+bool server_recv_line(int fd, std::string& out, int timeout_ms = 5000) {
+    struct timeval tv{};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    std::string buf;
+    char tmp[4096];
+    while (true) {
+        auto nl = buf.find('\n');
+        if (nl != std::string::npos) {
+            out = buf.substr(0, nl);
+            return true;
+        }
+        ssize_t n = ::recv(fd, tmp, sizeof(tmp), 0);
+        if (n <= 0) return false;
+        buf.append(tmp, static_cast<std::size_t>(n));
+    }
+}
+
+bool server_send_line(int fd, const std::string& line) {
+    std::string out = line;
+    if (out.empty() || out.back() != '\n') out.push_back('\n');
+    std::size_t sent = 0;
+    while (sent < out.size()) {
+        ssize_t n = ::send(fd, out.data() + sent, out.size() - sent, 0);
+        if (n <= 0) return false;
+        sent += static_cast<std::size_t>(n);
+    }
+    return true;
+}
+
+// Fixed test fixture values, reused across scenarios.
+const std::string kBlobHex(152, '0');  // 76 zero bytes, matching main.cpp's benchmark job convention
+const std::string kSeedHex(64, '1');   // 32-byte dummy seed
+const char* kTargetHex = "ffffffff";   // compact target: accept-everything
+
+/// Poll `cond` until it returns true or `timeout` elapses. Returns whether it became true.
+template <typename Cond>
+bool wait_until(Cond cond, std::chrono::milliseconds timeout) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (cond()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    return cond();
+}
+
+// ── Scenario 1: Stratum V1 full flow, reached via the AUTO protocol's
+//    CryptoNote-first negotiation rejecting on the first connection and
+//    falling back to Stratum V1 on a second connection — this is the exact
+//    path real incompatible-protocol pools (e.g. herominers on the wrong
+//    port) trigger, per AGENTS.md's documented CryptoNote-first behavior. ──
+
+void test_stratum_v1_full_flow_via_auto_fallback() {
+    std::uint16_t port = 0;
+    int listen_fd = listen_on_ephemeral_port(port);
+
+    std::atomic<bool> notify_sent{false};
+    std::thread server([&] {
+        // Connection 1: client tries CryptoNote `login` first (AUTO default).
+        // Reject it so the client falls back to Stratum V1.
+        int c1 = accept_one(listen_fd);
+        assert(c1 >= 0);
+        std::string line;
+        bool got = server_recv_line(c1, line);
+        assert(got);
+        assert(line.find("\"method\":\"login\"") != std::string::npos);
+        const auto id1 = armrx::json::get_raw(line, "id");
+        server_send_line(c1, "{\"id\":" + id1 + ",\"jsonrpc\":\"2.0\","
+                              "\"error\":{\"code\":-1,\"message\":\"unsupported\"}}");
+        ::close(c1);
+
+        // Connection 2: client retries with Stratum V1 `mining.subscribe`.
+        int c2 = accept_one(listen_fd);
+        assert(c2 >= 0);
+        got = server_recv_line(c2, line);
+        assert(got);
+        assert(line.find("\"method\":\"mining.subscribe\"") != std::string::npos);
+        const auto id2 = armrx::json::get_raw(line, "id");
+        server_send_line(c2, "{\"id\":" + id2 + ",\"error\":null,"
+                              "\"result\":[[[\"mining.notify\",\"subid1\"]],\"deadbeef\",4]}");
+
+        got = server_recv_line(c2, line);
+        assert(got);
+        assert(line.find("\"method\":\"mining.authorize\"") != std::string::npos);
+        const auto id3 = armrx::json::get_raw(line, "id");
+        server_send_line(c2, "{\"id\":" + id3 + ",\"error\":null,\"result\":true}");
+
+        // Push an unsolicited mining.notify (server-initiated, no reply expected).
+        server_send_line(c2,
+            "{\"method\":\"mining.notify\",\"params\":[\"job1\",\"" + kBlobHex + "\",\"" +
+            std::string(kTargetHex) + "\",0,\"" + kSeedHex + "\"]}");
+        notify_sent.store(true);
+
+        // Keep the connection open briefly so the client can process the
+        // notify before we tear down.
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        ::close(c2);
+    });
+
+    armrx::StratumClient client("127.0.0.1", port, "test_wallet", "x");
+    std::mutex job_mutex;
+    armrx::Job received_job;
+    std::atomic<bool> job_received{false};
+    client.set_job_callback([&](const armrx::Job& j) {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        received_job = j;
+        job_received.store(true);
+    });
+
+    client.connect();
+    assert(client.is_connected());
+
+    bool ok = wait_until([&] { return job_received.load(); }, std::chrono::seconds(5));
+    assert(ok);
+    {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        assert(received_job.job_id == "job1");
+        assert(received_job.block_template.size() == 76);
+    }
+
+    client.disconnect();
+    server.join();
+    ::close(listen_fd);
+    std::cout << "[test_pool_protocol] test_stratum_v1_full_flow_via_auto_fallback passed\n";
+}
+
+// ── Scenario 2: CryptoNote full flow (login succeeds on the first try). ──
+
+void test_cryptonote_full_flow() {
+    std::uint16_t port = 0;
+    int listen_fd = listen_on_ephemeral_port(port);
+
+    std::thread server([&] {
+        int c = accept_one(listen_fd);
+        assert(c >= 0);
+        std::string line;
+        bool got = server_recv_line(c, line);
+        assert(got);
+        assert(line.find("\"method\":\"login\"") != std::string::npos);
+        const auto id = armrx::json::get_raw(line, "id");
+
+        // Successful login reply, with a job bundled in the result (as real
+        // CryptoNote pools do) to exercise process_cryptonote_job() via the
+        // handshake reply path, not just the standalone "job" notification.
+        server_send_line(c,
+            "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+            "\"result\":{\"id\":\"sess123\",\"job\":{"
+            "\"job_id\":\"cnjob1\",\"blob\":\"" + kBlobHex + "\","
+            "\"target\":\"" + std::string(kTargetHex) + "\","
+            "\"seed_hash\":\"" + kSeedHex + "\"}}}");
+
+        // Client should not send anything else immediately for CryptoNote
+        // (no separate authorize step); give it time to process, then close.
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        ::close(c);
+    });
+
+    armrx::StratumClient client("127.0.0.1", port, "test_wallet", "x");
+    std::mutex job_mutex;
+    armrx::Job received_job;
+    std::atomic<bool> job_received{false};
+    client.set_job_callback([&](const armrx::Job& j) {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        received_job = j;
+        job_received.store(true);
+    });
+
+    client.connect();
+    assert(client.is_connected());
+
+    bool ok = wait_until([&] { return job_received.load(); }, std::chrono::seconds(5));
+    assert(ok);
+    {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        assert(received_job.job_id == "cnjob1");
+        assert(received_job.block_template.size() == 76);
+    }
+
+    client.disconnect();
+    server.join();
+    ::close(listen_fd);
+    std::cout << "[test_pool_protocol] test_cryptonote_full_flow passed\n";
+}
+
+// ── Scenario 3: mid-session disconnect triggers reconnect_loop() with
+//    exponential backoff, exhausting after a small configured retry count.
+//    Uses StratumClient's own public set_reconnect_config() with a short
+//    base delay so this completes in well under a second, rather than
+//    waiting through PoolManager's hardcoded 1s-base/5-retry production
+//    config (see test_pool_failover() below for why that one is slow). ──
+
+void test_reconnect_backoff_exhaustion() {
+    std::uint16_t port = 0;
+    int listen_fd = listen_on_ephemeral_port(port);
+
+    std::thread server([&] {
+        // Accept once, complete a real CryptoNote handshake, then drop the
+        // connection to simulate a mid-session disconnect.
+        int c = accept_one(listen_fd);
+        assert(c >= 0);
+        std::string line;
+        bool got = server_recv_line(c, line);
+        assert(got);
+        const auto id = armrx::json::get_raw(line, "id");
+        server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                             "\"result\":{\"id\":\"sess1\"}}");
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ::close(c); // drop mid-session
+
+        // No listener for subsequent reconnect attempts — they must fail
+        // fast (connection refused), exercising pure backoff timing rather
+        // than handshake timing.
+        ::close(listen_fd);
+    });
+
+    armrx::StratumClient client("127.0.0.1", port, "test_wallet", "x");
+    client.set_reconnect_config(/*max_retries=*/2, /*base_delay_ms=*/50);
+
+    std::atomic<bool> gave_up{false};
+    std::string last_error;
+    std::mutex error_mutex;
+    client.set_error_callback([&](const std::string& reason) {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        last_error = reason;
+        if (reason.find("max retries exhausted") != std::string::npos) {
+            gave_up.store(true);
+        }
+    });
+
+    client.connect();
+    assert(client.is_connected());
+    server.join();
+
+    bool ok = wait_until([&] { return gave_up.load(); }, std::chrono::seconds(5));
+    assert(ok);
+    assert(client.reconnect_attempts() >= 2);
+
+    client.disconnect();
+    std::cout << "[test_pool_protocol] test_reconnect_backoff_exhaustion passed\n";
+}
+
+// ── Scenario 4: PoolManager multi-pool failover.
+//
+// Important finding while building this test: PoolManager::tick()'s failover
+// only ever triggers from reconnect_attempts() reaching 5 — and that counter
+// is driven by StratumClient's reconnect_loop(), which is only started by
+// reader_thread_fn() noticing a connection that WAS UP go down. If a pool's
+// very first connect() attempt fails outright (nothing listening, refused),
+// that failure is caught synchronously inside PoolManager::connect_to_current()
+// and just logged; reconnect_loop() is never started, reconnect_attempts()
+// stays 0 forever, and tick() never fails over. A first-configured pool that
+// is simply unreachable from the start will NOT trigger failover to the next
+// pool in the list — only a pool that connects successfully and then drops
+// mid-session does. This test exercises the actually-reachable path (accept,
+// succeed, then drop); the unreachable-from-the-start gap is a real behavior
+// worth being aware of but is outside this test-writing task's scope to fix.
+//
+// Real production backoff timing applies here (1s,2s,4s,8s,16s delays before
+// each of the 5 attempts, ~31s cumulative — PoolManager::connect_to_current()
+// hardcodes set_reconnect_config(5, 1000) with no override), so this is the
+// slowest scenario in the file by design, not a bug.
+//
+// Second finding, also documented rather than fixed (not blocking, unlike the
+// tick()/connect_to_current() deadlock this test originally caught — see
+// docs/pool-failover-deadlock-postmortem.md): connect_to_current() replaces
+// the old StratumClient via `stratum_ = std::make_unique<...>()`. That
+// assignment destroys the OLD object first, and ~StratumClient() joins its
+// reconnect_thread_ — which, at the moment failover triggers, is very likely
+// mid `sleep_for()` for what would have been a 6th (already-doomed) retry,
+// sleeping up to kMaxBackoffMs (30s). reconnect_enabled_.store(false) in the
+// destructor doesn't wake a thread already inside sleep_for(); the join()
+// blocks until that sleep elapses naturally. So the *actual* reconnect to the
+// next pool can be delayed by up to ~30s beyond the already-real ~31s backoff
+// before it even starts — observed directly on-device (slower, more loaded
+// hardware makes this far more visible than on a fast x86_64 sandbox). The
+// timeouts below are sized generously to absorb this; a tighter fix would
+// need reconnect_loop()'s sleep to be interruptible (e.g. a condition_variable
+// instead of sleep_for), which is a real design change beyond this
+// test-writing task's scope.
+
+void test_pool_failover() {
+    std::uint16_t first_port = 0;
+    int first_listen_fd = listen_on_ephemeral_port(first_port);
+
+    std::uint16_t good_port = 0;
+    int good_listen_fd = listen_on_ephemeral_port(good_port);
+
+    std::thread first_pool_server([&] {
+        // Accept once, complete a real handshake so the client is fully
+        // connected (starting its reader thread), then drop — this is what
+        // actually arms reconnect_loop(), unlike a refused-from-the-start pool.
+        int c = accept_one(first_listen_fd);
+        if (c < 0) return;
+        std::string line;
+        if (server_recv_line(c, line)) {
+            const auto id = armrx::json::get_raw(line, "id");
+            server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                                 "\"result\":{\"id\":\"sess0\"}}");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ::close(c); // drop mid-session — arms the reconnect_loop
+        ::close(first_listen_fd); // subsequent reconnect attempts fail fast (refused)
+    });
+
+    std::atomic<bool> good_pool_connected{false};
+    std::thread good_pool_server([&] {
+        // Generous: ~31s real backoff + up to ~30s stale-thread join block
+        // (see comment above) + handshake + on-device scheduling margin.
+        int c = accept_one(good_listen_fd, /*timeout_ms=*/150000);
+        if (c < 0) return; // test will fail via the wait_until below
+        std::string line;
+        bool got = server_recv_line(c, line);
+        if (!got) { ::close(c); return; }
+        const auto id = armrx::json::get_raw(line, "id");
+        server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                             "\"result\":{\"id\":\"sess1\"}}");
+        good_pool_connected.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        ::close(c);
+    });
+
+    std::vector<armrx::PoolConfig> pools = {
+        {"127.0.0.1", first_port, false},
+        {"127.0.0.1", good_port, false},
+    };
+    armrx::PoolManager mgr(pools, "test_wallet", "x");
+    mgr.connect(); // succeeds against the first pool
+
+    first_pool_server.join();
+
+    // Drive tick() roughly once per second, matching MinerApp's real usage
+    // pattern, until failover completes or a generous timeout elapses. See
+    // the stale-thread-join comment above for why this needs to be large.
+    bool failed_over = wait_until([&] {
+        mgr.tick();
+        return good_pool_connected.load();
+    }, std::chrono::seconds(150));
+
+    assert(failed_over);
+    assert(mgr.current_pool_name() == ("127.0.0.1:" + std::to_string(good_port)));
+
+    mgr.disconnect();
+    good_pool_server.join();
+    ::close(good_listen_fd);
+    std::cout << "[test_pool_protocol] test_pool_failover passed\n";
+}
+
+// ── Scenario 5: malformed/partial JSON from the server doesn't crash the
+//    client or wedge the reader thread — a subsequent valid message must
+//    still be processed correctly afterward. ──
+
+void test_malformed_input_robustness() {
+    std::uint16_t port = 0;
+    int listen_fd = listen_on_ephemeral_port(port);
+
+    std::thread server([&] {
+        int c = accept_one(listen_fd);
+        assert(c >= 0);
+        std::string line;
+        bool got = server_recv_line(c, line);
+        assert(got);
+        const auto id = armrx::json::get_raw(line, "id");
+        server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                             "\"result\":{\"id\":\"sess1\"}}");
+
+        // A grab-bag of hostile/malformed lines: unterminated string, stray
+        // braces, empty line, binary-ish junk with embedded quotes, huge
+        // nesting, truncated escape sequence.
+        server_send_line(c, "{\"method\":\"mining.notify\",\"params\":[\"unterminated");
+        server_send_line(c, "}}}}}}}}}}");
+        server_send_line(c, "");
+        server_send_line(c, "{\"method\":\"job\",\"params\":{\"blob\":\"\\");
+        server_send_line(c, std::string(2000, '{'));
+        server_send_line(c, "not json at all, just bytes \x01\x02\x03");
+
+        // Now a real, valid job notification — must still be processed.
+        server_send_line(c,
+            "{\"method\":\"job\",\"params\":{\"job_id\":\"recover1\",\"blob\":\"" +
+            kBlobHex + "\",\"target\":\"" + std::string(kTargetHex) + "\","
+            "\"seed_hash\":\"" + kSeedHex + "\"}}");
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        ::close(c);
+    });
+
+    armrx::StratumClient client("127.0.0.1", port, "test_wallet", "x");
+    std::mutex job_mutex;
+    armrx::Job received_job;
+    std::atomic<bool> job_received{false};
+    client.set_job_callback([&](const armrx::Job& j) {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        received_job = j;
+        job_received.store(true);
+    });
+
+    client.connect();
+    assert(client.is_connected());
+
+    bool ok = wait_until([&] { return job_received.load(); }, std::chrono::seconds(5));
+    assert(ok); // proves the reader thread survived the malformed-input barrage
+    {
+        std::lock_guard<std::mutex> lock(job_mutex);
+        assert(received_job.job_id == "recover1");
+    }
+    assert(client.is_connected()); // still healthy, not wedged
+
+    client.disconnect();
+    server.join();
+    ::close(listen_fd);
+    std::cout << "[test_pool_protocol] test_malformed_input_robustness passed\n";
+}
+
+} // namespace
+
+int main() {
+    armrx::log::set_level(armrx::log::Level::warn); // quiet the expected handshake-reject/reconnect noise
+
+    test_stratum_v1_full_flow_via_auto_fallback();
+    test_cryptonote_full_flow();
+    test_reconnect_backoff_exhaustion();
+    test_malformed_input_robustness();
+    test_pool_failover(); // slowest scenario (~30s real backoff) — run last
+
+    std::cout << "ALL POOL PROTOCOL TESTS PASSED SUCCESSFULLY!\n";
+    return 0;
+}
