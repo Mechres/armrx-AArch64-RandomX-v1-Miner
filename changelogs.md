@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-23 — MetricsExporter Data Race Fix + Test Coverage Gaps Closed (Found a Real `--config=` Bug)
+
+Closes PLAN.md Phase 4 items C and E.1/E.2:
+
+- **`MetricsExporter::server_fd_` data race fixed** (`include/armrx/metrics.hpp`): plain `int` written by the background server thread and read by the destructor on another thread with no synchronization, a real (if narrow) data race under the C++ memory model. Changed to `std::atomic<int>`. One-line, zero-risk fix; no new test added (the existing `-fsanitize=thread` build option is the tool to re-verify with if this area is revisited).
+- **New `tests/test_cli_parser.cpp`** (15 cases covering every flag family, malformed-value exit codes, `--version`/`--help`, unknown-argument handling, and config-file/CLI-override precedence) — `cli_parser.cpp` previously had zero automated tests. **Found a real, previously-unknown bug while writing it**: `--config=<path>` was consumed by the config pre-scan (to load defaults before CLI overrides) but never recognized in the main flag-parsing loop, so it always fell through to `"Unknown argument: --config=..."` and made the process exit with code 64 — the documented `--config=` flag was completely broken for any invocation using it. Confirmed against the actual built `armrx` binary before fixing (`./armrx --config=/tmp/x.json --help` exited 64 pre-fix, 0 post-fix). Fixed with an explicit `continue` on `--config=` in the main loop (`src/cli_parser.cpp`).
+- **New `tests/test_aes_hash.cpp`**: direct coverage for `fill_aes_1r_x4`/`fill_aes_4r_x4`/`hash_aes_1r_x4`/`hash_and_fill_aes_1r_x4` (`aes_hash.cpp`), previously only exercised indirectly via full end-to-end RandomX KAT hashes. Includes a golden-output pin for `fill_aes_1r_x4` (captured from the current KAT-verified-correct implementation) plus determinism/prefix-consistency/input-sensitivity checks, and — the main new coverage — a decomposition-equivalence check proving `hash_and_fill_aes_1r_x4`'s combined hash+fill pass produces byte-identical results to calling `hash_aes_1r_x4()`/`fill_aes_1r_x4()` separately on the same inputs, which is the actual contract that fused function exists to provide.
+- **Verified**: full `ctest` green locally (x86_64, 7/7 including the two new tests) and on-device (AArch64 JIT).
+
 ## 2026-07-23 — Two Phase 4 Correctness Fixes: Worker-Thread Death on Bad Nonce Job, Config Parse Crash
 
 Closes items A and B from `PLAN.md`'s Phase 4 fresh-codebase-inspection findings:

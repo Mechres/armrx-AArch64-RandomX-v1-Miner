@@ -48,16 +48,32 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
     `tests/test_config.cpp` (3 cases: malformed fields, valid fields, missing file).
 
 ### 2. Small hardening fix
-*   [ ] **`MetricsExporter::server_fd_` data race** (`include/armrx/metrics.hpp`) — plain
-    `int` written by the background thread, read by the destructor on another thread,
-    no synchronization. Change to `std::atomic<int>`.
+*   [x] ~~`MetricsExporter::server_fd_` data race~~ — **done (2026-07-23).**
+    `int server_fd_ = -1;` → `std::atomic<int> server_fd_{-1};`. No test added
+    (one-line, zero-risk fix per the original finding; not TSan-verified this
+    round, existing `-fsanitize=thread` build option covers it if ever re-checked).
 
-### 3. Test coverage (lower priority, no bugs found — just exposure)
-*   [ ] `cli_parser.cpp`/`miner_app.cpp` have zero automated unit tests.
-*   [ ] `fill_aes_1r_x4`/`fill_aes_4r_x4`/`hash_aes_1r_x4`/`hash_and_fill_aes_1r_x4`
-    (`aes_hash.cpp`) still only covered indirectly via end-to-end KAT hashes.
+### 3. Test coverage (lower priority — but found a real bug anyway)
+*   [x] ~~`cli_parser.cpp` unit tests~~ — **done (2026-07-23).** New
+    `tests/test_cli_parser.cpp` (15 cases: defaults, every flag family, malformed-value
+    exit codes, `--version`/`--help`, unknown-argument handling, config-file/CLI-override
+    precedence). **Found a real, previously-unknown bug while writing it**: `--config=<path>`
+    was consumed by the config pre-scan but never recognized in the main flag loop, so it
+    always fell through to "Unknown argument" and made the process `exit(64)` — i.e. the
+    documented `--config=` flag was completely broken. Confirmed against the built `armrx`
+    binary before fixing. Fixed by explicitly skipping `--config=` in the main loop
+    (`src/cli_parser.cpp`) since the pre-scan already consumed its value.
+    (`miner_app.cpp` remains untested — thin orchestration layer, lower value.)
+*   [x] ~~`fill_aes_1r_x4`/`fill_aes_4r_x4`/`hash_aes_1r_x4`/`hash_and_fill_aes_1r_x4`
+    direct tests~~ — **done (2026-07-23).** New `tests/test_aes_hash.cpp`: golden-output
+    pin for `fill_aes_1r_x4` (captured from the current KAT-verified implementation),
+    determinism + output-prefix-consistency checks for both fill functions, input-
+    sensitivity check for `hash_aes_1r_x4`, and — the main new coverage —
+    `hash_and_fill_aes_1r_x4`'s "combined" hash+fill in one pass is asserted to produce
+    byte-identical results to calling `hash_aes_1r_x4()`/`fill_aes_1r_x4()` separately on
+    the same inputs, pinning down the actual contract the fused function exists to provide.
 *   [ ] `tls_client.cpp`/`tui.cpp` remain fully untested (need a mock TLS server / a
-    terminal-capture harness respectively).
+    terminal-capture harness respectively) — not attempted this round, larger lift.
 
 ### 4. Open decision — not a bug, needs a call from the maintainer
 *   [ ] **JIT buffer W^X vs RWX default** (`src/virtual_memory.c`'s `setPagesRWX()`).
@@ -102,6 +118,9 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 ## Resolved Since Last Snapshot (2026-07-23)
 *   [x] `MiningEngine::worker_loop()` bad-nonce-job worker death — `active = false; return;` → `active = false; continue;`, regression test added.
 *   [x] `config.cpp` numeric config-file parsing crash — `try`/`catch` guards added around `workers`/`difficulty`/`seconds`/pool-port, matching `cli_parser.cpp`'s CLI-flag treatment, regression test added.
+*   [x] `MetricsExporter::server_fd_` data race — now `std::atomic<int>`.
+*   [x] `cli_parser.cpp` test coverage — new `tests/test_cli_parser.cpp`; found and fixed a real bug (`--config=` always exited with "Unknown argument", code 64).
+*   [x] `aes_hash.cpp` direct helper test coverage — new `tests/test_aes_hash.cpp` (golden pins + `hash_and_fill_aes_1r_x4` decomposition-equivalence check).
 *   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/argon2-neon-diagonal-vectorization.md`.
 *   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.

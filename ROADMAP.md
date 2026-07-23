@@ -147,16 +147,17 @@
 | Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/argon2-neon-diagonal-vectorization.md`) | ✅ |
 | `MiningEngine::worker_loop()` permanently killed a worker thread on a bad nonce offset/size — fixed (`active = false; continue;`), regression test added | ✅ |
 | `config.cpp` numeric config-file fields unguarded against parse failure — fixed (try/catch, matching `cli_parser.cpp`), regression test added | ✅ |
+| `MetricsExporter::server_fd_` data race (plain `int` across threads) — fixed (`std::atomic<int>`) | ✅ |
+| `cli_parser.cpp` test coverage added (`tests/test_cli_parser.cpp`) — found and fixed a real bug: `--config=` always exited with "Unknown argument" (code 64) | ✅ |
+| `aes_hash.cpp` direct helper test coverage added (`tests/test_aes_hash.cpp`) — golden pins + `hash_and_fill_aes_1r_x4` decomposition-equivalence check | ✅ |
 
 ---
 
 ## 🔴 Remaining — Action List
 
-### Correctness (found 2026-07-22, `PLAN.md` Phase 4 — remaining)
+### Correctness
 
-| # | Item | Site | Severity | Notes |
-|---|------|------|----------|-------|
-| — | `MetricsExporter::server_fd_` data race (plain `int` across threads) | `metrics.hpp` | 🟢 Low | One-line fix: `std::atomic<int>`. |
+_All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixed — see Completed table above._
 
 ### Performance
 
@@ -184,7 +185,7 @@
 | # | Item | Effort | Notes |
 |---|------|--------|-------|
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
-| — | Test coverage: `cli_parser.cpp`/`miner_app.cpp` (zero unit tests), direct `aes_hash.cpp` helper KATs, `tls_client.cpp`/`tui.cpp` | 🟡 Medium | See `PLAN.md` Phase 4 item E. |
+| — | Test coverage: `tls_client.cpp`/`tui.cpp` remain fully untested | 🟡 Medium | Need a mock TLS server / terminal-capture harness respectively. `cli_parser.cpp`/`aes_hash.cpp` gaps closed 2026-07-23 — see `PLAN.md` Phase 4 item E. |
 
 ---
 

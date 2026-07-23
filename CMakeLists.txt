@@ -189,6 +189,20 @@ if(ARMRX_BUILD_TESTS)
     target_compile_options(test_config PRIVATE -UNDEBUG)
     add_test(NAME test_config COMMAND test_config)
 
+    # cli_parser.cpp lives outside armrx_core (it's compiled directly into the
+    # armrx executable, see the add_executable(armrx ...) line below), so this
+    # test binary compiles it directly rather than linking a library that
+    # doesn't contain it.
+    add_executable(test_cli_parser tests/test_cli_parser.cpp src/cli_parser.cpp)
+    target_link_libraries(test_cli_parser PRIVATE armrx_core)
+    target_compile_options(test_cli_parser PRIVATE -UNDEBUG)
+    add_test(NAME test_cli_parser COMMAND test_cli_parser)
+
+    add_executable(test_aes_hash tests/test_aes_hash.cpp)
+    target_link_libraries(test_aes_hash PRIVATE armrx_core)
+    target_compile_options(test_aes_hash PRIVATE -UNDEBUG)
+    add_test(NAME test_aes_hash COMMAND test_aes_hash)
+
     # Mock Stratum protocol tests (PLAN.md §3.2) — loopback TCP, no hardware
     # dependency. test_pool_failover() dominates: ~31s real production
     # backoff timing plus up to ~30s more from a stale reconnect thread's
@@ -272,6 +286,8 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
         set_property(TARGET test_mining PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET bench_armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET test_config PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET test_cli_parser PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET test_aes_hash PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         if(ARMRX_HAVE_JIT)
             set_property(TARGET bench_opcodes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

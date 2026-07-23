@@ -42,6 +42,13 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view argument{argv[i]};
+        if (argument.rfind("--config=", 0) == 0) {
+            // Already consumed by the pre-scan above (config must be loaded
+            // before CLI overrides are applied); just skip it here so it
+            // doesn't fall through to "Unknown argument" below.
+            continue;
+        }
+
         if (argument.rfind("--mode=", 0) == 0) {
             const auto mode_text = argument.substr(7);
             if (mode_text == "auto") {

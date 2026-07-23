@@ -88,7 +88,7 @@ public:
 
 private:
     std::atomic<bool> running_{false};
-    int server_fd_ = -1;
+    std::atomic<int> server_fd_{-1};
     std::thread thread_;
 };
 
