@@ -224,9 +224,13 @@ prior work, so they're adopted here as tracked next steps (`NEXT_STEPS.md` §5a)
   no NEON at all — this is a genuinely untried technique, correctly flagged
   with the same "must be hashrate-vetoed on-device, not assumed" risk framing
   this session has used throughout.
-- `--stagger-ms` default claim — confirmed backed by real prior data
+- `--stagger-ms` default claim — the underlying memory-bus-contention data point
   (`changelogs.md` 2026-07-21 worker sweep, 25% per-worker efficiency drop
-  under 8-worker memory-bus contention).
+  under 8-worker contention) is real, but the audit's *proposed fix* (a
+  nonzero startup stagger might help) had already been tried and found
+  ineffective in an earlier session — see item 3's outcome below. A second
+  instance of "verify before trusting a claim," this time catching a doc the
+  audit itself apparently didn't check (`docs/archived/beyond-parity_v2.md`).
 - **One inaccuracy found and fixed**: the audit attributed the Newton-Raphson
   "−1.1% hashrate" figure to `ROADMAP.md` "Features", but that entry actually
   said "Failed once (segfault). Do not retry..." — describing an *earlier*,
@@ -298,6 +302,20 @@ independent of *which* NEON AES technique is tried. Kept (flag-gated, default
 OFF) rather than reverted — the implementation, its test coverage, and the
 derivation are reusable even though the performance didn't pan out here.
 Full account in `docs/neon-vector-permute-aes.md`.
+
+**Item 3 outcome (2026-07-23): already investigated in an earlier session,
+found ineffective — not re-tested.** Before spending on-device time,
+checked whether this exact experiment had already been run: it had.
+`docs/archived/beyond-parity_v2.md` documents startup stagger tried at 5,
+20, 100, and 1000ms on this same device — "+0% (tested, ineffective)... a
+hardware ceiling." RandomX touches the full 2 MiB scratchpad on *every*
+hash iteration, so a one-time launch-time delay can't desync steady-state
+memory-bus contention the way the audit's suggestion assumed; the 8-worker
+efficiency drop is single-channel LPDDR3 bandwidth saturation. Current
+default (`stagger_ms_ = 0`) left as-is, no change made. This finding predates
+this session's other work and was not re-verified against the current
+codebase — noted as a caveat, not re-run, given how mechanism-clear and
+hardware-fundamental the prior result is.
 
 ### Phase 3 (original, superseded — kept for reference)
 *   **Tasks:**

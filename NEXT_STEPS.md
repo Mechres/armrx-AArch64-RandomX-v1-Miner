@@ -213,12 +213,23 @@ actually re-measured on the current codebase — see below.
     derivation are reusable reference material even though the performance
     didn't pan out on this hardware. Full account, all verified constants,
     and the complete derivation in `docs/neon-vector-permute-aes.md`.
-*   [ ] **(Lower priority, quick experiment) `--stagger-ms` default.**
-    Currently defaults to 0 (`src/mining_engine.cpp:313`). A prior worker sweep
-    (`changelogs.md` 2026-07-21) found 8-worker saturation drops per-worker
-    efficiency 25% (4.25→3.18 H/s/worker) from shared-dataset memory-bus
-    contention — a small nonzero stagger might desync the memory-heavy phases
-    enough to help. Worth a 1-line on-device experiment, not a design change.
+*   [x] ~~`--stagger-ms` default~~ — **already investigated in an earlier
+    session, found ineffective (2026-07-23 re-check, not re-tested this
+    session).** `docs/archived/beyond-parity_v2.md` documents this exact
+    experiment already run on this device: startup stagger tried at 5, 20,
+    100, and 1000ms — **"+0% (tested, ineffective)... a hardware ceiling."**
+    RandomX's memory pressure is continuous (the full 2 MiB scratchpad is
+    touched every single hash iteration, not just at startup), so a one-time
+    launch-time delay can't desync steady-state phase alignment the way the
+    audit's suggestion assumed — the 8-worker efficiency drop is single-
+    channel LPDDR3 bandwidth saturation, not a fixable scheduling artifact.
+    Current default (`stagger_ms_ = 0`, `src/mining_engine.cpp:313`) is
+    correct as-is; no CMake/CLI change made. **Caveat**: this finding predates
+    this session's other changes (Argon2 diagonal-step, worker-thread fix,
+    etc.) and was *not* re-verified against the current codebase — flagged
+    here rather than assumed, in case a future re-check is warranted (same
+    lesson as PGO's stale-claim finding this session), but not treated as an
+    open action item given how strong and mechanism-clear the prior result is.
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.

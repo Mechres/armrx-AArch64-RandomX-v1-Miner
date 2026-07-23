@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-23 — `--stagger-ms` Lead Closed: Already Tested Previously, Found Ineffective
+
+Closes the third and final adopted lead from the external audit (`PLAN.md` Phase 5, `NEXT_STEPS.md` §5a) — without spending on-device time, since it turned out to be redundant with prior work:
+
+- Before running the suggested experiment, checked whether it had already been tried. It had: `docs/archived/beyond-parity_v2.md` documents startup stagger tested at 5, 20, 100, and 1000ms on this same device, with the explicit finding "+0% (tested, ineffective)... a hardware ceiling."
+- **Why it can't work**: RandomX's memory pressure is continuous — the full 2 MiB scratchpad is touched on *every* hash iteration, not just at startup — so a one-time launch-time delay can't desync steady-state phase alignment across 8 workers the way the audit's suggestion assumed. The 8-worker efficiency drop (25%, `changelogs.md` 2026-07-21) is single-channel LPDDR3 bandwidth saturation, a hardware ceiling, not a fixable scheduling artifact.
+- Left `stagger_ms_`'s default (0, `src/mining_engine.cpp:313`) unchanged. This finding predates this session's other work and was not re-verified against the current codebase — flagged as a caveat rather than treated as settled, but not re-run given how mechanism-clear and hardware-fundamental the prior result is.
+
 ## 2026-07-23 — NEON Vector-Permute AES: Derived, Exhaustively Verified, Measured as a Regression
 
 Implements adopted lead #2 from the external performance audit (`PLAN.md` Phase 5, `NEXT_STEPS.md` §5a):

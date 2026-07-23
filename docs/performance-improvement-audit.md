@@ -1,135 +1,112 @@
 # Performance Improvement Audit — armrx (AArch64 RandomX Miner)
 
-**Date:** 2026-07-23
+**Date:** 2026-07-23 (audit) — updated 2026-07-23 (after both leads were
+investigated on-device)
 **Audited by:** Hermes Agent (code review pass)
 **Scope:** Hot-path review for performance improvement opportunities.
-**Constraint:** Audit host is x86_64; the AArch64 JIT (98% of hash time) cannot
-execute off-device. JIT-only claims must be measured on the dev box
-(192.168.10.156). The software-AES path runs everywhere and was benchmarked
-directly on the audit host.
+**Constraint:** Original audit host was x86_64; the AArch64 JIT (98% of hash
+time) cannot execute off-device. JIT-only claims must be measured on the dev
+box (192.168.10.156). The software-AES path runs everywhere and was
+benchmarked directly on the audit host.
 
 ---
 
-## TL;DR
+## STATUS — both substantive leads were investigated on-device; both are now KNOWN NON-WINS against current code
 
-The codebase is already heavily optimized (LTO/IPO, PGO plumbing, huge pages,
-NEON Argon2, instruction scheduling, big.LITTLE pinning). The single biggest
-remaining lever is **already implemented but not shipped**: PGO is plumbed into
-CMake but the automated devbox build does not use it, even though it is worth
-**+19.3% single-thread hashrate** (4.34 → 5.18 H/s). The top *code* change not
-yet tried is **NEON-vectorizing the software T-table AES** (the dominant
-init/finalize cost) — distinct from the hardware `AESE`/`AESD` paths that were
-correctly rejected.
+This audit proposed two substantive performance leads. A follow-up agent
+("Claude") adopted both into `PLAN.md` Phase 5 / `NEXT_STEPS.md` §5a and
+investigated them honestly on real hardware. **Neither is a win on the
+current codebase.** The audit's headline framing ("PGO = +19.3%, single
+biggest lever") is now DISPROVEN. Record, so the next session does not repeat
+either as a live opportunity:
 
----
+1. **PGO (was "headline / single biggest lever, +19.3%")** — `devbox_pgo_build`
+   was added and measured apples-to-apples: **4.27 H/s single-thread with PGO,
+   4.27 H/s without** (two training durations, 15s and 90s, to rule out
+   under-training). The +19.3% figure came from a 2026-07-21 measurement and is
+   **stale**: substantial hot-path code changed since (Argon2 diagonal-step
+   vectorization, the JIT startup log line, several correctness fixes), shifting
+   the code shape PGO's compile-time decisions were tuned against. Do NOT repeat
+   the "+19.3%" claim without re-measuring against current code — and current
+   code shows no payoff.
 
-## Headline Finding — PGO is built but not shipped
+2. **NEON `vtbl` software-AES (was "Tier-2, untried")** — Derived a full
+   tower-field S-box from scratch, verified 256/256 SubBytes/InvSubBytes + 20,000
+   random full-round parity trials against the scalar path (KATs green, 12/12
+   on-device), flag-gated behind `ARMRX_ENABLE_NEON_AES` (default OFF). Measured:
+   **~19.4% REGRESSION** on `fill_aes_1r_x4`/`hash_aes_1r_x4`. Same root cause as
+   the earlier hardware-`AESE`/`AESD` rejection: per-block NEON load/store
+   overhead cancels the lookup savings on Cortex-A53. This is the *same class of
+   failure* as the 2026-07-20 hardware-AES attempt, confirming a durable
+   hardware fact: **NEON does not help this workload's AES on this core.** Treat
+   any future "vectorize the AES" suggestion as a likely regression until proven
+   otherwise with a benchmark.
 
-PGO is plumbed into CMake via `-DARMRX_PGO=GENERATE|USE`
-(`CMakeLists.txt:26,118-128`), and the changelog shows it is worth
-**+19.3%** single-thread (4.34 → 5.18 H/s) and **+15%** at 8 threads
-(25.28 H/s, NEXT_STEPS.md telemetry table).
-
-But the automated build does NOT use it:
-
-- `tools/devbox/devbox_mcp.py:56`
-  ```python
-  "build_flags": ["-DARMRX_ENABLE_NATIVE=ON", "-DARMRX_BUILD_TESTS=ON"],
-  ```
-- `README.md:21` advertises "PGO Enabled"
-- `README.md:39` lists "Light mode JIT | 1 | 5.18 H/s" — the PGO number
-
-The README advertises 5.18 H/s (the PGO result) while `devbox_build` produces
-the 4.34 H/s non-PGO binary. The two-stage generate → train → use cycle is
-never wired into the devbox flow, so the advertised number is not what a
-default build yields.
-
-**Verified end-to-end on the audit host (GCC 16.1):**
-PGO `GENERATE` built clean, trained via `armrx --help`/`--jit-dump`, and PGO
-`USE` linked cleanly (`-fprofile-generate`/`use` confirmed in compile + link
-commands, `.gcda` profile data emitted). The mechanism works; only the build
-wiring is missing.
-
-**Fix:** Pure build wiring — add a `devbox_pgo_build` flow (generate on-device
-with a representative workload, e.g. `armrx --mine --seconds=30`, then `USE`),
-or at minimum document the two-stage release build. Zero code change, ~+19%
-hashrate.
-
-**Risk:** None to correctness (rebuild only); KATs already gate the flow.
+The genuinely productive output of the follow-up was fixing a real, pre-existing
+bug in the devbox tooling itself (see "What was actually fixed" below), not a
+performance gain.
 
 ---
 
-## Tier 2 — Highest-value on-device experiment not yet tried
+## What was actually fixed (the one concrete win from this audit)
 
-### NEON-vectorize the software T-table AES (dominant init/finalize cost)
-
-The repo tried the **hardware** `AESE`/`AESD` instructions and dismissed all
-NEON AES as "zero benefit" (changelogs.md, 2026-07-20). That was the hardware
-instruction only (wrong round-ordering vs the RandomX AES spec). It never tried
-`vtbl`/`vqtbl1q`-based vectorization of the **software** T-table path — the
-standard technique (process 4 columns × 16 bytes via 16-byte table lookups, the
-mbedTLS / Android OpenSSL approach).
-
-**Why it matters — the cost is real and measured:**
-
-The software AES in `include/armrx/aes.hpp`
-(`encrypt_transform`/`decrypt_transform`) — 16 byte-indexed table lookups + XORs
-per round — is the inner loop of:
-- `fill_aes_1r_x4` (`init_scratchpad`) — ~12.35% of full hash on A53
-- `hash_aes_1r_x4` (`get_final_result`) — ~9.30% of full hash on A53
-  (NEXT_STEPS.md telemetry table)
-
-**Benchmarked locally on the audit host (interpreted path, identical code):**
-```
-fill_aes_1r_x4 (2 MiB)    515.66 μs
-hash_aes_1r_x4  (2 MiB)  1159.15 μs
-```
-AES scratchpad work dominates init/finalize and is a regular byte-lookup
-workload that Cortex-A53's NEON `vtbl`/`vqtbl1q` is specifically good at.
-
-**Recommended shape:**
-- New NEON `vtbl` path guarded by `__aarch64__` + a KAT-gated CMake flag.
-- Scalar T-table path untouched (x86_64 + interpreter stay correct).
-- The v2 AES mix block in `src/jit_compiler_a64_static.S:392` is a separate
-  hardware-`AESE` block — keep as-is; this proposal does not touch the JIT's
-  hardware path.
-- Prototype + benchmark on the **interpreted path first** (KAT parity + speedup
-  number) before any JIT integration.
-
-**Risk:** Must be hashrate-vetoed on-device. Possible that per-block NEON
-load/store overhead cancels the lookup speedup on A53 (this is exactly why the
-earlier hardware-AES attempt was reverted) — which is why it must be measured,
-not assumed.
+The follow-up found and fixed a real bug while validating `devbox_pgo_build`:
+`_stash_and_run`, `tool_status`, and `tool_test` were `shlex.quote()`-ing paths
+built from `cfg.remote_dir` (`"~/armrx"`), which single-quotes the string and
+silently defeats shell tilde expansion. Every build/test/bench log was landing
+in a disconnected literal `~` directory; `devbox_status`'s deployed-revision
+check was permanently reading from that wrong location (always reporting no sync
+had happened). Fixed by interpolating `remote_dir`-derived paths unquoted.
+(`changelogs.md` 2026-07-23 "PGO Devbox Wiring" entry.) This is worth keeping
+independent of the PGO payoff.
 
 ---
 
-## Tier 3 — Smaller / uncertain / tuning knobs
+## Where the audit was right (still valid)
+
+- The codebase is already heavily optimized. The JIT-execution path (98% of
+  hash time) and the init/finalize software-AES cost are real and measured
+  (benchmarked on x86_64: `fill_aes_1r_x4` 515 μs, `hash_aes_1r_x4` 1159 μs;
+  region-attribution telemetry: ~12.35% init + ~9.30% finalize on A53).
+- The "do not re-touch" list (LTO/IPO, Argon2 NEON, huge pages, template-copy
+  elimination, worker-thread dataset reuse, big.LITTLE pinning, CBRANCH closed,
+  hardware-AESE rejected) remains correct.
+
+## Where the audit was WRONG (corrected above)
+
+- PGO is NOT a +19.3% lever on current code.
+- NEON software-AES is NOT an untried win — it is a confirmed ~19.4% regression.
+
+---
+
+## Updated recommendations (what is actually worth doing next)
+
+Given PGO and NEON-AES are both exhausted, the only remaining code-level lever
+the project itself has flagged is:
 
 - **Peephole JIT coalescing** (`ROADMAP.md` "P3"; `docs/peephole-jit-plan.md`):
-  documented −5–10%, but the plan itself says to "re-evaluate this estimate"
-  because it was framed against the old 31% branch-miss baseline that has since
-  been shown to NOT represent the hot path (isolated hot path is 2.4%). 3–6 week
-  clean-room effort against XMRig's disassembly; high effort, uncertain payoff.
-  Only after Tier 1 / Tier 2 land.
+  documented −5–10%, but the plan itself says to re-evaluate because it was
+  framed against the old 31% branch-miss baseline that does NOT represent the
+  hot path (isolated hot path is 2.4%). 3–6 week clean-room effort against
+  XMRig's disassembly; high effort, uncertain payoff. Hashrate-vetoed on-device.
 
-- **`--stagger-ms` default** (`src/mining_engine.cpp:313`): exists but defaults
-  to 0. The worker sweep (changelogs.md, 2026-07-21) showed memory-bus
-  contention drops little-core efficiency under 8-worker saturation; a small
-  stagger desyncs the memory-heavy phases. Worth a 1-line default experiment
-  on-device.
+Lower-risk, non-JIT tuning knobs (measure on-device, not assumptions):
+- `--stagger-ms` default experiment (memory-bus contention under 8-worker
+  saturation; currently defaults to 0).
+- Re-confirm the 33% instruction-count gap vs XMRig is still the real delta and
+  re-derive which opcodes dominate it with current `bench_opcodes` data.
 
-- **`ARMRX_FAST_MATH` (`-Ofast`)** and **`ARMRX_ENABLE_JIT_FAST_DIV_SQRT`**:
-  both correctly OFF. `-Ofast` rewrites IEEE FP semantics and would break
-  RandomX KATs. Newton-Raphson FDIV/FSQRT measured **−1.1% hashrate** (frozen,
-  ROADMAP.md "Features"). Leave both OFF. Do NOT enable.
+Do NOT enable: `ARMRX_FAST_MATH` (`-Ofast`, breaks FP KATs) or
+`ARMRX_ENABLE_JIT_FAST_DIV_SQRT` (Newton-Raphson, −1.1% hashrate, frozen).
 
 ---
 
-## Already Done — do not re-touch
+## Already done — do not re-touch
 
 Closed-out optimizations confirmed in changelogs.md / ROADMAP.md:
-- Argon2 NEON G-function + diagonal-step vectorization (26.8% fewer
-  instructions, 19.0% fewer cycles for cache init).
+- Argon2 NEON G-function + diagonal-step vectorization (26.8% fewer instructions,
+  19.0% fewer cycles for cache init — seed-key-rotation latency, not steady-state
+  hashrate).
 - Huge-page tiers (dataset `MAP_HUGETLB`, cache, 2 MiB scratchpad +
   `MADV_POPULATE_WRITE`).
 - Template-copy elimination from per-hash path; Superscalar heap-churn kill.
@@ -137,39 +114,29 @@ Closed-out optimizations confirmed in changelogs.md / ROADMAP.md:
 - big.LITTLE-aware scheduling + hwloc CPU pinning.
 - Prefetch hint tuning; interleaved JIT FP loads; register-offset FP loads.
 - LTO/IPO; rounding-mode cache; alignas(16) RegisterFile.
-- CBRANCH: **closed** — 2.4% hot-path branch-miss rate, not a real lever
-  (the 31.08% aggregate figure came from a non-representative benchmark
-  section).
-- NEON `AESE`/`AESD` hardware AES: correctly rejected (incompatible round
-  order vs RandomX spec).
+- CBRANCH: **closed** — 2.4% hot-path branch-miss rate, not a real lever.
+- NEON `AESE`/`AESD` hardware AES AND NEON `vtbl` software-AES: **both rejected**
+  (wrong round order / per-block load-store overhead cancels win on Cortex-A53).
+- PGO: plumbed + `devbox_pgo_build` available, but **measured 0% payoff on current
+  code** — keep off by default.
 
 ---
 
-## Verification evidence (audit host, x86_64)
+## Verification evidence
 
-- `cmake -S . -B build -DARMRX_BUILD_TESTS=ON` + `cmake --build build -j`:
-  clean (LTO/IPO enabled, hwloc found).
-- `./build/bench_armrx --micro-only`: AES fill 515 μs, AES hash 1159 μs
-  (confirms init/finalize software-AES cost).
-- `./build/armrx_tests`: KAT suite green (both interpreted inputs).
-- PGO GENERATE → train → USE: links cleanly, `-fprofile-generate`/`use`
-  present in compile and link commands, `.gcda` emitted.
+Original audit host (x86_64):
+- `cmake -S . -B build -DARMRX_BUILD_TESTS=ON` + `cmake --build build -j`: clean.
+- `./build/bench_armrx --micro-only`: AES fill 515 μs, AES hash 1159 μs.
+- `./build/armrx_tests`: KAT suite green.
+- PGO GENERATE → train → USE: links cleanly, `.gcda` emitted (mechanism works;
+  the 0% payoff is a runtime/code-shape fact, not a build failure).
 
-## What was NOT verified here (requires the AArch64 dev box)
+On-device (Cortex-A53) — from follow-up investigation:
+- PGO USE vs non-PGO: 4.27 H/s vs 4.27 H/s (15s and 90s training).
+- NEON `vtbl` software-AES: ~19.4% regression on `fill_aes_1r_x4`/`hash_aes_1r_x4`.
+- Full `ctest` 12/12 green with `ARMRX_ENABLE_NEON_AES=ON`.
+
+## What was NOT verified (requires the AArch64 dev box)
 
 - Any JIT-execution hashrate claim (JIT excluded on x86_64).
-- On-device PGO hashrate delta (the +19.3% is from changelogs.md telemetry,
-  reproduced on the A53).
-- NEON software-AES speedup on Cortex-A53 (must be benchmarked on-device).
-
----
-
-## Suggested next actions (for the next engineer)
-
-1. **PGO into devbox release flow** — CMake + `devbox_mcp.py` two-stage
-   generate/train/use, plus a one-line README clarification that 5.18 H/s is
-   the PGO build. ~+19% hashrate, zero code risk.
-2. **Prototype NEON `vtbl` software-AES** in `include/armrx/aes.hpp` behind a
-   KAT-gated flag; benchmark the interpreted path here for parity + speedup,
-   then gate on-device hashrate before JIT integration.
-3. (Optional) `devbox_pgo_build` + a `--stagger-ms` default experiment.
+- Peephole JIT coalescing payoff (3–6 week effort, not yet started).
