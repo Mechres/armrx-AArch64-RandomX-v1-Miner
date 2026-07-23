@@ -1,4 +1,4 @@
-# Argon2Block Copy Elimination in argon2_compress() — Tried, Measured, Reverted
+# Argon2 Performance Backlog Closeout — Copy Elimination (Reverted) + Driver-Code Attribution
 
 ## Problem
 
@@ -104,12 +104,49 @@ Same standard applied to the CBRANCH/CSEL investigation: implement, measure
 honestly, keep only if it's a real improvement. This one wasn't — cycles and
 wall-clock came out flat-to-worse despite fewer instructions, so the change
 was reverted (`git checkout -- src/argon2.cpp`, back to the diagonal-step-fix
-state). **Lesson for future attempts on this same lead:** eliminating an
-explicit `memcpy()` call doesn't automatically save cycles if the replacement
-code ends up doing materially the same memory traffic by hand — glibc's
-`memcpy` on this Cortex-A53 is already close to as fast as a naive manual
-copy for a 1024-byte block, so the actual 23.17%-attributed-to-
-`Argon2dCache::initialize`'s-own-code lead remains open; the next attempt
-should profile *what specifically* that driver code is spending cycles on
-(e.g. the per-block address/reference computation math, not just the copy)
-before assuming copy volume is the bottleneck.
+state). **Lesson learned:** eliminating an explicit `memcpy()` call doesn't
+automatically save cycles if the replacement code ends up doing materially
+the same memory traffic by hand — glibc's `memcpy` on this Cortex-A53 is
+already close to as fast as a naive manual copy for a 1024-byte block.
+
+## Follow-up: what *is* `Argon2dCache::initialize`'s own 23-25%? (2026-07-23)
+
+Rebuilt `bench_armrx` with `-g` added (same `-O3`/optimization flags,
+just debug symbols) in a separate `build_profile` directory so `perf annotate`
+could attribute cycles to individual instructions within
+`Argon2dCache::initialize`'s disassembly, not just the function as a whole.
+
+**Finding: it's not separate driver overhead at all.** Of ~3600 sampled
+instructions inside the function, 3315 (92%) carry ≈0% attributed cost. The
+actual per-block address/reference computation (`j1`, `square = j1*j1`,
+`x`, `y`, `relative`, `reference` — the `umull`/`add`/`sub`/`lsr` scalar
+arithmetic) tops out at 0.16% per instruction, negligible in aggregate.
+**Every hot instruction is a NEON `eor v.16b` (vector XOR), `ldr q`/`str q`/
+`ldur q`/`stur q` (128-bit load/store)** — the top offender alone (`eor
+v1.16b, v5.16b, v27.16b`) is 9.90% of *all* cycles in the entire benchmark.
+
+This is `argon2_compress()`'s own XOR-combine math — `result[i] =
+previous[i] ^ reference[i]`, then `result[i] ^= permuted[i]` (and `^=
+(*destination)[i]` for pass > 0), three full 1024-byte XOR passes per block
+— auto-vectorized by GCC into 128-bit NEON operations and **inlined directly
+into `Argon2dCache::initialize`'s body** (small function, simple non-
+recursive loop call site, comfortably within GCC's inlining threshold at
+`-O3`). It shows up under `initialize`'s symbol name only because of that
+inlining decision, not because there's a distinct, fixable inefficiency in
+the driver loop itself. `permute_block_neon`/`permute_16_neon` remain
+separate, non-inlined symbols (58.88% + 6.76% of the same profile) — GCC
+inlined one level (`argon2_compress` into `initialize`) but not two
+(`permute_block_neon` into the now-inlined `argon2_compress`).
+
+**Conclusion: this is inherent, unavoidable compression work, already
+compiler-vectorized — not a bug or missed optimization.** The XORs are
+required by the Argon2d spec and can't be eliminated; the compiler is
+already doing them as efficiently as a straightforward NEON codegen allows.
+**This closes out the Argon2 performance backlog** (`NEXT_STEPS.md` §5,
+`PLAN.md` Phase 3 item C) — there is no remaining actionable lead from the
+original profiling pass. Any further Argon2 speedup would require either a
+fundamentally different memory-traffic strategy (e.g. restructuring how
+blocks are laid out to improve cache behavior — unexplored, higher risk,
+no evidence yet that cache behavior is even the constraint here given the
+0.3% cache-miss rate measured earlier) or accepting diminishing returns on
+this function.

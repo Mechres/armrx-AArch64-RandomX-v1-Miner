@@ -108,15 +108,19 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
     fast as the hand-rolled replacement on this hardware. Reverted
     (`git checkout -- src/argon2.cpp`). Full account in
     `docs/argon2-compress-copy-elimination.md`.
-*   [ ] **`Argon2dCache::initialize`'s own driver-code cycle share (23.17%
-    of the original profile) remains open.** The copy-elimination attempt
-    above ruled out `memcpy`/copy volume as the explanation. Next attempt
-    should profile *what specifically* the per-block driver loop (address/
-    reference-block computation: `j1`, `square`, `x`, `y`, `relative`,
-    `reference` in `Argon2dCache::initialize`'s main loop) is spending cycles
-    on, rather than assuming copy volume is the bottleneck — same profile-
-    first discipline (multi-event `perf stat`, symbol attribution, apples-to-
-    apples before/after) that worked for the diagonal-step fix.
+*   [x] ~~`Argon2dCache::initialize`'s own driver-code cycle share (23.17%
+    of the original profile)~~ — **investigated and closed (2026-07-23), no
+    action needed.** `perf annotate` (debug-symbol rebuild, instruction-level
+    attribution) found this isn't separate driver overhead: 92% of sampled
+    instructions in the function cost ≈0%, including the actual address/
+    reference-computation arithmetic (`j1`, `square`, `x`, `y`, `relative`,
+    `reference`). Every hot instruction is a NEON `eor`/`ldr q`/`str q` —
+    `argon2_compress()`'s own XOR-combine loops, auto-vectorized and inlined
+    directly into `initialize`'s body by the compiler. It's inherent,
+    spec-required compression work, already well-optimized — not a bug or
+    missed optimization. **This closes out the Argon2 performance backlog**;
+    no further actionable lead from the original profiling pass. Full account
+    in `docs/argon2-compress-copy-elimination.md`.
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.
