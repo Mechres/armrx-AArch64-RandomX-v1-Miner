@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy this file to devbox.json (gitignored) and fill in your device. devbox.json is NOT committed.",
+
+  "host": "192.168.1.50",
+  "user": "mech",
+  "port": 22,
+  "remote_dir": "~/armrx",
+
+  "_ssh_note": "Leave ssh_key null to use the ssh default (~/.ssh/id_* or ssh-agent). Set it to override. ssh_password is only used if set (via sshpass -e); key auth is strongly preferred since the MCP process can't prompt for a passphrase.",
+  "ssh_key": null,
+  "ssh_password": null,
+
+  "build_flags": ["-DARMRX_ENABLE_NATIVE=ON", "-DARMRX_BUILD_TESTS=ON"],
+
+  "timeout_s": {
+    "default": 120,
+    "build": 1800,
+    "bench": 600
+  },
+
+  "_guard_note": "When true, devbox_shell blocks a small catastrophic set (reboot/dd-to-device/mkfs/fork-bomb/rm -rf /). All normal dev commands are unrestricted. Set false only if you understand the risk.",
+  "destructive_guard": true
+}

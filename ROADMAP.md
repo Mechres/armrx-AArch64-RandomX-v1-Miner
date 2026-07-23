@@ -146,6 +146,7 @@
 | CBRANCH investigation: CSEL implemented, measured, reverted (net regression); root-caused the 31.08% branch-miss figure to a non-representative benchmark section | ✅ |
 | Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/argon2-neon-diagonal-vectorization.md`) | ✅ |
 | Argon2 `memcpy`/copy-elimination investigation: implemented, measured, reverted (no net win — cost relocated, didn't disappear) + follow-up `perf annotate` closed out the remaining "driver code" lead as inherent, already-vectorized XOR-combine work, not a bug (`docs/argon2-compress-copy-elimination.md`) | ✅ |
+| `devbox_pgo_build` tool added (GENERATE→train→USE orchestration) + fixed a real pre-existing devbox-tooling bug (tilde-expansion defeated by `shlex.quote()`, silently breaking log stashing and `devbox_status`'s revision check) — but the claimed +19.3% PGO payoff does **not** reproduce on the current codebase (measured identical 4.27 H/s PGO vs non-PGO, apples-to-apples) | ✅ |
 | `MiningEngine::worker_loop()` permanently killed a worker thread on a bad nonce offset/size — fixed (`active = false; continue;`), regression test added | ✅ |
 | `config.cpp` numeric config-file fields unguarded against parse failure — fixed (try/catch, matching `cli_parser.cpp`), regression test added | ✅ |
 | `MetricsExporter::server_fd_` data race (plain `int` across threads) — fixed (`std::atomic<int>`) | ✅ |

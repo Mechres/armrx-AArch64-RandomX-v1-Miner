@@ -127,23 +127,61 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 An untracked audit doc (`docs/performance-improvement-audit.md`, written by another
 agent) proposed several leads. Each claim was independently fact-checked against
 the actual codebase/history before being added here — one citation error was
-found and corrected (see the Newton-Raphson `ROADMAP.md` fix, same date), but the
-two substantive recommendations below checked out as accurate and non-redundant
-with prior work.
+found and corrected (see the Newton-Raphson `ROADMAP.md` fix, same date), and
+both substantive recommendations were genuinely non-redundant with prior work
+(confirmed before implementing either). PGO's *wiring gap* claim checked out
+exactly as described; its *payoff* claim (+19.3%) turned out to be stale once
+actually re-measured on the current codebase — see below.
 
-*   [ ] **PGO is plumbed into CMake but not used by the default devbox build.**
-    `tools/devbox/devbox_mcp.py:56`'s default `build_flags` is
-    `["-DARMRX_ENABLE_NATIVE=ON", "-DARMRX_BUILD_TESTS=ON"]` — no `ARMRX_PGO`.
-    Verified: this is worth **+19.3% single-thread / +14.9% at 8 threads**
-    (4.34→5.18 H/s / ~22.0→25.28 H/s, matching this file's own telemetry table
-    above), and `README.md` advertises the PGO numbers as if they were the
-    default build's output. `devbox_build`'s `extra_flags` param **can** already
-    pass `-DARMRX_PGO=USE` per-invocation (so this isn't a capability gap, just
-    a default/automation gap) — there's no orchestrated generate→train→use flow.
-    **Fix:** add a `devbox_pgo_build` flow (GENERATE, train via a representative
-    workload e.g. `armrx --mine --seconds=30`, then USE), or at minimum document
-    the two-stage release build and clarify in `README.md` that 5.18 H/s requires
-    it. Zero code risk — rebuild-only, KATs already gate the flow.
+*   [x] ~~PGO devbox wiring~~ — **tool built and shipped (2026-07-23); the
+    claimed +19.3% does NOT reproduce on the current codebase, measured
+    honestly.** Added `devbox_pgo_build` (`tools/devbox/devbox_mcp.py`):
+    orchestrates GENERATE (clean rebuild) → train (`armrx --mine --seconds=N`,
+    sustained light-mode JIT mining per `docs/performance-next-agent-handoff.md`
+    §10.3) → USE (reconfigure + rebuild consuming the collected `.gcda` profile
+    data), all in one call. Verified end-to-end multiple times: KATs pass,
+    `-fprofile-use -fno-lto` genuinely present in `armrx`'s link command, real
+    non-empty `.gcda` files produced and consumed.
+
+    **While validating it, found and fixed a real, pre-existing bug** in the
+    devbox tooling itself: `_stash_and_run`/`tool_status`/`tool_test` were
+    `shlex.quote()`-ing paths built from `cfg.remote_dir`, which single-quotes
+    the string and — since this project's own `remote_dir` config is
+    `"~/armrx"` — silently defeats shell tilde-expansion. This caused every
+    `devbox_build`/`test`/`bench` log to be written to a disconnected, literal
+    `~` directory instead of inside the real repo tree, and made
+    `devbox_status`'s deployed-revision check permanently read `.devbox-revision`
+    from that same bogus location (always reporting no sync had happened, even
+    right after a real one). Confirmed this had been silently active across
+    earlier sessions too (found stale logs from unrelated prior runs sitting in
+    the bogus directory). Fixed by interpolating `remote_dir`-derived paths
+    unquoted (matching how `tool_build`'s own commands already did it
+    correctly) — trusted config-file input, not attacker-controlled, so this is
+    safe. Verified fixed: `devbox_status`'s "deployed" now correctly matches
+    local HEAD; logs land at and are read from the real path.
+
+    **However — measured honestly, apples-to-apples, on THIS codebase's
+    current state, PGO shows no benefit**: a fresh non-PGO build and the
+    `devbox_pgo_build`-produced PGO build (two different `train_seconds`
+    values tried, 15s and 90s, to rule out an under-trained profile) both
+    measured **identical 4.27 H/s** single-thread steady-state (`armrx --mine
+    --seconds=60 --workers=1`), not the historically-claimed 5.18 H/s.
+    `perf stat` on `--micro-only` even showed the PGO build very slightly
+    *worse* (+4.6% instructions, +1.7% cycles) on unrelated microbenchmarks.
+    `.gcda` files were confirmed non-empty and genuinely consumed (real
+    profile data, not an artifact of a broken flow). **Most likely
+    explanation**: a great deal of hot-path code has changed since the
+    2026-07-21 measurement that produced +19.3% (Argon2 diagonal-step
+    vectorization, the JIT startup log line, several correctness fixes,
+    CBRANCH investigation) — the code shape PGO's inlining/branch-prediction
+    decisions were tuned against back then no longer matches today's binary.
+    **The tool is kept** (mechanically correct, useful for future
+    re-evaluation or if a future change reopens a real PGO opportunity), but
+    the "+19.3%, single biggest lever" framing from the external audit is
+    **stale and should not be repeated** without re-measuring on the then-
+    current codebase. `README.md`'s 5.18 H/s figure was not touched — that
+    would need its own honest re-measurement, not assumed from this old number
+    either.
 *   [ ] **Prototype NEON `vtbl`/`vqtbl1q`-vectorized software T-table AES.**
     Distinct from the two previously-tried-and-reverted approaches (hardware
     `AESE`/`AESD`/`AESMC` crypto-extension instructions, wrong round order vs

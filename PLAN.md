@@ -247,6 +247,35 @@ prior work, so they're adopted here as tracked next steps (`NEXT_STEPS.md` §5a)
    session (CBRANCH/CSEL, Argon2 diagonal-step, Argon2 copy-elimination).
 3. (Lower priority) a quick on-device `--stagger-ms` default experiment.
 
+**Item 1 outcome (2026-07-23): tool shipped, payoff claim did NOT reproduce.**
+Added `devbox_pgo_build` (`tools/devbox/devbox_mcp.py`) — a genuine, mechanically
+verified GENERATE→train→USE orchestration. While validating it, found and fixed
+a real, pre-existing bug affecting the *entire* devbox toolchain: `shlex.quote()`
+was being applied to paths built from `cfg.remote_dir`, which single-quotes the
+string and defeats tilde expansion — since this project's actual config uses
+`remote_dir: "~/armrx"`, every `devbox_build`/`test`/`bench` log silently landed
+in a disconnected literal `~` directory, and `devbox_status`'s deployed-revision
+check permanently read from that same wrong location (confirmed stale logs from
+unrelated *prior* sessions sitting there — this had been silently broken for a
+while, not something introduced by this PGO work). Fixed by interpolating those
+paths unquoted, matching the convention `tool_build`'s own commands already
+used correctly.
+
+**However**, measured honestly and apples-to-apples (two training durations
+tried, 15s and 90s, non-PGO and PGO builds both freshly built, same device,
+back-to-back): both measured **identical 4.27 H/s** single-thread steady-state
+— not the historically-claimed 5.18 H/s. `.gcda` profile data was confirmed
+real and non-empty, `-fprofile-use` confirmed present in `armrx`'s actual link
+command, KATs passed on every build. This isn't a broken PGO flow — it's a
+genuinely-reproduced null result on the *current* codebase. Most likely
+explanation: substantial hot-path code has changed since the 2026-07-21
+measurement that produced +19.3% (Argon2 diagonal-step vectorization, the JIT
+startup log line, several correctness fixes), shifting the code shape PGO's
+compile-time decisions were tuned against. **The tool is kept** for future
+re-evaluation, but the audit's "+19.3%, single biggest lever" framing should
+not be repeated without re-measuring against whatever the codebase looks like
+at the time.
+
 ### Phase 3 (original, superseded — kept for reference)
 *   **Tasks:**
     1. Deploy QEMU AArch64 container environments on GitHub Actions CI (§4.1).
