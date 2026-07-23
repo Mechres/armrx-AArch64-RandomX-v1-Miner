@@ -122,6 +122,52 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
     no further actionable lead from the original profiling pass. Full account
     in `docs/argon2-compress-copy-elimination.md`.
 
+### 5a. Performance — new leads from external audit (`docs/performance-improvement-audit.md`, 2026-07-23)
+
+An untracked audit doc (`docs/performance-improvement-audit.md`, written by another
+agent) proposed several leads. Each claim was independently fact-checked against
+the actual codebase/history before being added here — one citation error was
+found and corrected (see the Newton-Raphson `ROADMAP.md` fix, same date), but the
+two substantive recommendations below checked out as accurate and non-redundant
+with prior work.
+
+*   [ ] **PGO is plumbed into CMake but not used by the default devbox build.**
+    `tools/devbox/devbox_mcp.py:56`'s default `build_flags` is
+    `["-DARMRX_ENABLE_NATIVE=ON", "-DARMRX_BUILD_TESTS=ON"]` — no `ARMRX_PGO`.
+    Verified: this is worth **+19.3% single-thread / +14.9% at 8 threads**
+    (4.34→5.18 H/s / ~22.0→25.28 H/s, matching this file's own telemetry table
+    above), and `README.md` advertises the PGO numbers as if they were the
+    default build's output. `devbox_build`'s `extra_flags` param **can** already
+    pass `-DARMRX_PGO=USE` per-invocation (so this isn't a capability gap, just
+    a default/automation gap) — there's no orchestrated generate→train→use flow.
+    **Fix:** add a `devbox_pgo_build` flow (GENERATE, train via a representative
+    workload e.g. `armrx --mine --seconds=30`, then USE), or at minimum document
+    the two-stage release build and clarify in `README.md` that 5.18 H/s requires
+    it. Zero code risk — rebuild-only, KATs already gate the flow.
+*   [ ] **Prototype NEON `vtbl`/`vqtbl1q`-vectorized software T-table AES.**
+    Distinct from the two previously-tried-and-reverted approaches (hardware
+    `AESE`/`AESD`/`AESMC` crypto-extension instructions, wrong round order vs
+    RandomX spec, then a narrower `AESE`+`AESMC` re-enable that measured "zero
+    benefit" and was reverted — `changelogs.md` 2026-07-20). The *current*
+    `include/armrx/aes.hpp` `encrypt_transform`/`decrypt_transform` are 100%
+    scalar byte-indexed table lookups, no NEON vectorization at all — genuinely
+    untried. This is the inner loop of `fill_aes_1r_x4`/`hash_aes_1r_x4`
+    (init_scratchpad ~12.35%, get_final_result ~9.30% of full hash on A53, per
+    this file's telemetry table). **Fix:** prototype a `vtbl`-based vectorized
+    T-table path guarded by `__aarch64__` + a KAT-gated flag, verify parity on
+    the *interpreted* path first (KAT + speedup number) before any JIT
+    integration — same profile-first discipline as every other perf change this
+    session. **Risk:** must be hashrate-vetoed on-device; per-block NEON
+    load/store overhead cancelling the lookup speedup on this Cortex-A53 is a
+    real possibility (exactly what happened to the hardware-AES re-enable
+    attempt) — measure, don't assume.
+*   [ ] **(Lower priority, quick experiment) `--stagger-ms` default.**
+    Currently defaults to 0 (`src/mining_engine.cpp:313`). A prior worker sweep
+    (`changelogs.md` 2026-07-21) found 8-worker saturation drops per-worker
+    efficiency 25% (4.25→3.18 H/s/worker) from shared-dataset memory-bus
+    contention — a small nonzero stagger might desync the memory-heavy phases
+    enough to help. Worth a 1-line on-device experiment, not a design change.
+
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.
 *   Stratum V2 protocol support.

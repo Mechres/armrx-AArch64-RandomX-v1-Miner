@@ -179,7 +179,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 |---|------|--------|-------|
 | — | Stratum V2 protocol support | 🔴 Major | Next-gen pool compatibility |
 | — | HTTP Prometheus metrics endpoint | ✅ Completed | Serving GET /metrics, loopback-only |
-| — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | Failed once (segfault). Do not retry without KAT proof and XMRig source study. |
+| — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | **Stale entry corrected 2026-07-23**: this used to describe an early segfault/`x29` register-corruption bug, which was since root-caused and fixed (`docs/WX_Alignment_and_LITTLE_Core_Profiling.md` §5). Newton-Raphson was then fully re-evaluated cleanly: 100% correctness/determinism pass in CTest, but measured **5.12 H/s vs 5.18 H/s for native hardware `fdiv`/`fsqrt` (−1.1%)** — kept OFF because it's slower on the in-order Cortex-A53 (FPU pipeline pressure from the 12-17 instruction approximation), not because of any remaining correctness risk. See `OPTIMIZATION_REFERENCE.md` and `changelogs.md` (2026-07-21). Do not re-enable by default; a future attempt would need to beat −1.1%, not just prove correctness. |
 
 ### Maintenance
 

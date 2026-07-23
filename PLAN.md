@@ -200,6 +200,53 @@ Concretely reachable: a pool sending a job whose `block_template` is shorter tha
 
 **Not re-litigated:** the CBRANCH/JIT branch-misprediction work (Phase 3 item C) remains the single largest known performance lever (31.08% branch-miss rate, ~8.6–11.9% of cycles) but stays gated on an explicit go-ahead per that section's own risk framing — nothing new this inspection changes that calculus.
 
+### Phase 5 — proposed (2026-07-23): external audit leads, verified and adopted
+
+`docs/performance-improvement-audit.md` (written by another agent, untracked)
+proposed several performance leads. Each claim was independently fact-checked
+against the actual codebase/history before adoption — this is standard practice
+for any externally-sourced recommendation, not just an audit: verify before
+acting on it. One inaccuracy was found and fixed (see below); the two
+substantive recommendations checked out as accurate and non-redundant with
+prior work, so they're adopted here as tracked next steps (`NEXT_STEPS.md` §5a).
+
+**Verification summary:**
+- PGO plumbing/devbox-default claim (`CMakeLists.txt:26,118-128`,
+  `tools/devbox/devbox_mcp.py:56`) — confirmed accurate. The +19.3%/+14.9%
+  numbers match this file's own telemetry exactly. One nuance the audit
+  understated: `devbox_build`'s `extra_flags` already lets a caller pass
+  `-DARMRX_PGO=USE` per-invocation, so this is a missing *default/automation*,
+  not a missing *capability*.
+- NEON software-AES `vtbl` vectorization claim — confirmed **not** redundant
+  with the two previously-reverted hardware-AES attempts (`AESE`/`AESD`, wrong
+  round order; then `AESE`+`AESMC` re-enable, zero benefit, both
+  `changelogs.md` 2026-07-20). Current `include/armrx/aes.hpp` is 100% scalar,
+  no NEON at all — this is a genuinely untried technique, correctly flagged
+  with the same "must be hashrate-vetoed on-device, not assumed" risk framing
+  this session has used throughout.
+- `--stagger-ms` default claim — confirmed backed by real prior data
+  (`changelogs.md` 2026-07-21 worker sweep, 25% per-worker efficiency drop
+  under 8-worker memory-bus contention).
+- **One inaccuracy found and fixed**: the audit attributed the Newton-Raphson
+  "−1.1% hashrate" figure to `ROADMAP.md` "Features", but that entry actually
+  said "Failed once (segfault). Do not retry..." — describing an *earlier*,
+  separate `x29`-register-corruption bug that was since root-caused and fixed
+  (`docs/WX_Alignment_and_LITTLE_Core_Profiling.md` §5), after which
+  Newton-Raphson was cleanly re-evaluated (100% correctness pass, −1.1%
+  hashrate, kept off for perf not safety reasons — the real source is
+  `OPTIMIZATION_REFERENCE.md`/`changelogs.md` 2026-07-21). Fixed the stale
+  `ROADMAP.md` entry to reflect this (2026-07-23).
+
+**Adopted as next steps** (see `NEXT_STEPS.md` §5a for the actionable form):
+1. Wire PGO into the devbox release flow (generate→train→use), or at minimum
+   document the two-stage build and correct `README.md`'s framing. Zero code
+   risk.
+2. Prototype a `vtbl`/`vqtbl1q`-vectorized software T-table AES path, KAT-gated,
+   verified on the interpreted path before any JIT integration, hashrate-vetoed
+   on-device before adoption — same discipline as every perf change this
+   session (CBRANCH/CSEL, Argon2 diagonal-step, Argon2 copy-elimination).
+3. (Lower priority) a quick on-device `--stagger-ms` default experiment.
+
 ### Phase 3 (original, superseded — kept for reference)
 *   **Tasks:**
     1. Deploy QEMU AArch64 container environments on GitHub Actions CI (§4.1).

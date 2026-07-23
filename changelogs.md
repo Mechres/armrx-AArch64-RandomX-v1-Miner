@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-23 — External Performance Audit: Verified, Fixed a Stale Doc, Adopted Two Leads
+
+Another agent's `docs/performance-improvement-audit.md` proposed several performance leads. Fact-checked each claim against the actual codebase/history before acting on any of it (standard practice for externally-sourced recommendations):
+
+- **Fixed a stale `ROADMAP.md` entry** the audit's citation exposed: the Newton-Raphson FDIV/FSQRT row said "Failed once (segfault). Do not retry..." — describing an *earlier*, separate `x29`-register-corruption bug that was since root-caused and fixed (`docs/WX_Alignment_and_LITTLE_Core_Profiling.md` §5). Newton-Raphson was then cleanly re-evaluated: 100% correctness/determinism pass, but measured 5.12 H/s vs 5.18 H/s for native hardware `fdiv`/`fsqrt` (−1.1%, `OPTIMIZATION_REFERENCE.md`, `changelogs.md` 2026-07-21) — kept off for performance, not safety. Corrected the entry to reflect this.
+- **Verified and adopted two substantive leads** into `PLAN.md` Phase 5 / `NEXT_STEPS.md` §5a: (1) PGO is plumbed into CMake but the default devbox build doesn't use it (confirmed — `tools/devbox/devbox_mcp.py:56`'s default flags have no `ARMRX_PGO`; the +19.3%/+14.9% figures match this project's own telemetry exactly); (2) a NEON `vtbl`-vectorized software T-table AES path is genuinely untried — confirmed distinct from the two previously-reverted *hardware* `AESE`/`AESD`/`AESMC` attempts (`changelogs.md` 2026-07-20); the current software AES path is 100% scalar.
+- Both adopted items carry the same profile-first, hashrate-vetoed-on-device discipline used for every other performance change this session — neither is implemented yet, both are tracked as next steps.
+
 ## 2026-07-23 — Argon2 `memcpy` Copy-Elimination: Implemented, Measured, Reverted (No Net Win)
 
 Closes out the last item in the Argon2 performance backlog (`NEXT_STEPS.md` §5, `PLAN.md` Phase 3 item C):
