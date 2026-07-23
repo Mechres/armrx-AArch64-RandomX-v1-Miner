@@ -97,17 +97,26 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
     fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-
     key-rotation latency, not sustained hashrate). Full account in
     `docs/argon2-neon-diagonal-vectorization.md`.
-*   [ ] **Further Argon2 profiling lead, not yet investigated.** The same
-    `perf record -e cycles` pass that found the diagonal-step fix (212K samples,
-    `bench_armrx --argon2-only`) also attributed 23.17% of cycles to
-    `Argon2dCache::initialize`'s own code (the main loop/driver, not `gb()`/
-    `permute_16_neon`, which the diagonal fix already addressed) and 5.54% to
-    `memcpy` (likely `Argon2Block` copies in `argon2_compress`'s
-    `auto permuted = result;` and similar). Neither has been profiled further — the
-    diagonal-step fix only closed out the `gb()`/`permute_16_neon` share of the
-    picture. Worth a look if more Argon2/seed-rotation-latency work is wanted;
-    apply the same profile-first discipline (multi-event `perf stat` first, symbol
-    attribution before any code change) that worked for the diagonal-step fix.
+*   [x] ~~`memcpy`/copy-elimination lead~~ — **tried, measured, reverted
+    (2026-07-23), no net win.** Gave `permute_block` an out-of-place
+    `permute_block_into(src, dst)` sibling to eliminate `argon2_compress`'s
+    `auto permuted = result;` 1024-byte copy. Apples-to-apples `perf stat`
+    (old code rebuilt fresh, on-device): -2.86% instructions but **+0.35%
+    cycles** (flat-to-worse) — symbol attribution showed the `memcpy` cost
+    (6.77%→3.56%) didn't disappear, it relocated into the new function
+    (12.74%), netting out roughly even. glibc's `memcpy` was already about as
+    fast as the hand-rolled replacement on this hardware. Reverted
+    (`git checkout -- src/argon2.cpp`). Full account in
+    `docs/argon2-compress-copy-elimination.md`.
+*   [ ] **`Argon2dCache::initialize`'s own driver-code cycle share (23.17%
+    of the original profile) remains open.** The copy-elimination attempt
+    above ruled out `memcpy`/copy volume as the explanation. Next attempt
+    should profile *what specifically* the per-block driver loop (address/
+    reference-block computation: `j1`, `square`, `x`, `y`, `relative`,
+    `reference` in `Argon2dCache::initialize`'s main loop) is spending cycles
+    on, rather than assuming copy volume is the bottleneck — same profile-
+    first discipline (multi-event `perf stat`, symbol attribution, apples-to-
+    apples before/after) that worked for the diagonal-step fix.
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.

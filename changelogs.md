@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-23 — Argon2 `memcpy` Copy-Elimination: Implemented, Measured, Reverted (No Net Win)
+
+Closes out the last item in the Argon2 performance backlog (`NEXT_STEPS.md` §5, `PLAN.md` Phase 3 item C):
+
+- **Investigated the tracked lead**: the diagonal-step profiling pass had also attributed 5.54% of cycles to `memcpy` — traced to `argon2_compress()`'s `auto permuted = result;`, a 1024-byte `Argon2Block` copy needed because `permute_block` mutates its argument in place (the algorithm needs both the original `R = previous^reference` and the permuted `Z` to compute the final XOR).
+- **Implemented a fix**: gave `permute_block` an out-of-place `permute_block_into(src, dst)` sibling (both NEON and scalar variants) that fuses the copy into the row step's existing load/store instead of doing a separate whole-block `memcpy` first. Verified correct first: full KAT hashes, reference dataset-item checks, and `ctest` all green, both scalar (x86_64) and NEON (on-device) paths, before any benchmarking.
+- **Measured honestly, reverted**: apples-to-apples `perf stat` (old code rebuilt fresh on-device) showed -2.86% instructions but **+0.35% cycles** — flat to slightly worse. Symbol-attributed `perf record` explained why: the `memcpy` cost didn't disappear, it relocated into the new function (`memcpy` 6.77%→3.56%, but a new `permute_block_into_neon` appeared at 12.74%) — glibc's `memcpy` was already about as fast as the hand-rolled replacement on this hardware. Reverted (`git checkout -- src/argon2.cpp`), same standard applied to the CBRANCH/CSEL investigation. Full account in `docs/argon2-compress-copy-elimination.md`.
+- **What's still open**: `Argon2dCache::initialize`'s own driver-code cycle share (23.17% of the original profile) — this investigation ruled out copy volume as the explanation, so it remains an open lead for whoever picks it up next, now with a concrete "don't just chase the copy" pointer.
+
 ## 2026-07-23 — JIT Buffer RWX/W^X Mode Now Disclosed at Startup
 
 Closes PLAN.md Phase 4 item F (open hardening-posture decision):
