@@ -170,7 +170,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 
 | # | Item | Site | Notes |
 |---|------|------|-------|
-| — | JIT buffer W^X vs RWX default | `virtual_memory.c` | Currently RWX by default unless `RANDOMX_FORCE_SECURE` is set at build time — real perf/security tradeoff, currently invisible to operators (no log line). Needs a decision, not just a fix. |
+| — | JIT buffer W^X vs RWX default | `virtual_memory.c` | **Default kept RWX (explicit user direction, 2026-07-23), now disclosed via a startup log line in `jit_compiler_a64.cpp` instead of being silent.** Revisit the actual default later if wanted. |
 
 ### Features
 

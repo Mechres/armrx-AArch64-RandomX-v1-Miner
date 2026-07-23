@@ -75,12 +75,14 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 *   [ ] `tls_client.cpp`/`tui.cpp` remain fully untested (need a mock TLS server / a
     terminal-capture harness respectively) — not attempted this round, larger lift.
 
-### 4. Open decision — not a bug, needs a call from the maintainer
-*   [ ] **JIT buffer W^X vs RWX default** (`src/virtual_memory.c`'s `setPagesRWX()`).
-    Currently defaults to RWX unless `RANDOMX_FORCE_SECURE` is set at build time — a
-    real, deliberate perf/security tradeoff that's currently invisible to operators
-    (no log line, no `--help` mention). Decide: flip the default, or at least log
-    which mode is active at startup.
+### 4. Open decision — default kept for now, now disclosed (2026-07-23)
+*   [x] ~~JIT buffer W^X vs RWX default~~ — **decision: keep RWX-by-default unchanged,
+    but no longer silent.** `src/virtual_memory.c`'s `setPagesRWX()` still defaults to
+    RWX unless `RANDOMX_FORCE_SECURE` is set at build time (explicit user direction:
+    "let it stay for now... we may or may not change it later"). `JitCompilerA64`'s
+    constructor (`src/jit_compiler_a64.cpp`) now logs which mode is active once per
+    process. Revisit the actual default later if wanted — this item stays open only
+    in the sense that the underlying tradeoff hasn't been re-decided, just disclosed.
 
 ### 5. Performance
 *   [x] ~~CBRANCH / JIT branch-misprediction cost reduction~~ — **closed (2026-07-22),

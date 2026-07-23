@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-23 — JIT Buffer RWX/W^X Mode Now Disclosed at Startup
+
+Closes PLAN.md Phase 4 item F (open hardening-posture decision):
+
+- **Decision (explicit, user-directed): keep the RWX-by-default JIT buffer behavior unchanged for now** ("we may or may not change it later") — no perf/security tradeoff was altered.
+- **Made it visible instead of silent.** `JitCompilerA64`'s constructor (`src/jit_compiler_a64.cpp`) now logs which protection mode is active — `"JIT code buffer: RWX (...)"` or `"JIT code buffer: W^X enforced (...)"` — exactly once per process, guarded by a static `std::atomic<bool>` since one `JitCompilerA64` exists per worker thread and all of them land on the identical result (same process, same kernel policy).
+- **Verified on-device**: with 2 workers, the line fires exactly once (not twice), correctly reporting `RWX` on this device's stock Linux kernel.
+
 ## 2026-07-23 — MetricsExporter Data Race Fix + Test Coverage Gaps Closed (Found a Real `--config=` Bug)
 
 Closes PLAN.md Phase 4 items C and E.1/E.2:

@@ -29,8 +29,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "armrx/jit_compiler_a64.hpp"
 #include "armrx/assert.hpp"
+#include "armrx/log.hpp"
 #include "configuration.h"
 #include "instruction_weights.hpp"
+#include <atomic>
 
 // Verify the JIT code buffer layout: the .fill directive in static.S reserves
 // RANDOMX_PROGRAM_MAX_SIZE * 16 * 4 bytes (6144 AArch64 instruction slots).
@@ -155,6 +157,24 @@ JitCompilerA64::JitCompilerA64()
 #else
 	rwx_ = false;
 #endif
+
+	// One JitCompilerA64 exists per worker thread and all of them land on the
+	// same rwx_ result (same process, same kernel policy), so only the first
+	// one logs it -- otherwise this would print once per worker. This is a
+	// real, deliberate perf/security tradeoff (RWX skips an mprotect syscall
+	// pair on every JIT recompile) that was previously silent to operators;
+	// see PLAN.md Phase 4 item F / NEXT_STEPS.md item 4.
+	static std::atomic<bool> logged{false};
+	if (!logged.exchange(true, std::memory_order_relaxed)) {
+		if (rwx_) {
+			ARMRX_LOG_INFO << "JIT code buffer: RWX (read+write+execute always set; "
+			                  "faster, no per-recompile mprotect calls -- rebuild with "
+			                  "RANDOMX_FORCE_SECURE to enforce W^X instead)";
+		} else {
+			ARMRX_LOG_INFO << "JIT code buffer: W^X enforced (RW while compiling, "
+			                  "RX while executing, never both)";
+		}
+	}
 }
 
 JitCompilerA64::~JitCompilerA64()
