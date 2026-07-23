@@ -4,7 +4,7 @@
 > For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 
-> **Current status (2026-07-22):** Two critical concurrency bugs found and fixed this session (fast-mode dataset corruption, `PoolManager` self-deadlock — see their postmortems in `docs/`), plus an on-device LTO build regression root-caused and fixed, both documented pool-failover gaps closed, and three constant-dedup refactors landed. A fresh codebase inspection (`PLAN.md` Phase 4) found one more real bug (a worker thread that can be permanently killed by a malformed job) and a config-parsing crash risk, both not yet fixed — see `NEXT_STEPS.md`.
+> **Current status (2026-07-23):** Two critical concurrency bugs found and fixed in an earlier session (fast-mode dataset corruption, `PoolManager` self-deadlock — see their postmortems in `docs/`), plus an on-device LTO build regression root-caused and fixed, both documented pool-failover gaps closed, and three constant-dedup refactors landed. A fresh codebase inspection (`PLAN.md` Phase 4) found two more real bugs — a worker thread that could be permanently killed by a malformed job, and a config-parsing crash risk — both now fixed and regression-tested. Also landed: CBRANCH branch-misprediction investigation (measured a CSEL rewrite, reverted as a net regression) and an Argon2 NEON diagonal-step vectorization (26.8% fewer instructions, 19.0% fewer cycles for cache init). See `NEXT_STEPS.md` for what's still open.
 > See `docs/aes-ttable-bug-postmortem.md` for the AES fix analysis, and `docs/fast-mode-dataset-corruption-postmortem.md` / `docs/pool-failover-deadlock-postmortem.md` for this session's critical fixes.
 
 ## Baseline
@@ -145,17 +145,17 @@
 | `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained | ✅ |
 | CBRANCH investigation: CSEL implemented, measured, reverted (net regression); root-caused the 31.08% branch-miss figure to a non-representative benchmark section | ✅ |
 | Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/argon2-neon-diagonal-vectorization.md`) | ✅ |
+| `MiningEngine::worker_loop()` permanently killed a worker thread on a bad nonce offset/size — fixed (`active = false; continue;`), regression test added | ✅ |
+| `config.cpp` numeric config-file fields unguarded against parse failure — fixed (try/catch, matching `cli_parser.cpp`), regression test added | ✅ |
 
 ---
 
 ## 🔴 Remaining — Action List
 
-### Correctness (found 2026-07-22, `PLAN.md` Phase 4 — not yet fixed)
+### Correctness (found 2026-07-22, `PLAN.md` Phase 4 — remaining)
 
 | # | Item | Site | Severity | Notes |
 |---|------|------|----------|-------|
-| — | **`MiningEngine::worker_loop()` permanently kills a worker thread** on a bad nonce offset/size instead of skipping the job | `mining_engine.cpp:418-423` | 🔴 High | `return;` should match the `active = false;`-fallthrough pattern every neighboring error path uses. Pool-triggerable, silent hashrate degradation. |
-| — | **`config.cpp` numeric config-file fields unguarded against parse failure** | `config.cpp:18,63,66,69` | 🟡 Medium | `cli_parser.cpp` already guards the equivalent CLI flags; config-file path (which loads unconditionally on every launch) doesn't. Malformed default config crashes the miner. |
 | — | `MetricsExporter::server_fd_` data race (plain `int` across threads) | `metrics.hpp` | 🟢 Low | One-line fix: `std::atomic<int>`. |
 
 ### Performance

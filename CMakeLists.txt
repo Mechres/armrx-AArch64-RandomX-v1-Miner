@@ -184,6 +184,11 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
     add_test(NAME bench_armrx COMMAND bench_armrx)
 
+    add_executable(test_config tests/test_config.cpp)
+    target_link_libraries(test_config PRIVATE armrx_core)
+    target_compile_options(test_config PRIVATE -UNDEBUG)
+    add_test(NAME test_config COMMAND test_config)
+
     # Mock Stratum protocol tests (PLAN.md §3.2) — loopback TCP, no hardware
     # dependency. test_pool_failover() dominates: ~31s real production
     # backoff timing plus up to ~30s more from a stale reconnect thread's
@@ -266,6 +271,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
         set_property(TARGET armrx_tests PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET test_mining PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         set_property(TARGET bench_armrx PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET test_config PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         if(ARMRX_HAVE_JIT)
             set_property(TARGET bench_opcodes PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)

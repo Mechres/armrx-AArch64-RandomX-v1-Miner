@@ -418,8 +418,15 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
             ARMRX_LOG_ERROR << "Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
                       << " size=" << local_job.nonce_size << " in job, deactivating";
+            // Deactivate and go back to the top of the loop (matching every
+            // other bad-state path above, e.g. the dataset-size-mismatch
+            // case) rather than returning — a `return` here would exit
+            // worker_loop() entirely and permanently kill this thread for
+            // the rest of the process's life over a single bad job, instead
+            // of just idling until job_generation_ advances to a new
+            // (hopefully valid) job.
             active = false;
-            return;
+            continue;
         }
 
         alignas(16) std::array<std::byte, 32> hash{};

@@ -80,6 +80,66 @@ void test_mining_engine_lifecycle() {
               << engine.total_hashes() << " hashes and " << share_count.load() << " shares!\n";
 }
 
+// Regression test for PLAN.md Phase 4 item A: a job whose nonce_offset/size
+// doesn't fit the block_template used to permanently kill the worker thread
+// that hit it (update_nonce_in_template() failing led to `return;` inside
+// worker_loop(), exiting the thread for the rest of the process's life,
+// instead of `continue;` like every neighboring bad-state path). Pool-
+// triggerable (a malformed/truncated block template from the pool), and
+// silent — no crash, just one fewer working thread forever. This test feeds
+// exactly that bad job first, confirms no hashes come from it, then feeds a
+// valid job afterward and confirms the *same* worker threads pick it up and
+// produce hashes/shares — proving they're still alive, not just that the
+// process didn't crash.
+void test_worker_survives_bad_nonce_job() {
+    armrx::MiningEngine engine(armrx::RandomXMode::light, 2);
+
+    armrx::Job bad_job;
+    bad_job.job_id = "bad_job";
+    bad_job.block_template = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03}}; // only 3 bytes
+    bad_job.nonce_offset = 3;
+    bad_job.nonce_size = 4; // offset+size = 7 > block_template.size() = 3
+    bad_job.seed_key = {std::byte{'b'}, std::byte{'a'}, std::byte{'d'}};
+    std::fill(bad_job.target.bytes.begin(), bad_job.target.bytes.end(), std::byte{0xff});
+
+    std::atomic<int> share_count{0};
+    engine.set_job(bad_job);
+    engine.start([&share_count](const armrx::Job&, std::uint64_t, std::array<std::byte, 32>) {
+        share_count.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    // Give workers a chance to hit the bad job and (before the fix) exit.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    assert(engine.total_hashes() == 0);
+
+    armrx::Job good_job;
+    good_job.job_id = "good_job";
+    good_job.block_template = {std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                std::byte{0x00}, std::byte{0x00}, std::byte{0x00}, std::byte{0x00}};
+    good_job.nonce_offset = 3;
+    good_job.nonce_size = 4;
+    good_job.seed_key = {std::byte{'g'}, std::byte{'o'}, std::byte{'o'}, std::byte{'d'}};
+    std::fill(good_job.target.bytes.begin(), good_job.target.bytes.end(), std::byte{0xff});
+
+    engine.set_job(good_job);
+
+    // Poll rather than a fixed sleep: without JIT this can take a while.
+    const auto poll_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    while (engine.total_hashes() == 0 && std::chrono::steady_clock::now() < poll_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    engine.stop();
+
+    // If the worker threads had exited on the bad job, total_hashes() would
+    // still be 0 here and no shares would ever be found.
+    assert(engine.total_hashes() > 0);
+    assert(share_count.load() > 0);
+
+    std::cout << "[test_mining] test_worker_survives_bad_nonce_job passed ("
+              << engine.total_hashes() << " hashes, " << share_count.load()
+              << " shares after recovering from a bad-nonce job)\n";
+}
+
 // Covers PLAN.md §2.1: fast-mode seed-key rotation while workers are already
 // running now reuses the persistent, affinity-pinned mining threads to build
 // the new dataset (instead of spawning temporary threads). This test exercises
@@ -278,6 +338,7 @@ void test_stop_races_dataset_reinit() {
 int main() {
     test_target_comparison();
     test_mining_engine_lifecycle();
+    test_worker_survives_bad_nonce_job();
     test_fast_mode_dataset_reinit_via_workers();
     test_stop_races_dataset_reinit();
     std::cout << "ALL MINING TESTS PASSED SUCCESSFULLY!\n";

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-07-23 — Two Phase 4 Correctness Fixes: Worker-Thread Death on Bad Nonce Job, Config Parse Crash
+
+Closes items A and B from `PLAN.md`'s Phase 4 fresh-codebase-inspection findings:
+
+- **`MiningEngine::worker_loop()` no longer permanently kills a worker thread** on a bad nonce offset/size (`src/mining_engine.cpp`). When `update_nonce_in_template()` failed (`nonce_offset + nonce_size > block_template.size()`, reachable via a malformed/truncated pool job), the handler set `active = false` then called `return;`, which exited `worker_loop()` entirely — ending that thread for the rest of the process's life, silently degrading hashrate with no crash. Changed to `active = false; continue;`, matching every neighboring bad-state path in the same function. New regression test `test_worker_survives_bad_nonce_job()` (`tests/test_mining.cpp`) feeds a deliberately malformed job, confirms both workers log the error and idle (`total_hashes() == 0`) rather than dying, then confirms the *same* threads pick up a subsequent valid job and mine normally.
+- **`config.cpp`'s numeric config-file fields are now exception-guarded.** `parse_pool_str()`'s port parsing and `load_config()`'s `workers`/`difficulty`/`seconds` parsing called `std::stoul`/`std::stoull` directly on raw JSON-extracted strings with no `try`/`catch`, unlike `cli_parser.cpp`'s already-guarded equivalent CLI flags. Since `load_config_with_fallback()` runs unconditionally on every launch (auto-probing `$ARMRX_CONFIG`/`~/.config/armrx/config.json`/`./armrx.conf` even with no `--config=` flag), a single malformed default config crashed the whole miner via an unhandled exception before it ever logged anything useful. Each conversion is now wrapped in try/catch, logging a warning and falling back to `AppConfig`'s default on failure. New `tests/test_config.cpp` (3 cases: malformed fields all at once, valid fields still parse correctly, missing file returns defaults).
+- **Verified**: both fixes built and tested locally (x86_64 interpreter, full `ctest` green including the two new tests) and on-device (AArch64 JIT, full `ctest` green).
+
 ## 2026-07-23 — Argon2 NEON Diagonal-Step Vectorization (26.8% Fewer Instructions, 19.0% Fewer Cycles)
 
 Following the CBRANCH investigation's own recommendation to look at `Argon2dCache::initialize` next:

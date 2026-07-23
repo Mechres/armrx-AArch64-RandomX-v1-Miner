@@ -34,14 +34,18 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 ## Prioritized Next Steps (PLAN.md Phase 4)
 
 ### 1. Correctness — do first, both are small and high-value
-*   [ ] **Fix `MiningEngine::worker_loop()` permanently killing a worker thread** on a bad
-    nonce offset/size (`src/mining_engine.cpp:418-423` — `return;` should be `active = false;`
-    falling through like every neighboring error path). Pool-triggerable, silently
-    degrades hashrate with no crash. Needs a regression test in `tests/test_mining.cpp`.
-*   [ ] **Guard `config.cpp`'s numeric config-file parsing** (`std::stoul`/`std::stoull` on
-    `workers`/`difficulty`/`seconds`/pool-port) the same way `cli_parser.cpp` already
-    guards the equivalent CLI flags. A malformed default config currently crashes the
-    miner on every launch via an unhandled exception. Needs a small config-parsing test.
+*   [x] ~~Fix `MiningEngine::worker_loop()` permanently killing a worker thread~~ —
+    **done (2026-07-23).** `active = false; return;` → `active = false; continue;`
+    on a bad nonce offset/size, matching every neighboring bad-state path. Regression
+    test `test_worker_survives_bad_nonce_job()` added to `tests/test_mining.cpp`
+    (asserts the *same* worker threads idle through a malformed job, then recover
+    and mine normally once a valid job arrives).
+*   [x] ~~Guard `config.cpp`'s numeric config-file parsing~~ — **done (2026-07-23).**
+    `parse_pool_str()`'s port and `load_config()`'s `workers`/`difficulty`/`seconds`
+    conversions wrapped in `try`/`catch`, matching `cli_parser.cpp`'s existing
+    treatment of the equivalent CLI flags — malformed values now log a warning and
+    fall back to `AppConfig`'s defaults instead of crashing. New
+    `tests/test_config.cpp` (3 cases: malformed fields, valid fields, missing file).
 
 ### 2. Small hardening fix
 *   [ ] **`MetricsExporter::server_fd_` data race** (`include/armrx/metrics.hpp`) — plain
@@ -62,15 +66,30 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
     (no log line, no `--help` mention). Decide: flip the default, or at least log
     which mode is active at startup.
 
-### 5. Performance — closed (2026-07-22), no further CBRANCH work planned
-*   [x] ~~CBRANCH / JIT branch-misprediction cost reduction~~ — implemented the CSEL
-    rewrite, measured it cleanly (apples-to-apples `perf stat`, old code rebuilt fresh
-    for a fair baseline), and reverted: +46% branch-misses, flat hashrate, a net
-    regression not an improvement. Separately found the 31.08% aggregate figure that
-    justified this work doesn't represent the mining hot path — the isolated hot path's
-    real rate is 2.4%, costing ~0.1–0.16% of cycles, not the previously-estimated
-    ~8.6–11.9%. Full account in `docs/branchless-cbranch.md`. No further JIT
-    branch-encoding work is planned on this basis.
+### 5. Performance
+*   [x] ~~CBRANCH / JIT branch-misprediction cost reduction~~ — **closed (2026-07-22),
+    no further CBRANCH work planned.** Implemented the CSEL rewrite, measured it
+    cleanly (apples-to-apples `perf stat`, old code rebuilt fresh for a fair
+    baseline), and reverted: +46% branch-misses, flat hashrate, a net regression not
+    an improvement. Separately found the 31.08% aggregate figure that justified this
+    work doesn't represent the mining hot path — the isolated hot path's real rate is
+    2.4%, costing ~0.1–0.16% of cycles, not the previously-estimated ~8.6–11.9%. Full
+    account in `docs/branchless-cbranch.md`.
+*   [x] ~~Argon2 NEON diagonal-step vectorization~~ — **done (2026-07-23).** 26.8%
+    fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-
+    key-rotation latency, not sustained hashrate). Full account in
+    `docs/argon2-neon-diagonal-vectorization.md`.
+*   [ ] **Further Argon2 profiling lead, not yet investigated.** The same
+    `perf record -e cycles` pass that found the diagonal-step fix (212K samples,
+    `bench_armrx --argon2-only`) also attributed 23.17% of cycles to
+    `Argon2dCache::initialize`'s own code (the main loop/driver, not `gb()`/
+    `permute_16_neon`, which the diagonal fix already addressed) and 5.54% to
+    `memcpy` (likely `Argon2Block` copies in `argon2_compress`'s
+    `auto permuted = result;` and similar). Neither has been profiled further — the
+    diagonal-step fix only closed out the `gb()`/`permute_16_neon` share of the
+    picture. Worth a look if more Argon2/seed-rotation-latency work is wanted;
+    apply the same profile-first discipline (multi-event `perf stat` first, symbol
+    attribution before any code change) that worked for the diagonal-step fix.
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.
@@ -81,6 +100,8 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 ---
 
 ## Resolved Since Last Snapshot (2026-07-23)
+*   [x] `MiningEngine::worker_loop()` bad-nonce-job worker death — `active = false; return;` → `active = false; continue;`, regression test added.
+*   [x] `config.cpp` numeric config-file parsing crash — `try`/`catch` guards added around `workers`/`difficulty`/`seconds`/pool-port, matching `cli_parser.cpp`'s CLI-flag treatment, regression test added.
 *   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/argon2-neon-diagonal-vectorization.md`.
 *   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.

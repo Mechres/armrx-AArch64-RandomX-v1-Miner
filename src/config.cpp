@@ -5,6 +5,7 @@
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
+#include <stdexcept>
 
 namespace armrx {
 namespace {
@@ -15,7 +16,12 @@ PoolConfig parse_pool_str(const std::string& s) {
     auto colon = s.rfind(':');
     if (colon != std::string::npos) {
         pc.host = s.substr(0, colon);
-        pc.port = static_cast<std::uint16_t>(std::stoul(s.substr(colon + 1)));
+        try {
+            pc.port = static_cast<std::uint16_t>(std::stoul(s.substr(colon + 1)));
+        } catch (const std::exception& ex) {
+            std::cerr << "[Config] Warning: invalid pool port in \"" << s
+                      << "\" (" << ex.what() << "), using default port " << pc.port << '\n';
+        }
     } else {
         pc.host = s;
     }
@@ -59,14 +65,41 @@ AppConfig load_config(const std::string& path) {
     auto tui_str = armrx::json::get_raw(json, "tui");
     cfg.tui = (tui_str == "true");
 
+    // load_config_with_fallback() runs unconditionally on every launch (it
+    // auto-probes $ARMRX_CONFIG / ~/.config/armrx/config.json / ./armrx.conf
+    // even with no --config= flag), so a malformed value in any of these
+    // fields must not crash the whole process the way an unguarded
+    // std::stoul/std::stoull would — cli_parser.cpp already guards the
+    // equivalent CLI flags the same way, for the same reason.
     auto workers_str = armrx::json::get_raw(json, "workers");
-    if (!workers_str.empty()) cfg.workers = static_cast<unsigned>(std::stoul(workers_str));
+    if (!workers_str.empty()) {
+        try {
+            cfg.workers = static_cast<unsigned>(std::stoul(workers_str));
+        } catch (const std::exception& ex) {
+            std::cerr << "[Config] Warning: invalid \"workers\" value \"" << workers_str
+                      << "\" (" << ex.what() << "), ignoring\n";
+        }
+    }
 
     auto diff_str = armrx::json::get_raw(json, "difficulty");
-    if (!diff_str.empty()) cfg.difficulty = std::stoull(diff_str);
+    if (!diff_str.empty()) {
+        try {
+            cfg.difficulty = std::stoull(diff_str);
+        } catch (const std::exception& ex) {
+            std::cerr << "[Config] Warning: invalid \"difficulty\" value \"" << diff_str
+                      << "\" (" << ex.what() << "), ignoring\n";
+        }
+    }
 
     auto sec_str = armrx::json::get_raw(json, "seconds");
-    if (!sec_str.empty()) cfg.seconds = static_cast<unsigned>(std::stoul(sec_str));
+    if (!sec_str.empty()) {
+        try {
+            cfg.seconds = static_cast<unsigned>(std::stoul(sec_str));
+        } catch (const std::exception& ex) {
+            std::cerr << "[Config] Warning: invalid \"seconds\" value \"" << sec_str
+                      << "\" (" << ex.what() << "), ignoring\n";
+        }
+    }
 
     std::cout << "[Config] Loaded " << path << " (" << cfg.pools.size() << " pool(s))\n";
     return cfg;
