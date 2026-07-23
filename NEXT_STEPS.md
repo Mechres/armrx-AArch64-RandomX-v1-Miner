@@ -1,7 +1,7 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-22
-**HEAD:** 76d5652
+**Updated:** 2026-07-23
+**HEAD:** b406bd5 (at time of writing; see `git log` for current)
 **Devbox:** 192.168.10.156
 
 This file mirrors the prioritized, actionable subset of `PLAN.md`'s Phase 4 (a fresh
@@ -80,7 +80,8 @@ been tried (CSEL, 2026-07-22) and closed; see item 5 below.
 
 ---
 
-## Resolved Since Last Snapshot (2026-07-22)
+## Resolved Since Last Snapshot (2026-07-23)
+*   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/argon2-neon-diagonal-vectorization.md`.
 *   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.
 *   [x] Both documented pool-failover gaps (dead-at-startup pool never failing over; up to ~30s stale-reconnect-thread-join delay) — `src/pool_manager.cpp`, `src/stratum_client.cpp`.

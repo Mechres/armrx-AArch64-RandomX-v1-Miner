@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-23 — Argon2 NEON Diagonal-Step Vectorization (26.8% Fewer Instructions, 19.0% Fewer Cycles)
+
+Following the CBRANCH investigation's own recommendation to look at `Argon2dCache::initialize` next:
+
+- **Profiled first** (`bench_armrx --argon2-only`, a new isolated benchmark added for this): multi-event `perf stat` (IPC 0.65, branch-miss rate 2.0%, cache-miss rate 0.3%) ruled out both branch-misprediction and memory-boundedness, despite Argon2's memory-hardness design making the latter a reasonable prior. `perf record -e cycles` (212K samples) then attributed **38.09% of all cycles to the scalar `gb()` mixing function alone**.
+- **Root cause**: `permute_16_neon()`'s 4 "diagonal" mixing rounds fell back to sequential scalar `gb()` calls (long dependency chains, no ILP), while its 4 "column" rounds already get 2x NEON parallelism via `gb_neon()` — because the diagonal register-pairs aren't memory-adjacent, so the straightforward `vld1q_u64` load doesn't work for them directly.
+- **Fix** (`src/argon2.cpp`): gather the one non-adjacent operand pair per diagonal group via `vcombine_u64(vld1_u64(...), vld1_u64(...))`, reusing the existing `gb_neon()` unchanged — the same gather/scatter approach `permute_block_neon()`'s outer loop already uses for non-adjacent columns, applied one level deeper.
+- **Verified**: KAT hashes and reference dataset-item first-words byte-identical (both interpreted and JIT), `ctest` 8/8 on-device + 4/4 on x86_64 (scalar path untouched). Apples-to-apples `perf stat` (old code rebuilt fresh, both runs back-to-back to control for this device's real thermal/frequency variance between runs) shows **26.8% fewer instructions, 19.0% fewer cycles** (11,364 → 9,204 cycles per `argon2_compress` call).
+- **Scope, stated honestly**: this speeds up seed-key-rotation *latency* (cache init runs once per ~2048 blocks, not per hash) — it does not change sustained steady-state hashrate. Full account in `docs/argon2-neon-diagonal-vectorization.md`.
+
 ## 2026-07-22 — CBRANCH CSEL: Implemented, Measured, Reverted; Root-Caused the 31.08% Figure
 
 Closes the CBRANCH investigation started earlier the same day (see the "Precise Branch-Miss Attribution + Test Hardening" entry below):

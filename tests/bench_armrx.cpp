@@ -227,6 +227,23 @@ void bench_argon2_compress() {
     print_result(r_compress);
 }
 
+void bench_argon2_cache_init() {
+    print_header("3c. Argon2dCache::initialize() — isolated full light-mode cache init");
+
+    // Reuse one allocation across all calls (matches how the constructor's
+    // mmap/munmap cost is separate from the per-seed-change compute cost
+    // this benchmark exists to isolate) and vary the key per call so the
+    // compiler/predictor doesn't see identical input on every iteration.
+    armrx::Argon2dCache cache; // default: 262144 blocks (256 MiB), 3 passes — real light-mode size
+    unsigned key_counter = 0;
+    auto r = sample_benchmark("Argon2dCache::initialize (light, 256 MiB)", 3, 1, [&] {
+        const std::array<std::byte, 4> key{
+            std::byte{'k'}, std::byte{'e'}, std::byte{'y'}, static_cast<std::byte>(key_counter++)};
+        cache.initialize(key);
+    }, "init", 1.0);
+    print_result(r);
+}
+
 void bench_region_attribution() {
     print_header("4. Region attribution — hash pipeline phases");
 
@@ -508,18 +525,21 @@ int main(int argc, char** argv) {
     bool attribution_only = false;
     bool full_hash_only   = false;
     bool micro_only       = false;
+    bool argon2_only      = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
         if (arg == "--attribution-only") { run_all = false; attribution_only = true; }
         else if (arg == "--full-hash-only") { run_all = false; full_hash_only = true; }
         else if (arg == "--micro-only") { run_all = false; micro_only = true; }
+        else if (arg == "--argon2-only") { run_all = false; argon2_only = true; }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: bench_armrx [OPTIONS]\n"
                       << "Options:\n"
                       << "  --attribution-only   Only run region-attribution benchmarks\n"
                       << "  --full-hash-only     Only run full-hash throughput benchmark\n"
                       << "  --micro-only         Only run micro-benchmarks (blake2b, AES, dataset)\n"
+                      << "  --argon2-only        Only run isolated Argon2dCache::initialize() benchmark\n"
                       << "  --help               Show this message\n";
             return 0;
         }
@@ -534,6 +554,13 @@ int main(int argc, char** argv) {
         bench_aes_primitives();
         bench_dataset_helpers();
         bench_argon2_compress();
+    }
+
+    // Kept separate from --micro-only (not bundled with it) so it can be
+    // profiled in isolation without blake2b/AES/dataset-helper/compress
+    // samples diluting the picture — the whole point of this benchmark.
+    if (run_all || argon2_only) {
+        bench_argon2_cache_init();
     }
 
     if (run_all || attribution_only) {

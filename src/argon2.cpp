@@ -166,14 +166,43 @@ static void permute_16_neon(uint64_t* words) {
         store(2, 6, 10, 14, va, vb, vc, vd);
     }
 
-	// Diagonal step (last 4 scalar gb calls → 2 NEON calls)
-	// NOTE: Cannot use gb_neon here because diagonal register pairs
-	// (0,1), (5,6), (10,11), (15,12), (2,3), (7,4), (8,9), (13,14)
-	// are NOT at consecutive memory positions. Use scalar gb() instead.
-	gb(words[0], words[5], words[10], words[15]);
-	gb(words[1], words[6], words[11], words[12]);
-	gb(words[2], words[7], words[8], words[13]);
-	gb(words[3], words[4], words[9], words[14]);
+	// Diagonal step (last 4 scalar gb calls → 2 NEON calls). Of the 8
+	// register-pairs the diagonal rounds need — (0,1), (5,6), (10,11),
+	// (15,12), (2,3), (7,4), (8,9), (13,14) — only (15,12) and (7,4) are
+	// not at consecutive memory positions; the other 6 load/store with
+	// plain vld1q_u64/vst1q_u64 exactly like the column step above. The two
+	// scattered pairs are gathered into a vector register via
+	// vcombine_u64(vld1_u64(a), vld1_u64(b)) (lane 0 = a, lane 1 = b) and
+	// scattered back the same way on the way out — gb_neon() itself is
+	// unchanged, only how its operands reach/leave the register differ from
+	// the column step. This was previously believed to require falling back
+	// to 4 sequential scalar gb() calls (see docs/argon2-neon-diagonal-vectorization.md
+	// for the profiling that found this: those scalar calls alone were
+	// ~38% of all Argon2dCache::initialize() cycles).
+	{
+		uint64x2_t va = vld1q_u64(words + 0);   // words[0], words[1]
+		uint64x2_t vb = vld1q_u64(words + 5);   // words[5], words[6]
+		uint64x2_t vc = vld1q_u64(words + 10);  // words[10], words[11]
+		uint64x2_t vd = vcombine_u64(vld1_u64(words + 15), vld1_u64(words + 12)); // words[15], words[12]
+		gb_neon(va, vb, vc, vd);
+		vst1q_u64(words + 0, va);
+		vst1q_u64(words + 5, vb);
+		vst1q_u64(words + 10, vc);
+		vst1_u64(words + 15, vget_low_u64(vd));
+		vst1_u64(words + 12, vget_high_u64(vd));
+	}
+	{
+		uint64x2_t va = vld1q_u64(words + 2);   // words[2], words[3]
+		uint64x2_t vb = vcombine_u64(vld1_u64(words + 7), vld1_u64(words + 4)); // words[7], words[4]
+		uint64x2_t vc = vld1q_u64(words + 8);   // words[8], words[9]
+		uint64x2_t vd = vld1q_u64(words + 13);  // words[13], words[14]
+		gb_neon(va, vb, vc, vd);
+		vst1q_u64(words + 2, va);
+		vst1_u64(words + 7, vget_low_u64(vb));
+		vst1_u64(words + 4, vget_high_u64(vb));
+		vst1q_u64(words + 8, vc);
+		vst1q_u64(words + 13, vd);
+	}
 }
 
 static void permute_block_neon(Argon2Block& block) {

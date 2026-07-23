@@ -143,6 +143,8 @@
 | AES round-key constants consolidated (`include/armrx/aes_keys.hpp`) | ✅ |
 | Scratchpad L3 mask constants unified (`include/armrx/randomx_config.hpp`) | ✅ |
 | `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained | ✅ |
+| CBRANCH investigation: CSEL implemented, measured, reverted (net regression); root-caused the 31.08% branch-miss figure to a non-representative benchmark section | ✅ |
+| Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/argon2-neon-diagonal-vectorization.md`) | ✅ |
 
 ---
 
