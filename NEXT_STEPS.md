@@ -182,23 +182,37 @@ actually re-measured on the current codebase — see below.
     current codebase. `README.md`'s 5.18 H/s figure was not touched — that
     would need its own honest re-measurement, not assumed from this old number
     either.
-*   [ ] **Prototype NEON `vtbl`/`vqtbl1q`-vectorized software T-table AES.**
-    Distinct from the two previously-tried-and-reverted approaches (hardware
-    `AESE`/`AESD`/`AESMC` crypto-extension instructions, wrong round order vs
-    RandomX spec, then a narrower `AESE`+`AESMC` re-enable that measured "zero
-    benefit" and was reverted — `changelogs.md` 2026-07-20). The *current*
-    `include/armrx/aes.hpp` `encrypt_transform`/`decrypt_transform` are 100%
-    scalar byte-indexed table lookups, no NEON vectorization at all — genuinely
-    untried. This is the inner loop of `fill_aes_1r_x4`/`hash_aes_1r_x4`
-    (init_scratchpad ~12.35%, get_final_result ~9.30% of full hash on A53, per
-    this file's telemetry table). **Fix:** prototype a `vtbl`-based vectorized
-    T-table path guarded by `__aarch64__` + a KAT-gated flag, verify parity on
-    the *interpreted* path first (KAT + speedup number) before any JIT
-    integration — same profile-first discipline as every other perf change this
-    session. **Risk:** must be hashrate-vetoed on-device; per-block NEON
-    load/store overhead cancelling the lookup speedup on this Cortex-A53 is a
-    real possibility (exactly what happened to the hardware-AES re-enable
-    attempt) — measure, don't assume.
+*   [x] ~~NEON `vtbl`/`vqtbl1q`-vectorized software T-table AES~~ —
+    **implemented, exhaustively verified correct, measured as a real
+    regression (2026-07-23).** Derived a full "vector-permute AES" S-box
+    from scratch in Python (GF(2⁸)↔tower-field GF(2⁴)² isomorphism via a
+    root of AES's defining polynomial) before writing any C++ — verified
+    256/256 against the standard FIPS-197 S-box/inverse-S-box, and the full
+    round structure (ShiftRows/MixColumns/inverses) against 3000 random
+    trials matching this codebase's actual T-table semantics. Implemented in
+    `include/armrx/aes.hpp` as `encrypt_transform_neon`/`decrypt_transform_neon`,
+    gated behind a new `ARMRX_ENABLE_NEON_AES` CMake option (default OFF,
+    matching `ARMRX_ENABLE_JIT_FAST_DIV_SQRT`'s established pattern) —
+    every other call site unchanged. New `tests/test_aes_neon.cpp`: 256/256
+    SubBytes + InvSubBytes exact match, 20,000 random full-round parity
+    trials both directions — **compiled and passed on the first attempt on
+    real hardware, zero bugs found**, thanks to the exhaustive prior Python
+    verification. Full KATs and `test_aes_hash.cpp`'s golden pins byte-
+    identical with the flag ON; full `ctest` 12/12 green.
+
+    **Measured honestly, apples-to-apples (twice, to rule out a thermal
+    artifact): a real ~19.4% regression** on `fill_aes_1r_x4`/
+    `hash_aes_1r_x4` (28.4ms→33.9ms / 28.6ms→34.2ms). Same root cause as the
+    earlier hardware-AES re-enable attempt (`changelogs.md` 2026-07-20):
+    per-block NEON load/store overhead cancels the lookup savings on this
+    Cortex-A53 — this device's NEON pipeline just doesn't favor this
+    operation shape, independent of *which* NEON AES technique is tried.
+    **Kept, not reverted** (flag-gated, so "not adopted" just means leaving
+    the default OFF, unlike CSEL's unconditional-rewrite revert) — the
+    implementation, its exhaustive test coverage, and the mathematical
+    derivation are reusable reference material even though the performance
+    didn't pan out on this hardware. Full account, all verified constants,
+    and the complete derivation in `docs/neon-vector-permute-aes.md`.
 *   [ ] **(Lower priority, quick experiment) `--stagger-ms` default.**
     Currently defaults to 0 (`src/mining_engine.cpp:313`). A prior worker sweep
     (`changelogs.md` 2026-07-21) found 8-worker saturation drops per-worker

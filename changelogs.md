@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-07-23 — NEON Vector-Permute AES: Derived, Exhaustively Verified, Measured as a Regression
+
+Implements adopted lead #2 from the external performance audit (`PLAN.md` Phase 5, `NEXT_STEPS.md` §5a):
+
+- **Derived a full "vector-permute AES" S-box from scratch, in Python, before writing any C++**: found a root of AES's defining polynomial (x⁸+x⁴+x³+x+1) inside a tower-field representation GF(2⁴)[y]/(y²+y+λ), giving a provably correct isomorphism between GF(2⁸) (the AES field) and GF(2⁴)² — every sub-step of this then fits ARM NEON's 16-entry `vtbl`/`vqtbl1q` instructions, unlike the 256-entry T-tables this project uses (`src/soft_aes.cpp`), which don't. Verified byte-for-byte against the standard FIPS-197 S-box/inverse-S-box for all 256 values, and the full round structure (ShiftRows/MixColumns and their inverses) against 3000 random trials matching this codebase's actual `randomx_aes_lut_enc`/`randomx_aes_lut_dec` semantics — before ever touching an ARM intrinsic.
+- **Implemented** `encrypt_transform_neon`/`decrypt_transform_neon` (`include/armrx/aes.hpp`), gated behind a new `ARMRX_ENABLE_NEON_AES` CMake option (default OFF, matching `ARMRX_ENABLE_JIT_FAST_DIV_SQRT`'s established pattern) — every other call site (`aes_hash.cpp`, `aes_generator.cpp`) unchanged. Confirmed this is genuinely distinct from the two previously-reverted *hardware* `AESE`/`AESD`/`AESMC` attempts (2026-07-20 entry below) — a software vector-permute S-box has no fixed-AddRoundKey-position constraint.
+- **New `tests/test_aes_neon.cpp`**: 256/256 exact match for SubBytes and InvSubBytes against the standard S-box (broadcast-tested across all 16 NEON lanes), plus 20,000 random full-round parity trials comparing scalar vs NEON directly, both directions. **Compiled and passed on the first attempt on real hardware, zero bugs found** — a direct result of the exhaustive prior mathematical verification. Full KATs and `tests/test_aes_hash.cpp`'s existing golden pins stayed byte-identical with the flag on; full `ctest` 12/12 green on-device.
+- **Measured the actual payoff honestly, apples-to-apples** (twice, to rule out a thermal artifact — the first run had high variance, the second was clean and matched the first's mean): a real **~19.4% regression** on `fill_aes_1r_x4`/`hash_aes_1r_x4` (28.4ms→33.9ms / 28.6ms→34.2ms, `bench_armrx --micro-only`). Same root cause as the 2026-07-20 hardware-AES finding: per-block NEON load/store overhead cancels the lookup savings on this Cortex-A53, independent of which specific NEON AES technique is tried.
+- **Outcome**: kept, not reverted — since it's flag-gated (not an unconditional rewrite like CSEL), "not adopted" just means the default stays OFF. The implementation, its exhaustive test coverage, and the from-scratch mathematical derivation are reusable reference material even though the performance didn't pan out on this hardware. Full account in `docs/neon-vector-permute-aes.md`.
+
 ## 2026-07-23 — PGO Devbox Wiring: Tool Shipped, Real Infra Bug Fixed, Payoff Claim Did Not Reproduce
 
 Implements adopted lead #1 from the external audit (`PLAN.md` Phase 5, `NEXT_STEPS.md` §5a):

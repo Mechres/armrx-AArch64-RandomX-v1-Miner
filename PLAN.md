@@ -276,6 +276,29 @@ re-evaluation, but the audit's "+19.3%, single biggest lever" framing should
 not be repeated without re-measuring against whatever the codebase looks like
 at the time.
 
+**Item 2 outcome (2026-07-23): implemented, exhaustively verified correct,
+measured as a real regression.** Derived a full "vector-permute AES" S-box
+from scratch in Python before writing any C++ — GF(2⁸)↔tower-field GF(2⁴)²
+isomorphism via a root of AES's defining polynomial, verified 256/256 against
+the standard FIPS-197 S-box/inverse-S-box, full round structure verified
+against 3000 random trials matching this codebase's actual T-table
+semantics. Implemented as `encrypt_transform_neon`/`decrypt_transform_neon`
+in `include/armrx/aes.hpp`, gated behind a new `ARMRX_ENABLE_NEON_AES` CMake
+option (default OFF). New `tests/test_aes_neon.cpp` — 256/256 SubBytes/
+InvSubBytes exact match, 20,000 random full-round parity trials — **compiled
+and passed on the first attempt on real hardware, zero bugs found**. Full
+KATs and `test_aes_hash.cpp`'s golden pins byte-identical with the flag on;
+full `ctest` 12/12 green.
+
+Measured honestly, apples-to-apples (twice, ruling out a thermal artifact):
+a real **~19.4% regression** on `fill_aes_1r_x4`/`hash_aes_1r_x4`. Same root
+cause as the earlier hardware-AES re-enable attempt — per-block NEON
+load/store overhead cancels the lookup savings on this Cortex-A53,
+independent of *which* NEON AES technique is tried. Kept (flag-gated, default
+OFF) rather than reverted — the implementation, its test coverage, and the
+derivation are reusable even though the performance didn't pan out here.
+Full account in `docs/neon-vector-permute-aes.md`.
+
 ### Phase 3 (original, superseded — kept for reference)
 *   **Tasks:**
     1. Deploy QEMU AArch64 container environments on GitHub Actions CI (§4.1).

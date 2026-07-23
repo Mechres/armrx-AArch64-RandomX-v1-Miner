@@ -19,6 +19,7 @@ option(ARMRX_BUILD_TESTS "Build unit tests" ON)
 option(ARMRX_BUILD_FUZZERS "Build libFuzzer harnesses (requires Clang; PLAN.md §3.1)" OFF)
 option(ARMRX_JIT_PROFILE "Enable per-hash JIT profiling (adds 3 clock_gettime syscalls per hash)" OFF)
 option(ARMRX_ENABLE_JIT_FAST_DIV_SQRT "Enable fast Newton-Raphson JIT FDIV and FSQRT" OFF)
+option(ARMRX_ENABLE_NEON_AES "Use NEON vector-permute AES instead of scalar T-table lookups (experimental, needs on-device hashrate verification -- see docs/neon-vector-permute-aes.md)" OFF)
 option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OFF)
 option(ARMRX_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ARMRX_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
@@ -137,6 +138,11 @@ if(ARMRX_ENABLE_JIT_FAST_DIV_SQRT)
     message(STATUS "Fast JIT FDIV and FSQRT (Newton-Raphson) enabled")
 endif()
 
+if(ARMRX_ENABLE_NEON_AES)
+    target_compile_definitions(armrx_core PRIVATE ARMRX_ENABLE_NEON_AES)
+    message(STATUS "NEON vector-permute AES enabled (experimental)")
+endif()
+
 if(ARMRX_ENABLE_ASAN)
     target_compile_options(armrx_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(armrx_core PRIVATE -fsanitize=address)
@@ -238,6 +244,15 @@ if(ARMRX_BUILD_TESTS)
     # as a 120s hang (docs/branchless-cbranch.md) — bound this test explicitly
     # so a future CBRANCH regression fails fast instead of hanging forever.
     set_tests_properties(test_jit_equivalence PROPERTIES TIMEOUT 600)
+
+    # NEON vector-permute AES parity tests (PLAN.md Phase 5 / NEXT_STEPS.md §5a) — AArch64/NEON-
+    # only, always exercises both encrypt_transform/decrypt_transform (scalar) and
+    # encrypt_transform_neon/decrypt_transform_neon directly by name, independent of whether
+    # ARMRX_ENABLE_NEON_AES is set (that flag only controls production dispatch).
+    add_executable(test_aes_neon tests/test_aes_neon.cpp)
+    target_link_libraries(test_aes_neon PRIVATE armrx_core)
+    target_compile_options(test_aes_neon PRIVATE -UNDEBUG)
+    add_test(NAME test_aes_neon COMMAND test_aes_neon)
     endif()
 endif()
 
@@ -293,6 +308,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
             set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_determinism PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_equivalence PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_property(TARGET test_aes_neon PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         endif()
     endif()
 elseif(NOT ipo_supported)
