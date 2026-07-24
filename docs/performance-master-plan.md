@@ -298,7 +298,7 @@ maturity, "effort" includes *the risk of reproducing a known negative*.
 
 | # | Action | File / surface | Expected outcome | Rationale / caveat |
 |---|---|---|---|---|
-| L1 | **Peephole JIT coalescing** (`docs/peephole-jit-plan.md`, ROADMAP "P3") | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% *claimed* | **Re-scope before starting.** Estimate was framed against the debunked 31% branch-miss baseline; with IPC 0.708 the workload is stall-bound, so instruction coalescing likely underperforms the estimate. 3–6 week clean-room effort vs. XMRig disassembly. **Lowest EV item here — S1–S4 must be exhausted first.** |
+| L1 | **Peephole JIT coalescing** (`docs/peephole-jit-plan.md`, ROADMAP "P3") | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% *claimed* | **Re-scope before starting.** Estimate was framed against the debunked 31% branch-miss baseline; with IPC 0.708 the workload is stall-bound, so instruction coalescing likely underperforms the estimate. **Note (2026-07-24): the plan's original XMRig-disassembly methodology is now permanently out of scope (clean-room boundary, `PLAN.md` Phase 6 item 14) — any revival must use self-directed analysis of armrx's own generated code only.** **Lowest EV item here — S1–S4 must be exhausted first.** |
 | L2 | Bigger-RAM device evaluation (fast mode) | hardware | Unlocks the pure-bandwidth fast path; different optimization regime entirely | Not an armrx change — but note the *entire* light-mode compute bottleneck (§0) vanishes with ≥3 GiB RAM. If the deployment target can be a 4 GiB SBC, that dwarfs every software lead in this document. Worth raising as a deployment decision. |
 
 ---

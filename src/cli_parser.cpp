@@ -3,11 +3,30 @@
 #include "armrx/log.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <iostream>
+#include <limits>
+#include <stdexcept>
 #include <string_view>
 #include <thread>
 
 namespace armrx {
+
+namespace {
+// Range-validated unsigned parse (mirrors config.cpp): rejects negative
+// input (std::stoul silently wraps "-1" to 2^64-1) and values above
+// max_value (a bare static_cast silently truncates, e.g. port 65539 -> 3).
+// Throws std::out_of_range so callers' existing try/catch handles both.
+unsigned long long parse_bounded_ull(const std::string& s, unsigned long long max_value) {
+    const auto first = s.find_first_not_of(" \t");
+    if (first != std::string::npos && s[first] == '-')
+        throw std::out_of_range("negative value not allowed");
+    const auto v = std::stoull(s);
+    if (v > max_value)
+        throw std::out_of_range("value exceeds allowed maximum");
+    return v;
+}
+} // namespace
 
 ParsedArgs CommandLineParser::parse(int argc, char** argv) {
     ParsedArgs result;
@@ -70,7 +89,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 
         if (argument.rfind("--workers=", 0) == 0) {
             try {
-                o.workers = std::max(1U, static_cast<unsigned>(std::stoul(std::string{argument.substr(10)})));
+                o.workers = std::max(1U, static_cast<unsigned>(parse_bounded_ull(std::string{argument.substr(10)}, 4096)));
             } catch (...) {
                 std::cerr << "Invalid --workers value: " << argument.substr(10) << '\n';
                 result.should_exit = true;
@@ -99,7 +118,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 
         if (argument.rfind("--difficulty=", 0) == 0) {
             try {
-                o.difficulty = std::stoull(std::string{argument.substr(13)});
+                o.difficulty = parse_bounded_ull(std::string{argument.substr(13)}, std::numeric_limits<std::uint64_t>::max());
             } catch (...) {
                 std::cerr << "Invalid --difficulty value: " << argument.substr(13) << '\n';
                 result.should_exit = true;
@@ -111,7 +130,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 
         if (argument.rfind("--seconds=", 0) == 0) {
             try {
-                o.runtime_seconds = static_cast<unsigned>(std::stoul(std::string{argument.substr(10)}));
+                o.runtime_seconds = static_cast<unsigned>(parse_bounded_ull(std::string{argument.substr(10)}, std::numeric_limits<unsigned>::max()));
             } catch (...) {
                 std::cerr << "Invalid --seconds value: " << argument.substr(10) << '\n';
                 result.should_exit = true;
@@ -123,7 +142,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 
         if (argument.rfind("--warmup=", 0) == 0) {
             try {
-                o.warmup_secs = static_cast<unsigned>(std::stoul(std::string{argument.substr(9)}));
+                o.warmup_secs = static_cast<unsigned>(parse_bounded_ull(std::string{argument.substr(9)}, std::numeric_limits<unsigned>::max()));
             } catch (...) {
                 std::cerr << "Invalid --warmup value: " << argument.substr(9) << '\n';
                 result.should_exit = true;
@@ -162,7 +181,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
             if (colon != std::string::npos) {
                 host = addr.substr(0, colon);
                 try {
-                    port = static_cast<std::uint16_t>(std::stoul(addr.substr(colon + 1)));
+                    port = static_cast<std::uint16_t>(parse_bounded_ull(addr.substr(colon + 1), 65535));
                 } catch (...) {
                     std::cerr << "Invalid --pool port: " << addr.substr(colon + 1) << '\n';
                     result.should_exit = true;
@@ -240,7 +259,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
         }
         if (argument.rfind("--metrics-port=", 0) == 0) {
             try {
-                o.metrics_port = static_cast<std::uint16_t>(std::stoul(std::string{argument.substr(15)}));
+                o.metrics_port = static_cast<std::uint16_t>(parse_bounded_ull(std::string{argument.substr(15)}, 65535));
             } catch (...) {
                 std::cerr << "Invalid --metrics-port value: " << argument.substr(15) << '\n';
                 result.should_exit = true;
@@ -259,7 +278,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
         }
         if (argument.rfind("--stagger-ms=", 0) == 0) {
             try {
-                o.stagger_ms = static_cast<unsigned>(std::stoul(std::string{argument.substr(13)}));
+                o.stagger_ms = static_cast<unsigned>(parse_bounded_ull(std::string{argument.substr(13)}, 60000));
             } catch (...) {
                 std::cerr << "Invalid --stagger-ms value: " << argument.substr(13) << '\n';
                 result.should_exit = true;

@@ -87,8 +87,10 @@ the project itself has flagged is:
 - **Peephole JIT coalescing** (`ROADMAP.md` "P3"; `docs/peephole-jit-plan.md`):
   documented −5–10%, but the plan itself says to re-evaluate because it was
   framed against the old 31% branch-miss baseline that does NOT represent the
-  hot path (isolated hot path is 2.4%). 3–6 week clean-room effort against
-  XMRig's disassembly; high effort, uncertain payoff. Hashrate-vetoed on-device.
+  hot path (isolated hot path is 2.4%). High effort, uncertain payoff.
+  Hashrate-vetoed on-device. **(2026-07-24: the plan's original XMRig-disassembly
+  approach is permanently out of scope — clean-room boundary, `PLAN.md` Phase 6
+  item 14; any revival must be self-directed against armrx's own code.)**
 
 Lower-risk, non-JIT tuning knobs (measure on-device, not assumptions):
 - `--stagger-ms` default experiment (memory-bus contention under 8-worker

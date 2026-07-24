@@ -1,5 +1,41 @@
 # Changelog
 
+## 2026-07-24 — Audit Pass: Clean-Room Boundary Doc Stragglers + Range-Validated Numeric Parsing + JIT Review Fixes
+
+Follow-up audit after the clean-room boundary decision (entry below) plus a three-track
+fresh-eyes review (JIT encodings, Stratum/pool parsing, config consumption path).
+
+**Doc consistency — six stragglers still carried the old XMRig-internals framing, all fixed:**
+- `docs/peephole-jit-plan.md` — superseded-banner added at top (its whole methodology is
+  XMRig disassembly; body kept as historical record).
+- `docs/performance-master-plan-20260724.md` (L2 row), `docs/performance-master-plan.md`
+  (L1 row), `docs/performance-improvement-audit.md`, `docs/performance-next-agent-handoff.md`
+  (item 11 + Stage 4 step 4), `HANDOFF_CLAUDE.md` — reworded to the boundary + item 14's
+  self-directed framing.
+- `CLAUDE.md` — stale "known gap" claims removed (config.cpp guards and
+  `MetricsExporter::server_fd_` atomic were already fixed and marked done in `NEXT_STEPS.md`).
+
+**Range-validated numeric parsing (`src/config.cpp`, `src/cli_parser.cpp`):** the existing
+try/catch guards couldn't catch two classes of bad input: `std::stoul("-1")` silently wraps
+to 2^64−1 (`workers: -1` → attempt to spawn ~4B threads), and huge-but-valid values silently
+truncate through narrowing casts (`port 65539` → port 3). Added a shared
+`parse_bounded_ull()` helper (rejects leading `-`, enforces per-field maxima: ports ≤65535,
+workers ≤4096, stagger-ms ≤60000) at all 10 numeric parse sites in both files. Verified
+on-device: `--workers=-1` and `--metrics-port=65539` now exit 64 with a clear message.
+
+**JIT review fixes (`src/jit_compiler_a64.cpp`):** (1) corrected the stale buffer-layout
+comment claiming `.fill` reserves 16 words/instruction (6144 slots) — static.S actually
+reserves 32 (12288), and the fast div/sqrt path emits ~20 words, so "correcting" the .fill
+to the comment would have overflowed; (2) `h_IMUL_RCP`'s LDR-literal offset now masks to
+imm19 like the superscalar path already did (defensive parity; safe under current layout).
+Review otherwise clean: 0 encoding errors, 0 W^X issues, 0 branch off-by-one. Stratum/pool
+review: no memory-safety findings (two informational: `hex_to_bytes` silently coerces
+malformed hex; no early blob-length sanity check — both safely caught downstream).
+
+**Verified:** x86 build + full ctest 7/7; on-device build + 12/12 (KATs, JIT determinism/
+encodings/equivalence green; the 7 "BAD_COMMAND" failures in the first devbox run were the
+known CTest binary-path flake — direct re-run passed 5/5).
+
 ## 2026-07-24 — Clean-Room Boundary Decision: No XMRig Internals Inspection, Item 14 Reframed
 
 Prompted by a direct question from the user after item 13 landed: is inspecting XMRig's

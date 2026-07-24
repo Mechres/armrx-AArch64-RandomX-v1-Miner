@@ -87,7 +87,7 @@ Therefore, do not begin by spending weeks comparing every opcode against XMRig. 
 | 8 | Scratchpad prefetch A/B matrix | −2% to +3% | Low | Current hints may help one core but hurt 8-worker aggregate throughput |
 | 9 | Worker/core-mask and thermal steady-state sweep | 0–10% sustained | Low | Eight workers may not maximize thermally sustained throughput |
 | 10 | Conservative generated-VM scheduling | ~2–6% | High | Potentially useful on A53, but much harder to prove safe |
-| 11 | Broader XMRig emitted-code comparison | Unknown | Medium | Valuable only after region attribution shows generated handlers dominate |
+| 11 | ~~Broader XMRig emitted-code comparison~~ (ruled out 2026-07-24 — clean-room boundary, `PLAN.md` Phase 6 item 14; self-analysis of armrx's own code only) | — | — | Inspecting XMRig's generated code is permanently out of scope |
 | Frozen | Newton-Raphson FDIV/FSQRT | Unknown | Very high | Current path crashes and approximate FP must still be bit-identical |
 
 Treat all ranges as experiment budgets, not promises.
@@ -737,7 +737,7 @@ Keep only measured wins.
 1. Benchmark fused hash-and-fill batching.
 2. Integrate it into mining only with strong sequence/job-change tests.
 3. Consider limited generated-VM scheduling.
-4. Compare XMRig emitted output only for regions proven to dominate cycles.
+4. ~~Compare XMRig emitted output only for regions proven to dominate cycles.~~ **Ruled out 2026-07-24 — inspecting XMRig's emitted code violates the permanent clean-room boundary (`PLAN.md` Phase 6 item 14). Use self-directed analysis of armrx's own generated code instead.**
 
 ### Stage 5 — deferred/high-risk
 

@@ -5,10 +5,26 @@
 #include <iostream>
 #include <sstream>
 #include <cstdlib>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 namespace armrx {
 namespace {
+
+// Range-validated unsigned parse: rejects negative input (std::stoul would
+// silently wrap "-1" to 2^64-1) and values above max_value (a plain
+// static_cast would silently truncate, e.g. port 65539 -> 3). Throws
+// std::out_of_range so callers' existing try/catch handles both cases.
+unsigned long long parse_bounded_ull(const std::string& s, unsigned long long max_value) {
+    const auto first = s.find_first_not_of(" \t");
+    if (first != std::string::npos && s[first] == '-')
+        throw std::out_of_range("negative value not allowed");
+    const auto v = std::stoull(s);
+    if (v > max_value)
+        throw std::out_of_range("value exceeds allowed maximum");
+    return v;
+}
 
 // Parse "host:port" string
 PoolConfig parse_pool_str(const std::string& s) {
@@ -17,7 +33,7 @@ PoolConfig parse_pool_str(const std::string& s) {
     if (colon != std::string::npos) {
         pc.host = s.substr(0, colon);
         try {
-            pc.port = static_cast<std::uint16_t>(std::stoul(s.substr(colon + 1)));
+            pc.port = static_cast<std::uint16_t>(parse_bounded_ull(s.substr(colon + 1), 65535));
         } catch (const std::exception& ex) {
             std::cerr << "[Config] Warning: invalid pool port in \"" << s
                       << "\" (" << ex.what() << "), using default port " << pc.port << '\n';
@@ -74,7 +90,7 @@ AppConfig load_config(const std::string& path) {
     auto workers_str = armrx::json::get_raw(json, "workers");
     if (!workers_str.empty()) {
         try {
-            cfg.workers = static_cast<unsigned>(std::stoul(workers_str));
+            cfg.workers = static_cast<unsigned>(parse_bounded_ull(workers_str, 4096));
         } catch (const std::exception& ex) {
             std::cerr << "[Config] Warning: invalid \"workers\" value \"" << workers_str
                       << "\" (" << ex.what() << "), ignoring\n";
@@ -84,7 +100,7 @@ AppConfig load_config(const std::string& path) {
     auto diff_str = armrx::json::get_raw(json, "difficulty");
     if (!diff_str.empty()) {
         try {
-            cfg.difficulty = std::stoull(diff_str);
+            cfg.difficulty = parse_bounded_ull(diff_str, std::numeric_limits<std::uint64_t>::max());
         } catch (const std::exception& ex) {
             std::cerr << "[Config] Warning: invalid \"difficulty\" value \"" << diff_str
                       << "\" (" << ex.what() << "), ignoring\n";
@@ -94,7 +110,7 @@ AppConfig load_config(const std::string& path) {
     auto sec_str = armrx::json::get_raw(json, "seconds");
     if (!sec_str.empty()) {
         try {
-            cfg.seconds = static_cast<unsigned>(std::stoul(sec_str));
+            cfg.seconds = static_cast<unsigned>(parse_bounded_ull(sec_str, std::numeric_limits<unsigned>::max()));
         } catch (const std::exception& ex) {
             std::cerr << "[Config] Warning: invalid \"seconds\" value \"" << sec_str
                       << "\" (" << ex.what() << "), ignoring\n";

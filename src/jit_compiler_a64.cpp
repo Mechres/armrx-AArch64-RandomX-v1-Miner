@@ -35,8 +35,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <atomic>
 
 // Verify the JIT code buffer layout: the .fill directive in static.S reserves
-// RANDOMX_PROGRAM_MAX_SIZE * 16 * 4 bytes (6144 AArch64 instruction slots).
-// Each RandomX instruction must compile to at most 16 AArch64 words.
+// RANDOMX_PROGRAM_MAX_SIZE * 32 * 4 bytes (12288 AArch64 instruction slots).
+// Worst-case emission per RandomX instruction is ~20 AArch64 words
+// (h_FDIV_M/h_FSQRT_R under ARMRX_JIT_FAST_DIV_SQRT); the 32-word budget
+// leaves headroom. Do NOT shrink the .fill in static.S below the fast
+// div/sqrt worst case.
 // RANDOMX_PROGRAM_MAX_SIZE is fixed at 384 per the RandomX v1 spec.
 static_assert(RANDOMX_PROGRAM_MAX_SIZE == 384, "Upstream RandomX v1 constant");
 #include "armrx/superscalar.hpp"
@@ -942,7 +945,10 @@ void JitCompilerA64::h_IMUL_RCP(Instruction& instr, uint32_t& codePos)
 	else
 	{
 		// ldr tmp_reg, reciprocal
-		const uint32_t offset = (literalPos - k) / 4;
+		// Mask to the 19-bit imm19 field like the superscalar path does —
+		// defensive parity: keeps a (hypothetical) negative offset from
+		// spilling into opcode bits [31:24] via the <<5 shift.
+		const uint32_t offset = ((literalPos - k) / 4) & ((1 << 19) - 1);
 		emit32(ARMV8A::LDR_LITERAL | tmp_reg | (offset << 5), code, k);
 
 		// mul dst, dst, tmp_reg

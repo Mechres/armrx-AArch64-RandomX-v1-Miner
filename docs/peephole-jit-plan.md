@@ -1,5 +1,15 @@
 # Peephole JIT Coalescing — Plan (v2, incorporating review)
 
+> **⚠️ Superseded in part by the clean-room boundary (2026-07-24, permanent — see `PLAN.md`
+> Phase 6, note after item 13).** This plan's methodology of disassembling XMRig's
+> JIT-generated output and diffing it against armrx's (Guiding principle 2, Phase 1's
+> "reference dump" steps, and every "compare against XMRig's emitted code" step below) is
+> **no longer permitted** — inspecting another miner's compiled output is ruled out, not just
+> deprioritized. Black-box comparison (hashrate, `perf stat` counters) remains fine. If this
+> plan is ever revived, it must be rebuilt around self-directed analysis of armrx's own
+> generated code plus first-principles ARM64 reasoning (the approach `PLAN.md` item 14 now
+> prescribes). The text below is kept as historical record, unedited.
+
 **Goal**: Close the ~33% instruction-count gap between armrx and XMRig's
 AArch64 JIT output (measured at 64.3B vs 48.2B instructions per benchmark).
 

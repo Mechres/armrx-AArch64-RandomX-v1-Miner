@@ -576,6 +576,21 @@ than running them in parallel.
     effort) is worth starting; do **not** start it on the old, now-debunked 31%-branch-miss-era
     estimate. No XMRig-side comparison is in scope for this item — see the boundary note
     above.
+
+    **First static count toward this reconciliation (2026-07-24, self-analysis only):**
+    counting instructions per labeled region directly from `jit_compiler_a64_static.S` and
+    the `generateSuperscalarHash()` emission code gives, per `rx_calc_dataset_item` call:
+    entry 36 + 8 rounds × (AND 1 + prefetch 3 + jump 1 + mix 12 + reg-update 1) + store 13
+    ≈ **~185 fixed insns/call → ~3.0M/hash (~2.3%)**. The light-mode main VM loop's fixed
+    per-iteration overhead (main_loop 40 + xor_with_dataset_line 12 + update_spMix1 9 +
+    end_light chunks ~11 + light_dataset_offset 8 + `v2_FE_mix_soft_aes` 189 ≈ ~270/iter)
+    adds ≈ **4.4M/hash**. So *all* fixed JIT-region wrappers together explain only ~7.4M of
+    the missing ~74.5M — item 13's 58.4M + these ~7.4M + the ~4-5M main VM program body
+    still leaves **~60M insns/hash unaccounted in emitted code entirely**. The remainder
+    almost certainly lives in the C++ side (software T-table AES scratchpad fill/hash,
+    Blake2b, superscalar-adjacent C++). Next step for this item is therefore *not* more JIT
+    instrumentation but `perf record`/self-attribution of armrx's own binary by symbol —
+    fully inside the boundary.
 15. Re-run `devbox_pgo_build` (tool already exists, kept from Phase 5) after any medium/long-term item lands meaningfully — PGO nulled out on today's code shape, but a reshaped binary may reopen it. Free to re-check, never rebuild the tooling.
 16. ~~Re-baseline `README.md`'s stale 5.2 H/s single-thread / ~28 H/s 8-worker figures honestly~~ — **✅ done (2026-07-24)**, using item 2's sweep data: `README.md`'s performance table now shows 4.27 H/s (1 worker), and 16.82/21.13/24.95 H/s (4/6/8 workers) with per-point efficiency, replacing the stale "linear scaling" claim.
 
