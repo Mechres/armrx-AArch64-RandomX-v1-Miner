@@ -591,6 +591,48 @@ than running them in parallel.
     Blake2b, superscalar-adjacent C++). Next step for this item is therefore *not* more JIT
     instrumentation but `perf record`/self-attribution of armrx's own binary by symbol —
     fully inside the boundary.
+
+    **`perf record` self-attribution (2026-07-24, self-analysis only) — corrects the above
+    hypothesis.** Ran `perf record -F 999 -g -e cycles` directly on `./armrx --mine
+    --workers=8` under a representative light-mode run (20s warmup + 60s steady-state, all 8
+    workers confirmed contributing — worker[0-3] 3.20 H/s, worker[4-7] 1.60 H/s, matching
+    item 3's known ~2:1 cluster-arbitration split almost exactly, a good consistency check),
+    486K samples. This is the first *live system-profiler* capture of the real mining hot
+    path in this project — everything before this was static (`--jit-dump`, `.S` source
+    counting).
+
+    Result: only **~14-15% of self-time samples resolve to a named C++ symbol** at all —
+    dominated by `randomx_calculate_hash` (~12%, the C++ entry point wrapping the whole
+    per-hash call) and `permute_16_neon`/`Argon2dCache::initialize` (~1-2% combined). The
+    remaining **~85%** doesn't resolve to any named function: ~44% shows as thousands of
+    distinct raw hex addresses (`[.] 0x0000ffff...`), and a further ~41% doesn't even resolve
+    a leaf frame in the call-graph view at all (consistent with `-O3` frame-pointer omission
+    plus zero unwind/CFI info existing for a raw JIT buffer). **Directly verified, not
+    inferred**: dumped `/proc/<pid>/maps` during a live mining run and found multiple
+    (~1/worker) small **150-370 KiB `rwxp` anonymous mappings** sitting in the exact same
+    `0xffffXXXXXXXX` address range as the unresolved perf samples — i.e. these samples
+    provably land inside the runtime-JIT-compiled code, which has no symbol table and is
+    invisible to any generic profiler or disassembler by construction, not a profiling
+    artifact.
+
+    **This corrects the prior hypothesis, not confirms it.** The remaining ~60M
+    instructions/hash do *not* primarily live in the C++ side — `ROADMAP.md`'s own region
+    breakdown already measured AES scratchpad fill/hash at only 0.3% and Blake2b at 0.0% of
+    hash *time*, and this session's named-symbol total (~14-15%) is consistent with that
+    being small. The missing instructions are overwhelmingly still inside JIT-generated code
+    — just not the parts item 13/14's static counting has covered so far (the variable
+    superscalar-opcode region, the fixed per-call wrapper chunks, and the main VM program's
+    fixed per-iteration overhead). Something in the JIT-generated code is bigger than any of
+    those three static counts accounted for.
+
+    **Concrete next step, still fully self-directed**: correlate perf's raw sample addresses
+    against item 13's own `JitDumpEntry`/`getSuperscalarJitDump()` offset tables — subtract
+    each worker's JIT-buffer base address (readable from `/proc/<pid>/maps` at capture time,
+    or exposed via a small diagnostic hook) from each sampled IP, then look up which
+    RandomX-opcode byte range that offset falls in. This gives real opcode-level cycle
+    attribution *inside* the JIT code, which neither `perf report`'s generic symbolization
+    nor the static instruction count alone can produce — a small, self-contained correlation
+    script using only armrx's own tooling, not yet built.
 15. Re-run `devbox_pgo_build` (tool already exists, kept from Phase 5) after any medium/long-term item lands meaningfully — PGO nulled out on today's code shape, but a reshaped binary may reopen it. Free to re-check, never rebuild the tooling.
 16. ~~Re-baseline `README.md`'s stale 5.2 H/s single-thread / ~28 H/s 8-worker figures honestly~~ — **✅ done (2026-07-24)**, using item 2's sweep data: `README.md`'s performance table now shows 4.27 H/s (1 worker), and 16.82/21.13/24.95 H/s (4/6/8 workers) with per-point efficiency, replacing the stale "linear scaling" claim.
 

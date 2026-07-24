@@ -1,5 +1,45 @@
 # Changelog
 
+## 2026-07-24 — Item 14: Live `perf record` Self-Profiling Corrects the "Missing Instructions Are In C++" Hypothesis
+
+Continuation of item 14's instruction-count reconciliation, this time with a live system
+profiler instead of more static counting. On-device: `perf record -F 999 -g -e cycles` on
+the real `./armrx --mine --workers=8` binary (not `bench_armrx`), 20s warmup + 60s
+steady-state, 486K samples. All 8 workers confirmed contributing (worker[0-3] 3.20 H/s,
+worker[4-7] 1.60 H/s — matches item 3's ~2:1 cluster-arbitration split almost exactly, a
+good sanity check that this run was representative). This is the first live-profiler capture
+of the mining hot path in this project; everything before was static (`--jit-dump`, `.S`
+source counting).
+
+**Two hiccups along the way, both benign**: (1) an earlier `devbox_build` call's remote
+process kept running after the MCP client reported "Connection closed" and disconnected;
+the next `devbox_build` invocation raced against it on the same output files, corrupting 4-5
+linked binaries to 0 bytes. Fixed by killing the orphaned process tree and forcing a clean
+relink (`rm` the corrupted stubs, rebuild) — full 12/12 on-device test pass confirmed
+afterward. (2) The first `perf record` attempt used too short a warmup (5s) against a ~14s
+cache-init cost, so cluster 1's workers (4-7) never got a single post-warmup hash in and
+reported 0.00 H/s; redone with 20s warmup, all 8 workers contributed correctly.
+
+**Finding**: only ~14-15% of self-time samples resolve to a named C++ symbol at all
+(`randomx_calculate_hash` ~12%, `permute_16_neon`/`Argon2dCache::initialize` ~1-2%
+combined). The remaining ~85% is unattributed — ~44% as thousands of distinct raw hex
+addresses, ~41% not resolving a leaf frame at all (consistent with `-O3` frame-pointer
+omission and zero unwind info in a raw JIT buffer). **Verified, not inferred**: dumped
+`/proc/<pid>/maps` during a live run and found several ~150-370 KiB `rwxp` anonymous
+mappings (one per worker) in the exact same address range as the unresolved samples —
+proof these are genuinely inside the runtime-JIT-compiled code, not a profiling artifact.
+
+**This corrects item 13's closing hypothesis** ("the remainder almost certainly lives in the
+C++ side") rather than confirming it — `ROADMAP.md`'s own region breakdown already measured
+AES scratchpad and Blake2b at 0.3%/0.0% of hash time, too small to hide ~60M instructions/
+hash, and this session's ~14-15% named-C++ total corroborates that independently. The
+missing instructions are still inside JIT-generated code, just not the three regions item
+13/14 already counted statically (variable superscalar opcodes, fixed per-call wrappers,
+main VM program's fixed per-iteration overhead). Next, still self-directed: correlate perf's
+raw sample addresses against item 13's `JitDumpEntry` offset tables for real opcode-level
+attribution inside the JIT buffer — a small script, not yet built. See `PLAN.md` Phase 6
+item 14 for the full account.
+
 ## 2026-07-24 — Audit Pass: Clean-Room Boundary Doc Stragglers + Range-Validated Numeric Parsing + JIT Review Fixes
 
 Follow-up audit after the clean-room boundary decision (entry below) plus a three-track
