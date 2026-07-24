@@ -13,7 +13,7 @@ Cross-checked `ROADMAP.md` against the actual source. The completed claims hold:
 - **Crypto core** — `src/blake2b.cpp` (NEON + scalar), `src/argon2.cpp` (NEON G-function via `vmull_u32`+`vmovn_u64`), `src/aes_hash.cpp` (`vaeseq`/`vaesmcq` chains) all produce reference KAT vectors. NEON paths are idiomatic, not hand-rolled ASM. `tests/test_blake2b.cpp:194,200` asserts both KAT inputs in interpreted mode and lines `209,213` re-assert under `#ifdef ARMRX_HAVE_JIT`.
 - **JIT backend** — `src/jit_compiler_a64.cpp` uses a frequency-weighted 256-entry dispatch table (`engine[256]`, header line 73) with `REPN(..., WT(x))`. Static template `jit_compiler_a64_static.S` reserves 6144 slots. W^X is honored via `setPagesRW→emit→setPagesRX` unless `rwx_` is set.
 - **Dispatch-table refactor (P1)** — `kCompileHandlers[256]` in `vm.cpp:539–612` plus a clean enum switch in `execute_bytecode` (`vm.cpp:621–758`). Two-table design (raw opcode → bytecode → enum) is sound.
-- **Branchless CBRANCH (O11)** — `jit_compiler_a64.cpp:1156–1174` deploys the `bne .Lskip; b target` form with `imm19=2`. The postmortem in `docs/branchless-cbranch.md` correctly identifies the prior hang as an off-by-one in the B.cond immediate.
+- **Branchless CBRANCH (O11)** — `jit_compiler_a64.cpp:1156–1174` deploys the `bne .Lskip; b target` form with `imm19=2`. The postmortem in `docs/experiments/branchless-cbranch.md` correctly identifies the prior hang as an off-by-one in the B.cond immediate.
 - **Pool/network surface area** exists end-to-end: subscribe/authorize/notify/submit in `stratum_client.cpp`, CryptoNote + Stratum V1 fallback, exponential backoff, multi-pool failover in `pool_manager.cpp`.
 - **Tooling** — `bench_armrx.cpp` registered in CTest; ASan/UBSan/PGO/LTO CMake options all wired in `CMakeLists.txt:7–13, 104–136`; `.clang-format` / `.clang-tidy` present.
 
@@ -24,7 +24,7 @@ Cross-checked `ROADMAP.md` against the actual source. The completed claims hold:
 | **S7 — `emit32` UB** | Marked ✅ (memcpy fix) | **Done and verified** at `jit_compiler_a64.hpp:81–91`. Close it. |
 | **S8 — Dangling pointer contract** | Marked ⏸️ (docs deferred) | Still **relevant** — see §2.1, the `getCode()` encapsulation gap is the dangling-pointer entry point. |
 | **O12 — Newton-Raphson FDIV/FSQRT** | Marked ⏸️ Frozen (segfault) | **Correctly frozen.** `OPTIMIZATION_REFERENCE.md:46` documents x29 corruption on Cortex-A53 in-order. Keep frozen; the `h_FDIV_M` Markstein loop at `jit_compiler_a64.cpp:1045–1079` emits **17 instructions** that a different optimization (drop iterations 2–3) can shrink without touching NR. |
-| **P3 — Peephole JIT coalescing** | 🔴 Remaining | **Primary performance lever.** 33% instruction-count gap is the whole story. Plan in `docs/peephole-jit-plan.md` is sound — Phase 1.2 frequency data is the prerequisite. |
+| **P3 — Peephole JIT coalescing** | 🔴 Remaining | **Primary performance lever.** 33% instruction-count gap is the whole story. Plan in `docs/plans/peephole-jit-plan.md` is sound — Phase 1.2 frequency data is the prerequisite. |
 | **Stratum V2** | Remaining | **Low priority.** No Monero pool requires it today; existing Stratum V1 / CryptoNote stack works. Defer until a target pool mandates it. |
 | **Prometheus endpoint** | Remaining | **Medium priority** — but should be blocked *behind* the structured-logger refactor (§2.5), otherwise it duplicates the ad-hoc `std::cerr` problem in a second sink. |
 | **Cross-compile CI** | Remaining | **Medium** — only valuable if paired with the determinism test from `peephole-jit-plan.md:1.5`. |
@@ -113,14 +113,14 @@ From `OPTIMIZATION_REFERENCE.md:67–73`:
 | Cycles | 78.5B | 75.0B | +5% |
 | Branch misses | 152M | 11M | **+13×** |
 
-Cycles are within 5% — the CPU is doing comparable work. The gap is *pure emitted-code volume* plus branch misprediction. The path forward is `docs/peephole-jit-plan.md`, with the highest-leverage specific targets already identified by the audit:
+Cycles are within 5% — the CPU is doing comparable work. The gap is *pure emitted-code volume* plus branch misprediction. The path forward is `docs/plans/peephole-jit-plan.md`, with the highest-leverage specific targets already identified by the audit:
 
 - **`h_FDIV_M` Markstein loop** (`jit_compiler_a64.cpp:1045–1079`) emits **17 instructions** with 3 NR-style iteration pairs. RandomX does not require IEEE-correct rounding on FDIV_M. If the KAT suite passes with 2 iterations, **drop the third pair → −8 instructions per FDIV_M, 4× per program = −32 instructions/program**. This is a single-opcode win bigger than most of Phase 2 combined. **Must** be KAT-vetoed per the plan's principle #1.
 - **`h_IMUL_RCP` immediate materialization** (`jit_compiler_a64.cpp:500–526`): `emitMovImmediate` long-path emits `movz`+`movk` for any imm ≥ 2¹⁶, but `movz` with `hw=0..3` encodes any single-halfword immediate in one instruction. Add the single-halfword fast path.
 - **`emitMemLoad` mask redundancy** (`:567–598`): `emitAddImmediate` may emit up to 3 instructions, then the result is AND-masked. Fold the AND into the addressing when the add fits the low 12 bits.
 - **`h_IROR_R` / `h_IROL_R`** (`:901–955`): armrx uses `rotr`/`rotl`; `extr` (rotate-insert) may save an instruction and is the form XMRig uses for these.
 
-**Branch misses (+13×)** is the second-order problem. The branchless CBRANCH fix addressed one site; the BTB-aliasing caveat in `docs/branchless-cbranch.md:71–79` (per-program JIT regeneration means fixed code addresses see rotating branch behavior) is the larger contributor and has no cheap fix — it's a property of regenerating the JIT buffer per seed. Worth measuring with `perf stat -e branch-misses` after Phase 1.1 lands.
+**Branch misses (+13×)** is the second-order problem. The branchless CBRANCH fix addressed one site; the BTB-aliasing caveat in `docs/experiments/branchless-cbranch.md:71–79` (per-program JIT regeneration means fixed code addresses see rotating branch behavior) is the larger contributor and has no cheap fix — it's a property of regenerating the JIT buffer per seed. Worth measuring with `perf stat -e branch-misses` after Phase 1.1 lands.
 
 ### 3.2 Memory: huge pages, cold-start faults, and mprotect visibility
 
@@ -233,7 +233,7 @@ Goal: close correctness regressions and the ROADMAP's open "soft" items. No new 
 
 Goal: close the performance gap and modularize for maintainability.
 
-**P2.1 JIT peephole program (the ROADMAP's P3) — execute `docs/peephole-jit-plan.md`**
+**P2.1 JIT peephole program (the ROADMAP's P3) — execute `docs/plans/peephole-jit-plan.md`**
 - Phase 1.1: `--jit-dump` flag with opcode boundary markers in `src/main.cpp`.
 - Phase 1.2: `tests/bench_opcodes.cpp` with frequency histograms from real RandomX programs.
 - Phase 1.3: spot-check whether register allocation dominates the gap (informs Phase 3.1).

@@ -152,7 +152,7 @@ by `imm19=1` instead of `imm19=2` in the `bne` offset — since fixed). The curr
 CBRANCH emits 1 extra instruction vs the original `beq`. Compare against XMRig's
 approach in Phase 2 to see if they avoid this entirely with a different encoding.
 
-See `docs/branchless-cbranch.md` for the full post-mortem.
+See `docs/experiments/branchless-cbranch.md` for the full post-mortem.
 
 ---
 

@@ -122,7 +122,7 @@ The encrypt path happened to match by coincidence (verified by comparison test),
 
 ### 2.5 Other Recent Fixes (non-AES)
 
-- **JIT CBRANCH encoding bug** — imm19 displacement sign-extension issue; fixed with branchless CBRANCH (`docs/branchless-cbranch.md`). Status: ✅ O11.
+- **JIT CBRANCH encoding bug** — imm19 displacement sign-extension issue; fixed with branchless CBRANCH (`docs/experiments/branchless-cbranch.md`). Status: ✅ O11.
 - **Stratum protocol** — CryptoNote (herominers.com) login flow fixed after initial CryptoNote → Stratum V1 fallback.
 - **Various** — Pool connection fixes, JSON injection protection, `stratum_` mutex use-after-free, `session_id_` escape, JSON parser scope fixes, CLI numeric validation, SIGTERM handler, concurrency atomics.
 
@@ -243,7 +243,7 @@ Status: **Not started.** The branchless CBRANCH optimization (O11) that was impl
 
 **The AES bug may have inflated some of the earlier branch-miss measurements**, because the wrong code paths could produce different CBRANCH patterns. A re-baseline with corrected hashes is needed before starting CBRANCH optimization work.
 
-The current plan (from `docs/performance-next-agent-handoff.md` §22.5):
+The current plan (from `docs/plans/performance-next-agent-handoff.md` §22.5):
 1. Evaluate CSEL/CINC to conditionally select register values instead of branching.
 2. Balance taken/not-taken path costs.
 3. Apply BTB-aware code layout.
@@ -325,10 +325,10 @@ The commit history is **acceptable for active development** but would benefit fr
 | `changelogs.md` | ✅ Current | Chronological record of all changes |
 | `ROADMAP.md` | ✅ Current | Completed/remaining, updated with AES fix |
 | `REASONIX.md` | ✅ Current | Project card with conventions |
-| `docs/aes-ttable-bug-postmortem.md` | ✅ New | Full root cause analysis, detection method, verification |
-| `docs/branchless-cbranch.md` | ✅ Current | CBRANCH analysis |
-| `docs/peephole-jit-plan.md` | ✅ Current | Instruction-gap plan |
-| `docs/performance-next-agent-handoff.md` | ✅ Current | Priority-ranked experiment list |
+| `docs/postmortems/aes-ttable-bug-postmortem.md` | ✅ New | Full root cause analysis, detection method, verification |
+| `docs/experiments/branchless-cbranch.md` | ✅ Current | CBRANCH analysis |
+| `docs/plans/peephole-jit-plan.md` | ✅ Current | Instruction-gap plan |
+| `docs/plans/performance-next-agent-handoff.md` | ✅ Current | Priority-ranked experiment list |
 | `docs/beyond-parity.md` / `docs/new_plan.md` | ✅ Current (renamed) | Post-parity analysis |
 | `PLAN.md` / `plan.md` | ⚠️ Duplicates | Two plan files exist — should consolidate |
 | `OPTIMIZATION_REFERENCE.md` | ✅ Current | Full optimization history with data |

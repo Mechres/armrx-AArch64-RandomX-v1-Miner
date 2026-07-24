@@ -5,7 +5,7 @@
 // This replaces an earlier, much weaker version of this test that only
 // checked each CBRANCH's emitted size (>=4 bytes) despite this file's own
 // original comment claiming to verify branch targets — it never actually
-// did. See docs/branchless-cbranch.md's "Unit test recommendation" section:
+// did. See docs/experiments/branchless-cbranch.md's "Unit test recommendation" section:
 // a prior CBRANCH encoding bug (imm19 off-by-one) caused an infinite loop
 // that only showed up as a 120s test *hang*, not a fast, localized failure.
 // Decoding the real bytes turns that into an instant assertion.

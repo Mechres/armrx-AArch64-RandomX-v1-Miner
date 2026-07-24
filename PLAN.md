@@ -51,7 +51,7 @@ already done). None of these block or relate to Phase 6 below.
 ## Phase 6 — current (2026-07-24): dual master-plan synthesis, on-device verification first
 
 Two independent performance master plans were produced against current HEAD (`88f4122`):
-`docs/performance-master-plan.md` (this assistant) and `docs/performance-master-plan-20260724.md`
+`docs/plans/performance-master-plan.md` (this assistant) and `docs/plans/performance-master-plan-20260724.md`
 ("Hermes" agent). Both post-date, and explicitly build on, Phase 3/5's closed-leads list
 (CSEL/CBRANCH, NEON AES ×3, Newton-Raphson, PGO, `--stagger-ms` — all re-verified correct in
 both new plans, **not re-opened**). This phase reconciles the two into one adopted plan rather
@@ -77,7 +77,7 @@ than running them in parallel.
 **Where the two plans diverge (reconciled, not run in parallel):**
 - The opus plan treats IPC 0.708 as near-conclusive evidence that instruction-level JIT
   changes are low-EV until the memory-side questions are answered, and ranks peephole/
-  literal-pool work last (`docs/performance-master-plan.md` §2.3, §5 L1).
+  literal-pool work last (`docs/plans/performance-master-plan.md` §2.3, §5 L1).
 - The Hermes plan reaches the same IPC number but stays specific about *which* instruction-
   level changes could plausibly help an in-order core stalling on load-use latency —
   register-offset FP loads, software-pipelined load/convert groups, literal-pool relayout —
@@ -89,7 +89,7 @@ than running them in parallel.
   huge-page or worker-count fix could change the instruction stream's stall profile enough to
   make premature emitter surgery wasted effort. Adopt both plans' shared verification step
   first; treat the Hermes-plan emitter items as the next tier, gated on what that verification
-  shows; treat opus's full peephole-JIT rewrite (`docs/peephole-jit-plan.md`) as lowest-EV,
+  shows; treat opus's full peephole-JIT rewrite (`docs/plans/peephole-jit-plan.md`) as lowest-EV,
   unstarted without a fresh region-scoped measurement per its own gate.
 
 **Adopted phased plan (supersedes running either source doc standalone):**
@@ -572,7 +572,7 @@ than running them in parallel.
     emission code) to get a real number for these regions, using only armrx's own code and
     first-principles ARM64 ISA reasoning — the same method items 7-10 already used
     successfully. Only after this reconciliation is complete does it make sense to judge
-    whether `docs/peephole-jit-plan.md`'s full peephole-JIT rewrite (3-6 week clean-room
+    whether `docs/plans/peephole-jit-plan.md`'s full peephole-JIT rewrite (3-6 week clean-room
     effort) is worth starting; do **not** start it on the old, now-debunked 31%-branch-miss-era
     estimate. No XMRig-side comparison is in scope for this item — see the boundary note
     above.

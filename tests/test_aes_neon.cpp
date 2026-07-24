@@ -1,7 +1,7 @@
 // Regression + parity tests for the NEON vector-permute AES implementation
 // (include/armrx/aes.hpp's encrypt_transform_neon/decrypt_transform_neon), added to explore
 // PLAN.md Phase 5 / NEXT_STEPS.md SS5a's adopted "NEON software AES" lead. See
-// docs/neon-vector-permute-aes.md for the full mathematical derivation (done independently in
+// docs/experiments/neon-vector-permute-aes.md for the full mathematical derivation (done independently in
 // Python before any C++ was written, verifying the tower-field S-box construction against the
 // standard FIPS-197 S-box for all 256 byte values, and the full round structure against this
 // project's actual T-table semantics for thousands of random trials).

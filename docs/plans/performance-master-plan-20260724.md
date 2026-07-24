@@ -2,7 +2,7 @@
 
 **Baseline for this plan:** HEAD `88f4122`, target = 8× Cortex-A53 (in-order, dual-issue,
 Snapdragon 410-class), ~2 GiB single-channel LPDDR3, Alpine/musl, GCC 15.
-**Ground truth (measured, benchmark v2, `docs/performance-next-agent-handoff.md` §22):**
+**Ground truth (measured, benchmark v2, `docs/plans/performance-next-agent-handoff.md` §22):**
 
 | Fact | Value | Source |
 |---|---|---|

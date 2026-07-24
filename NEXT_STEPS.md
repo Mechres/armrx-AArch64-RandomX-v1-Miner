@@ -6,7 +6,7 @@
 
 This file mirrors the prioritized, actionable subset of `PLAN.md`'s current phase
 (**Phase 6**, 2026-07-24 — a reconciliation of two independent performance master plans,
-`docs/performance-master-plan.md` and `docs/performance-master-plan-20260724.md`). See
+`docs/plans/performance-master-plan.md` and `docs/plans/performance-master-plan-20260724.md`). See
 `PLAN.md` for the full evidence/reasoning behind each item; this is the short-list view.
 Phases 1–5 (everything before Phase 6) are **fully resolved** — see
 `docs/archived/plan_completed_phases_1-5.md` for the full narrative, or the "Resolved"
@@ -100,7 +100,7 @@ window; long-duration (15–30 min) sustained thermal throttling is a distinct, 
 | **IPC (isolated hot path)** | — | **0.708** (~35% of dual-issue peak) | — |
 
 The aggregate 31.08% figure does **not** represent the mining hot path — see
-`docs/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining
+`docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining
 hot path" section. It's 94.93% driven by `bench_armrx --attribution-only`'s
 non-representative interpreted-mode comparison run. The real hot path's rate
 (2.4%) costs only ~0.1–0.16% of cycles to misprediction — CBRANCH work has
@@ -113,8 +113,8 @@ reframes every remaining performance lead.
 
 ## Prioritized Next Steps (PLAN.md Phase 6, 2026-07-24)
 
-Synthesis of two independent master plans (`docs/performance-master-plan.md`,
-`docs/performance-master-plan-20260724.md`) — see `PLAN.md` Phase 6 for the full
+Synthesis of two independent master plans (`docs/plans/performance-master-plan.md`,
+`docs/plans/performance-master-plan-20260724.md`) — see `PLAN.md` Phase 6 for the full
 agree/diverge reconciliation. Nothing below has started yet.
 
 ### Short-term (hours, zero/low code risk — on-device only, do first)
@@ -190,19 +190,19 @@ agree/diverge reconciliation. Nothing below has started yet.
 *   [x] `MetricsExporter::server_fd_` data race — now `std::atomic<int>`.
 *   [x] `cli_parser.cpp` test coverage — new `tests/test_cli_parser.cpp`; found and fixed a real bug (`--config=` always exited with "Unknown argument", code 64).
 *   [x] `aes_hash.cpp` direct helper test coverage — new `tests/test_aes_hash.cpp` (golden pins + `hash_and_fill_aes_1r_x4` decomposition-equivalence check).
-*   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/argon2-neon-diagonal-vectorization.md`.
-*   [x] Argon2 `memcpy` copy-elimination — implemented, measured, reverted (no net win, cost relocated not eliminated). See `docs/argon2-compress-copy-elimination.md`.
-*   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
+*   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/experiments/argon2-neon-diagonal-vectorization.md`.
+*   [x] Argon2 `memcpy` copy-elimination — implemented, measured, reverted (no net win, cost relocated not eliminated). See `docs/experiments/argon2-compress-copy-elimination.md`.
+*   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/experiments/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.
 *   [x] Both documented pool-failover gaps (dead-at-startup pool never failing over; up to ~30s stale-reconnect-thread-join delay) — `src/pool_manager.cpp`, `src/stratum_client.cpp`.
 *   [x] AES round-key constants consolidated into `include/armrx/aes_keys.hpp`.
 *   [x] Scratchpad L3 mask constants unified into `include/armrx/randomx_config.hpp`.
 *   [x] `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained.
 *   [x] PGO devbox wiring (`devbox_pgo_build`) — tool shipped and mechanically correct (also fixed a real tilde-expansion bug affecting the whole devbox toolchain), but the claimed +19.3% payoff did **not** reproduce on current code (measured identical 4.27 H/s PGO vs. non-PGO). Tool kept for future re-evaluation.
-*   [x] NEON `vtbl`/`vqtbl1q`-vectorized software AES — derived from scratch, exhaustively verified correct (256/256 S-box match, 20,000-trial parity, first-try-correct on hardware), measured as a real ~19.4% regression. Kept flag-gated (`ARMRX_ENABLE_NEON_AES`, default OFF) as reference. See `docs/neon-vector-permute-aes.md`.
+*   [x] NEON `vtbl`/`vqtbl1q`-vectorized software AES — derived from scratch, exhaustively verified correct (256/256 S-box match, 20,000-trial parity, first-try-correct on hardware), measured as a real ~19.4% regression. Kept flag-gated (`ARMRX_ENABLE_NEON_AES`, default OFF) as reference. See `docs/experiments/neon-vector-permute-aes.md`.
 *   [x] `--stagger-ms` default — confirmed already tested in an earlier session (`docs/archived/beyond-parity_v2.md`, 4 stagger values, "+0%, hardware ceiling"), not re-run; default (0) left unchanged.
-*   [x] `MiningEngine` worker-thread reuse for dataset initialization — also surfaced and fixed the fast-mode dataset-corruption bug (`docs/fast-mode-dataset-corruption-postmortem.md`).
-*   [x] Mock Stratum socket integration tests — `tests/test_pool_protocol.cpp`, 7 scenarios — also surfaced and fixed the `PoolManager` self-deadlock (`docs/pool-failover-deadlock-postmortem.md`).
+*   [x] `MiningEngine` worker-thread reuse for dataset initialization — also surfaced and fixed the fast-mode dataset-corruption bug (`docs/postmortems/fast-mode-dataset-corruption-postmortem.md`).
+*   [x] Mock Stratum socket integration tests — `tests/test_pool_protocol.cpp`, 7 scenarios — also surfaced and fixed the `PoolManager` self-deadlock (`docs/postmortems/pool-failover-deadlock-postmortem.md`).
 *   [x] JSON parser fuzzing — `tests/fuzz_json.cpp`, 2.5M+ executions, zero findings.
 *   [x] NEON `permute_block_neon` benchmarking — ~16% faster than scalar, enabled.
 *   [x] JIT buffer overflow safety — root-caused segfaults to `PUBLIC` flag leaks under GCC 15 LTO; retained doubled 32,768-byte buffer as defense-in-depth.

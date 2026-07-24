@@ -9,7 +9,7 @@
 > **Current status (2026-07-24):** Phases 1–5 are fully resolved (correctness fixes, structural
 > refactors, test coverage, and the CBRANCH/Argon2/PGO/NEON-AES/`--stagger-ms` performance
 > investigations — see the archive linked above). **Current work is Phase 6**: two independent
-> performance master plans (`docs/performance-master-plan.md`, `docs/performance-master-plan-20260724.md`)
+> performance master plans (`docs/plans/performance-master-plan.md`, `docs/plans/performance-master-plan-20260724.md`)
 > were reconciled into one adopted plan. Both agree the device runs **light mode** (2 GiB RAM
 > can't fit the fast-mode dataset) and IPC 0.708 means the workload is memory-latency-stall-
 > bound, not instruction-throughput-bound. **Items 1–2 (the two highest-EV short-term
@@ -37,7 +37,7 @@
 > normalized per-cluster, armrx is at ~90%/88% of XMRig on clusters 0/1 respectively (a real,
 > modest ~10-12% gap, not the "far behind" impression the raw aggregate numbers gave). See
 > `PLAN.md` Phase 6 item 3's "REVISED" section for the full evidence chain.
-> See `docs/aes-ttable-bug-postmortem.md` for the AES fix analysis, and `docs/fast-mode-dataset-corruption-postmortem.md` / `docs/pool-failover-deadlock-postmortem.md` for Phase 2/3's critical fixes.
+> See `docs/postmortems/aes-ttable-bug-postmortem.md` for the AES fix analysis, and `docs/postmortems/fast-mode-dataset-corruption-postmortem.md` / `docs/postmortems/pool-failover-deadlock-postmortem.md` for Phase 2/3's critical fixes.
 
 ## Baseline
 
@@ -59,7 +59,7 @@
   8-worker pinned **24.95 H/s** (73.0% scaling efficiency vs. ideal linear — a smooth, monotonic
   decline across 4→8 workers with no plateau, so 8 remains the highest-throughput choice). The
   historical 5.18 H/s / 25.28 H/s "linear scaling" figures were stale and did not reproduce.
-- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
+- **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 - **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
 
@@ -170,8 +170,8 @@
 ### Docs
 | Doc | Description |
 |-----|-------------|
-| [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
-| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
+| [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
+| [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |
 | [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |
 
@@ -180,9 +180,9 @@
 | Item | Status |
 |------|--------|
 | `MiningEngine` worker-thread reuse for dataset init (barrier via mutex/counter/condition_variable) | ✅ |
-| **Critical fix:** fast-mode dataset corruption — wrong output span in multi-threaded `initialize_dataset()` calls (`docs/fast-mode-dataset-corruption-postmortem.md`) | ✅ |
+| **Critical fix:** fast-mode dataset corruption — wrong output span in multi-threaded `initialize_dataset()` calls (`docs/postmortems/fast-mode-dataset-corruption-postmortem.md`) | ✅ |
 | Mock Stratum protocol test suite (`tests/test_pool_protocol.cpp`, 7 scenarios) | ✅ |
-| **Critical fix:** `PoolManager::tick()` self-deadlock on real multi-pool failover (`docs/pool-failover-deadlock-postmortem.md`) | ✅ |
+| **Critical fix:** `PoolManager::tick()` self-deadlock on real multi-pool failover (`docs/postmortems/pool-failover-deadlock-postmortem.md`) | ✅ |
 | Pool-failover gap: pool dead from process startup never triggering failover | ✅ |
 | Pool-failover gap: up to ~30s stale-reconnect-thread-join delay | ✅ |
 | LibFuzzer harness for `armrx::json` (2.5M+ executions, zero findings) | ✅ |
@@ -193,10 +193,10 @@
 | Scratchpad L3 mask constants unified (`include/armrx/randomx_config.hpp`) | ✅ |
 | `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained | ✅ |
 | CBRANCH investigation: CSEL implemented, measured, reverted (net regression); root-caused the 31.08% branch-miss figure to a non-representative benchmark section | ✅ |
-| Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/argon2-neon-diagonal-vectorization.md`) | ✅ |
-| Argon2 `memcpy`/copy-elimination investigation: implemented, measured, reverted (no net win — cost relocated, didn't disappear) + follow-up `perf annotate` closed out the remaining "driver code" lead as inherent, already-vectorized XOR-combine work, not a bug (`docs/argon2-compress-copy-elimination.md`) | ✅ |
+| Argon2 NEON diagonal-step vectorization: 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize` (`docs/experiments/argon2-neon-diagonal-vectorization.md`) | ✅ |
+| Argon2 `memcpy`/copy-elimination investigation: implemented, measured, reverted (no net win — cost relocated, didn't disappear) + follow-up `perf annotate` closed out the remaining "driver code" lead as inherent, already-vectorized XOR-combine work, not a bug (`docs/experiments/argon2-compress-copy-elimination.md`) | ✅ |
 | `devbox_pgo_build` tool added (GENERATE→train→USE orchestration) + fixed a real pre-existing devbox-tooling bug (tilde-expansion defeated by `shlex.quote()`, silently breaking log stashing and `devbox_status`'s revision check) — but the claimed +19.3% PGO payoff does **not** reproduce on the current codebase (measured identical 4.27 H/s PGO vs non-PGO, apples-to-apples) | ✅ |
-| NEON vector-permute AES: derived from scratch, exhaustively verified (256/256 S-box match, 20,000-trial full-round parity, first-try-correct on real hardware), gated behind `ARMRX_ENABLE_NEON_AES` (default OFF) — measured as a real ~19.4% regression, same root cause as the earlier hardware-AES finding (`docs/neon-vector-permute-aes.md`) | ✅ |
+| NEON vector-permute AES: derived from scratch, exhaustively verified (256/256 S-box match, 20,000-trial full-round parity, first-try-correct on real hardware), gated behind `ARMRX_ENABLE_NEON_AES` (default OFF) — measured as a real ~19.4% regression, same root cause as the earlier hardware-AES finding (`docs/experiments/neon-vector-permute-aes.md`) | ✅ |
 | `--stagger-ms` default — found already tested in an earlier session (`docs/archived/beyond-parity_v2.md`, 4 stagger values, "+0%, hardware ceiling"), not re-run; default (0) left unchanged | ✅ |
 | `MiningEngine::worker_loop()` permanently killed a worker thread on a bad nonce offset/size — fixed (`active = false; continue;`), regression test added | ✅ |
 | `config.cpp` numeric config-file fields unguarded against parse failure — fixed (try/catch, matching `cli_parser.cpp`), regression test added | ✅ |
@@ -234,8 +234,8 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
-| ~~P4~~ | ~~Reduce JIT execution branch-misprediction cost (CSEL for CBRANCH)~~ | `jit_compiler_a64.cpp` | — | — | **Closed 2026-07-22 — implemented, measured, reverted.** CSEL gave +46% branch-misses and flat hashrate vs. the existing `bne`/`b`, not an improvement (BTB-aliasing: the JIT buffer regenerates every hash, so no encoding trick fixes the predictor-history problem). Separately found the 31.08% figure this item's "~8.6–11.9% of cycles" estimate was based on doesn't represent the mining hot path at all — the isolated hot path's real miss rate is 2.4%, costing ~0.1–0.16% of cycles. See `docs/branchless-cbranch.md`. No further CBRANCH JIT work planned. |
-| **P3** | **Peephole JIT coalescing** — [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | **Re-scoped by Phase 6 (2026-07-24): lowest-EV surviving code lead.** A real whole-process instruction-count gap vs. XMRig was measured once as a black-box reference point (~33.5%/hash, `PLAN.md` item 3) — a region-scoped attempt at the main VM program (`--jit-dump`) initially targeted the wrong region, but item 13's new instrumentation now covers the actual dominant region (superscalar/dataset-derivation, ~44% of instructions/hash explained). **The region-scoped gate item 14 requires is still not fully met** — ~55% of instructions/hash remains unreconciled, via armrx's own code/instrumentation only (no XMRig-side comparison — a deliberate clean-room boundary, see `PLAN.md` after item 13). Do not start P3 without closing that gap. |
+| ~~P4~~ | ~~Reduce JIT execution branch-misprediction cost (CSEL for CBRANCH)~~ | `jit_compiler_a64.cpp` | — | — | **Closed 2026-07-22 — implemented, measured, reverted.** CSEL gave +46% branch-misses and flat hashrate vs. the existing `bne`/`b`, not an improvement (BTB-aliasing: the JIT buffer regenerates every hash, so no encoding trick fixes the predictor-history problem). Separately found the 31.08% figure this item's "~8.6–11.9% of cycles" estimate was based on doesn't represent the mining hot path at all — the isolated hot path's real miss rate is 2.4%, costing ~0.1–0.16% of cycles. See `docs/experiments/branchless-cbranch.md`. No further CBRANCH JIT work planned. |
+| **P3** | **Peephole JIT coalescing** — [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | **Re-scoped by Phase 6 (2026-07-24): lowest-EV surviving code lead.** A real whole-process instruction-count gap vs. XMRig was measured once as a black-box reference point (~33.5%/hash, `PLAN.md` item 3) — a region-scoped attempt at the main VM program (`--jit-dump`) initially targeted the wrong region, but item 13's new instrumentation now covers the actual dominant region (superscalar/dataset-derivation, ~44% of instructions/hash explained). **The region-scoped gate item 14 requires is still not fully met** — ~55% of instructions/hash remains unreconciled, via armrx's own code/instrumentation only (no XMRig-side comparison — a deliberate clean-room boundary, see `PLAN.md` after item 13). Do not start P3 without closing that gap. |
 | ~~P6.1~~ | ~~Huge-page residency check~~ | — | — | — | **Closed 2026-07-24 — done, no-op.** ~97.6% of anon RSS already THP-coalesced (100% for the Argon2 cache mapping), dTLB misses negligible, despite no real hugetlbfs pool existing. `PLAN.md` Phase 6 item 1. |
 | ~~P6.2~~ | ~~Worker-count sweep, 4→8 workers~~ | — | — | — | **Closed 2026-07-24 — done.** Smooth monotonic decline 98.5%→73.0% efficiency, no plateau; 8 workers confirmed highest-throughput. `README.md` re-baselined. `PLAN.md` Phase 6 item 2. |
 | ~~P6.3~~ | ~~Multi-worker PMU attribution~~ | — | — | — | **Closed 2026-07-24 — done, revised later same day.** TLB definitively rejected (dTLB misses <1.4/million instructions at every worker count). The original "core-count-triggered power/current cap" hypothesis for the apparent 6-8-worker clock drop is **retracted** — this device has two separate 4-core L2 clusters (cores 0-3, cores 4-7; see P6.11), and the drop was just the average of a full-rate cluster and an arbitration-losing cluster once the worker count spanned both. `PLAN.md` Phase 6 item 3's "REVISED" section. |
@@ -260,7 +260,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 |---|------|--------|-------|
 | — | Stratum V2 protocol support | 🔴 Major | Next-gen pool compatibility |
 | — | HTTP Prometheus metrics endpoint | ✅ Completed | Serving GET /metrics, loopback-only |
-| — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | **Stale entry corrected 2026-07-23**: this used to describe an early segfault/`x29` register-corruption bug, which was since root-caused and fixed (`docs/WX_Alignment_and_LITTLE_Core_Profiling.md` §5). Newton-Raphson was then fully re-evaluated cleanly: 100% correctness/determinism pass in CTest, but measured **5.12 H/s vs 5.18 H/s for native hardware `fdiv`/`fsqrt` (−1.1%)** — kept OFF because it's slower on the in-order Cortex-A53 (FPU pipeline pressure from the 12-17 instruction approximation), not because of any remaining correctness risk. See `OPTIMIZATION_REFERENCE.md` and `changelogs.md` (2026-07-21). Do not re-enable by default; a future attempt would need to beat −1.1%, not just prove correctness. |
+| — | Newton-Raphson FDIV/FSQRT (O12) | ⏸️ Frozen | **Stale entry corrected 2026-07-23**: this used to describe an early segfault/`x29` register-corruption bug, which was since root-caused and fixed (`docs/audits/WX_Alignment_and_LITTLE_Core_Profiling.md` §5). Newton-Raphson was then fully re-evaluated cleanly: 100% correctness/determinism pass in CTest, but measured **5.12 H/s vs 5.18 H/s for native hardware `fdiv`/`fsqrt` (−1.1%)** — kept OFF because it's slower on the in-order Cortex-A53 (FPU pipeline pressure from the 12-17 instruction approximation), not because of any remaining correctness risk. See `OPTIMIZATION_REFERENCE.md` and `changelogs.md` (2026-07-21). Do not re-enable by default; a future attempt would need to beat −1.1%, not just prove correctness. |
 
 ### Maintenance
 
@@ -275,11 +275,11 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 
 | Doc | Description |
 |-----|-------------|
-| [`docs/performance-master-plan.md`](docs/performance-master-plan.md) | Phase 6 source doc (this assistant, 2026-07-24): light-mode/IPC-0.708 framing, huge-page + worker-sweep verification plan |
-| [`docs/performance-master-plan-20260724.md`](docs/performance-master-plan-20260724.md) | Phase 6 source doc (Hermes agent, 2026-07-24): concrete JIT-emitter latency-hiding proposals |
+| [`docs/plans/performance-master-plan.md`](docs/plans/performance-master-plan.md) | Phase 6 source doc (this assistant, 2026-07-24): light-mode/IPC-0.708 framing, huge-page + worker-sweep verification plan |
+| [`docs/plans/performance-master-plan-20260724.md`](docs/plans/performance-master-plan-20260724.md) | Phase 6 source doc (Hermes agent, 2026-07-24): concrete JIT-emitter latency-hiding proposals |
 | [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) | Full narrative for every completed Phase 1–5 item, split out of `PLAN.md` 2026-07-24 |
-| [`docs/branchless-cbranch.md`](docs/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
-| [`docs/peephole-jit-plan.md`](docs/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |
+| [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
+| [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |
-| [`docs/jit-buffer-size-audit.md`](docs/jit-buffer-size-audit.md) | JIT buffer size analysis and security audit |
+| [`docs/audits/jit-buffer-size-audit.md`](docs/audits/jit-buffer-size-audit.md) | JIT buffer size analysis and security audit |
 | [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |

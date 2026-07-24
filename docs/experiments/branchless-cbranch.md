@@ -157,8 +157,8 @@ cause incorrect offsets in edge cases.
 
 ## Precise attribution (2026-07-22) — the "profile first" step, finally done
 
-Every prior session recommended this exact step (`docs/audit-20260721-cross-reference.md`,
-`docs/archived/next_phase.md`, `docs/performance-next-agent-handoff.md` §22.6) but none had
+Every prior session recommended this exact step (`docs/audits/audit-20260721-cross-reference.md`,
+`docs/archived/next_phase.md`, `docs/plans/performance-next-agent-handoff.md` §22.6) but none had
 actually executed it — only aggregate `perf stat` counting existed, which gives a single
 branch-miss *count* with no attribution to *where* in the code the misses happen. This
 session ran `perf record -e branch-misses -c 10000 -- ./bench_armrx --full-hash-only`
@@ -240,7 +240,7 @@ Caught one real bug via the KAT test before ever benchmarking: the `csel`'s
 `Rn`/`Rm` register fields were transposed (`Rm` is bits 20-16, `Rn` is bits
 9-5 — easy to get backwards), which silently inverted which address got
 selected when the branch condition was met. The JIT hash was simply wrong
-until fixed — exactly the failure mode `docs/performance-next-agent-handoff.md`
+until fixed — exactly the failure mode `docs/plans/performance-next-agent-handoff.md`
 §19's "run KATs before benchmarking" step exists to catch.
 
 Once correct, a clean **apples-to-apples** `perf stat` comparison (same tool,

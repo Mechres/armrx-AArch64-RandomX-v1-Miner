@@ -14,11 +14,11 @@ other places still carried the old "inspect XMRig's generated code" framing. All
 
 | File | Stale content | Fix |
 |---|---|---|
-| `docs/peephole-jit-plan.md` | Entire methodology is XMRig disassembly (guiding principle 2, Phase 1) | Superseded-banner at top; body kept as unedited historical record |
-| `docs/performance-master-plan-20260724.md` (L2 row) | Verbatim old "`--jit-dump` + objdump" XMRig comparison | Reframed to item 14's self-directed reconciliation |
-| `docs/performance-master-plan.md` (L1 row) | "3–6 week clean-room effort vs. XMRig disassembly" | Boundary note added |
-| `docs/performance-improvement-audit.md` | Same phrasing | Boundary note added |
-| `docs/performance-next-agent-handoff.md` (item 11, Stage 4 step 4) | "Broader XMRig emitted-code comparison" as a live lead | Struck through, marked permanently ruled out |
+| `docs/plans/peephole-jit-plan.md` | Entire methodology is XMRig disassembly (guiding principle 2, Phase 1) | Superseded-banner at top; body kept as unedited historical record |
+| `docs/plans/performance-master-plan-20260724.md` (L2 row) | Verbatim old "`--jit-dump` + objdump" XMRig comparison | Reframed to item 14's self-directed reconciliation |
+| `docs/plans/performance-master-plan.md` (L1 row) | "3–6 week clean-room effort vs. XMRig disassembly" | Boundary note added |
+| `docs/audits/performance-improvement-audit.md` | Same phrasing | Boundary note added |
+| `docs/plans/performance-next-agent-handoff.md` (item 11, Stage 4 step 4) | "Broader XMRig emitted-code comparison" as a live lead | Struck through, marked permanently ruled out |
 | `HANDOFF_CLAUDE.md` (uncommitted) | "clean-room effort against XMRig's disassembly per prior estimates" | Reworded to boundary + item 14 gate |
 
 Deliberately **not** touched: `OPTIMIZATION_REFERENCE.md`'s "What XMRig Does Differently
@@ -42,7 +42,7 @@ again** this session (7/12 in one `devbox_full` run; immediate filtered re-run p
 ## 3. Untracked-files audit
 
 - `build_pgo/` — does not exist (only gitignored `build/`). Non-issue.
-- `docs/performance-master-plan.md`, `docs/performance-master-plan-20260724.md`,
+- `docs/plans/performance-master-plan.md`, `docs/plans/performance-master-plan-20260724.md`,
   `docs/archived/plan_completed_phases_1-5.md` — all already git-tracked. Non-issue.
 - Real working-tree state: modified `HANDOFF_CLAUDE.md` + untracked `CLAUDE.md` (both
   intentional, now including this session's edits).
@@ -122,7 +122,7 @@ armrx's own binary, not more JIT instrumentation. Recorded in `PLAN.md` item 14.
 ## Files changed
 
 **Code:** `src/config.cpp`, `src/cli_parser.cpp`, `src/jit_compiler_a64.cpp`
-**Docs:** `docs/peephole-jit-plan.md`, `docs/performance-master-plan.md`,
-`docs/performance-master-plan-20260724.md`, `docs/performance-improvement-audit.md`,
-`docs/performance-next-agent-handoff.md`, `HANDOFF_CLAUDE.md`, `CLAUDE.md`, `PLAN.md`,
+**Docs:** `docs/plans/peephole-jit-plan.md`, `docs/plans/performance-master-plan.md`,
+`docs/plans/performance-master-plan-20260724.md`, `docs/audits/performance-improvement-audit.md`,
+`docs/plans/performance-next-agent-handoff.md`, `HANDOFF_CLAUDE.md`, `CLAUDE.md`, `PLAN.md`,
 `changelogs.md`, plus this file.

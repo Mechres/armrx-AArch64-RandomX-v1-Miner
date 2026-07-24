@@ -5,7 +5,7 @@
 The same `perf record -e cycles` pass (212K samples, `bench_armrx
 --argon2-only`, full 256 MiB light-mode cache init) that found and fixed the
 `permute_16_neon` diagonal-step bottleneck (see
-`docs/argon2-neon-diagonal-vectorization.md`) also attributed **23.17% of
+`docs/experiments/argon2-neon-diagonal-vectorization.md`) also attributed **23.17% of
 cycles to `Argon2dCache::initialize`'s own driver code** and **5.54% to
 `memcpy`** — tracked as an open lead in `NEXT_STEPS.md` §5 and `PLAN.md` Phase
 3 item C, not investigated further at the time.

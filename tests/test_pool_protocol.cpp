@@ -318,7 +318,7 @@ void test_reconnect_backoff_exhaustion() {
 // ── Scenario 4: PoolManager multi-pool failover.
 //
 // This test originally caught the tick()/connect_to_current() self-deadlock
-// (docs/pool-failover-deadlock-postmortem.md) and, while investigating it,
+// (docs/postmortems/pool-failover-deadlock-postmortem.md) and, while investigating it,
 // surfaced two further gaps — both since fixed (2026-07-22):
 //
 // 1. A pool whose very first connect() attempt fails outright (nothing

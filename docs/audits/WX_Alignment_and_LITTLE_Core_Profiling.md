@@ -23,7 +23,7 @@ We completed a comprehensive sweep of the architectural gaps, JIT code deduplica
 
 *   **Status Report:** Updated [STATUS_REPORT.md](file:///home/mechres/Projeler/aarch64-randomx/STATUS_REPORT.md) to reflect the completed state of PGO, O12, O13, Software AES inlining, and big.LITTLE scheduling. Updated module listings to remove the deleted `src/aes.cpp`.
 *   **Roadmap & Plan:** Updated [ROADMAP.md](file:///home/mechres/Projeler/aarch64-randomx/ROADMAP.md) and [PLAN.md](file:///home/mechres/Projeler/aarch64-randomx/PLAN.md) to reflect these newly completed architectural alignments and performance uplifts.
-*   **AES Postmortem:** Fixed incorrect file paths in [aes-ttable-bug-postmortem.md](file:///home/mechres/Projeler/aarch64-randomx/docs/aes-ttable-bug-postmortem.md) to point to `include/armrx/aes.hpp` instead of `src/aes.cpp`.
+*   **AES Postmortem:** Fixed incorrect file paths in [aes-ttable-bug-postmortem.md](file:///home/mechres/Projeler/aarch64-randomx/docs/postmortems/aes-ttable-bug-postmortem.md) to point to `include/armrx/aes.hpp` instead of `src/aes.cpp`.
 *   **Evolution Plans:** Archived the stale `next_phase_v2.md` to `docs/archived/next_phase_v2.md`, and created a clean [next_phase_v3.md](file:///home/mechres/Projeler/aarch64-randomx/docs/next_phase_v3.md) mapping out only current outstanding goals (Peephole JIT Phase 2, CBRANCH re-measurement, etc.).
 
 ---

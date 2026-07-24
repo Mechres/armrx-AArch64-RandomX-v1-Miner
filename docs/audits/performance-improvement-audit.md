@@ -84,7 +84,7 @@ independent of the PGO payoff.
 Given PGO and NEON-AES are both exhausted, the only remaining code-level lever
 the project itself has flagged is:
 
-- **Peephole JIT coalescing** (`ROADMAP.md` "P3"; `docs/peephole-jit-plan.md`):
+- **Peephole JIT coalescing** (`ROADMAP.md` "P3"; `docs/plans/peephole-jit-plan.md`):
   documented −5–10%, but the plan itself says to re-evaluate because it was
   framed against the old 31% branch-miss baseline that does NOT represent the
   hot path (isolated hot path is 2.4%). High effort, uncertain payoff.

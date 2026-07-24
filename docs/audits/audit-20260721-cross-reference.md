@@ -277,7 +277,7 @@ Zero matches for `TODO`, `FIXME`, `HACK`, `XXX`, `Workaround` across all `src/` 
 | **2.2** | **Re-measure CBRANCH miss attribution** with corrected AES. Run `perf record -e branch-misses`. If 94%+ still in Superscalar, deprioritize CSEL/CINC CBRANCH. | May save weeks of work | NEXT_STEPS found 94.85% in Superscalar, but pre-fix measurement may be wrong. |
 | **2.3** | **Complete generateProgram/generateProgramLight dedup.** Extract `emitPrologueMix` and `emitSpMix2` as specified in `next_phase_v2.md` §2.2. Collapse onto shared path. KAT-gated. | Maintainability + correctness | ~70% code duplication with silent drift risk on v2 AES-tweak. |
 | **2.4** | **Change `ARMRX_JIT_FAST_DIV_SQRT` from PUBLIC to PRIVATE.** Audit for non-JIT consumers; change if none found. | Prevents latent corruption | PUBLIC propagation was suspected of causing unrelated C++ corruption (STATUS_REPORT). |
-| **2.5** | **Peephole JIT Phase 2 per-opcode audit.** Execute `docs/peephole-jit-plan.md` §Phase 2. Start with FDIV_M Markstein iteration drop (17→8 instructions). KAT-veto per change. | +3–7% | Only remaining path to close instruction-count gap after O12/O13/PGO. |
+| **2.5** | **Peephole JIT Phase 2 per-opcode audit.** Execute `docs/plans/peephole-jit-plan.md` §Phase 2. Start with FDIV_M Markstein iteration drop (17→8 instructions). KAT-veto per change. | +3–7% | Only remaining path to close instruction-count gap after O12/O13/PGO. |
 | **2.6** | **Fix `MetricsExporter` to use structured logger** instead of raw `std::cerr` at `metrics.hpp:38,42,46`. | Consistency | Bypasses TUI ring-buffer discipline. |
 | **2.7** | **Delete dead `getCode()` accessor** in `jit_compiler_a64.hpp:67`. | Security (W^X) | Public raw pointer to executable buffer, zero callers. |
 

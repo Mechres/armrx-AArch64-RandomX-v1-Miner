@@ -17,12 +17,12 @@ No optimization described below has been measured on the target unless explicitl
 
 Before changing code, read:
 
-1. [`../PLAN.md`](../PLAN.md) — master plan, but note the stale priorities documented below.
-2. [`../ROADMAP.md`](../ROADMAP.md) — completed/remaining tracker, also contains stale entries.
-3. [`beyond-parity.md`](beyond-parity.md) — prior post-parity analysis.
+1. [`../../PLAN.md`](../../PLAN.md) — master plan, but note the stale priorities documented below.
+2. [`../../ROADMAP.md`](../../ROADMAP.md) — completed/remaining tracker, also contains stale entries.
+3. [`../archived/beyond-parity_v2.md`](../archived/beyond-parity_v2.md) — prior post-parity analysis.
 4. [`peephole-jit-plan.md`](peephole-jit-plan.md) — existing instruction-gap plan; several assumptions need correction.
-5. [`../OPTIMIZATION_REFERENCE.md`](../OPTIMIZATION_REFERENCE.md) — historical experiments and old perf counters.
-6. [`../AGENTS.md`](../AGENTS.md) — mandatory project rules and build procedure.
+5. [`../../OPTIMIZATION_REFERENCE.md`](../../OPTIMIZATION_REFERENCE.md) — historical experiments and old perf counters.
+6. [`../../AGENTS.md`](../../AGENTS.md) — mandatory project rules and build procedure.
 
 Important project constraint:
 
@@ -104,7 +104,7 @@ Treat all ranges as experiment budgets, not promises.
 - emitted bytes per opcode
 - aggregate generation elapsed time
 
-It does **not** isolate or execute one opcode at a time, and it does not collect PMU instructions or cycles per opcode. The claim in `docs/peephole-jit-plan.md` that per-opcode `perf stat` infrastructure is delivered is stronger than the implementation.
+It does **not** isolate or execute one opcode at a time, and it does not collect PMU instructions or cycles per opcode. The claim in `docs/plans/peephole-jit-plan.md` that per-opcode `perf stat` infrastructure is delivered is stronger than the implementation.
 
 `tests/bench_armrx.cpp` also has misleading component benchmarks:
 
@@ -545,7 +545,7 @@ Update the relevant plans when implementation work begins.
 
 ### 14.1 The 33% count is not yet a per-opcode JIT gap
 
-`docs/peephole-jit-plan.md` attributes the gap to emitted sequences, but the historical measurement includes the wider hash path. Region attribution is required first.
+`docs/plans/peephole-jit-plan.md` attributes the gap to emitted sequences, but the historical measurement includes the wider hash path. Region attribution is required first.
 
 ### 14.2 `bench_opcodes` does not measure per-opcode retired instructions
 

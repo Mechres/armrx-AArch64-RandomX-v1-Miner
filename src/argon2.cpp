@@ -176,7 +176,7 @@ static void permute_16_neon(uint64_t* words) {
 	// scattered back the same way on the way out — gb_neon() itself is
 	// unchanged, only how its operands reach/leave the register differ from
 	// the column step. This was previously believed to require falling back
-	// to 4 sequential scalar gb() calls (see docs/argon2-neon-diagonal-vectorization.md
+	// to 4 sequential scalar gb() calls (see docs/experiments/argon2-neon-diagonal-vectorization.md
 	// for the profiling that found this: those scalar calls alone were
 	// ~38% of all Argon2dCache::initialize() cycles).
 	{

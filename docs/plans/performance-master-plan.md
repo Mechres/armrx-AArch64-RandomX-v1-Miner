@@ -80,7 +80,7 @@ which is exactly why CSEL and Newton-Raphson *added* instructions "for free" and
 ### 1.3 Branch behavior — [CLOSED]
 
 The "31.08%" branch-miss figure is a benchmark artifact; real hot-path miss rate is **2.4%**,
-costing ~0.1–0.16% of cycles (`docs/branchless-cbranch.md`). The `bne +8 / b target` CBRANCH
+costing ~0.1–0.16% of cycles (`docs/experiments/branchless-cbranch.md`). The `bne +8 / b target` CBRANCH
 form in `h_CBRANCH` (`jit_compiler_a64.cpp:1217`) is already the right shape. **Do not touch.**
 
 ### 1.4 Allocations / pointer-chasing — clean
@@ -151,11 +151,11 @@ double-digit win as §2.1 without touching code. Document the exact value in the
 
 | Idea | Result | Evidence |
 |---|---|---|
-| Branchless CBRANCH (CSEL) | +46% branch-miss, flat hashrate → reverted | `docs/branchless-cbranch.md` |
+| Branchless CBRANCH (CSEL) | +46% branch-miss, flat hashrate → reverted | `docs/experiments/branchless-cbranch.md` |
 | Newton–Raphson FDIV/FSQRT | −1.1% (FPU pressure on in-order A53) | flag `ARMRX_ENABLE_JIT_FAST_DIV_SQRT`, default OFF |
-| NEON vector-permute AES | −19.4% (per-block NEON load/store overhead) | `docs/neon-vector-permute-aes.md` |
-| Hardware AESE/AESD | wrong round order per spec | `docs/aes-ttable-bug-postmortem.md` |
-| Argon2 `memcpy` copy-elimination | cost relocated, +0.35% cycles → reverted | `docs/argon2-compress-copy-elimination.md` |
+| NEON vector-permute AES | −19.4% (per-block NEON load/store overhead) | `docs/experiments/neon-vector-permute-aes.md` |
+| Hardware AESE/AESD | wrong round order per spec | `docs/postmortems/aes-ttable-bug-postmortem.md` |
+| Argon2 `memcpy` copy-elimination | cost relocated, +0.35% cycles → reverted | `docs/experiments/argon2-compress-copy-elimination.md` |
 | PGO | identical 4.27 H/s on current code | `NEXT_STEPS.md` §5a |
 
 The reason these all failed is the same and worth stating once: **the workload is
@@ -166,7 +166,7 @@ predict a null result and demand a measurement before spending device time.
 ### 2.3 One real win already banked (for context)
 
 Argon2 diagonal-step NEON vectorization: **−26.8% instructions / −19.0% cycles** for
-`Argon2dCache::initialize()` (`docs/argon2-neon-diagonal-vectorization.md`). Note this is
+`Argon2dCache::initialize()` (`docs/experiments/argon2-neon-diagonal-vectorization.md`). Note this is
 **seed-rotation latency**, not steady-state hashrate — it makes the miner recover faster when
 the pool pushes a new seed, invisible in H/s. Correctly scoped; nothing more to do there.
 
@@ -298,7 +298,7 @@ maturity, "effort" includes *the risk of reproducing a known negative*.
 
 | # | Action | File / surface | Expected outcome | Rationale / caveat |
 |---|---|---|---|---|
-| L1 | **Peephole JIT coalescing** (`docs/peephole-jit-plan.md`, ROADMAP "P3") | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% *claimed* | **Re-scope before starting.** Estimate was framed against the debunked 31% branch-miss baseline; with IPC 0.708 the workload is stall-bound, so instruction coalescing likely underperforms the estimate. **Note (2026-07-24): the plan's original XMRig-disassembly methodology is now permanently out of scope (clean-room boundary, `PLAN.md` Phase 6 item 14) — any revival must use self-directed analysis of armrx's own generated code only.** **Lowest EV item here — S1–S4 must be exhausted first.** |
+| L1 | **Peephole JIT coalescing** (`docs/plans/peephole-jit-plan.md`, ROADMAP "P3") | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% *claimed* | **Re-scope before starting.** Estimate was framed against the debunked 31% branch-miss baseline; with IPC 0.708 the workload is stall-bound, so instruction coalescing likely underperforms the estimate. **Note (2026-07-24): the plan's original XMRig-disassembly methodology is now permanently out of scope (clean-room boundary, `PLAN.md` Phase 6 item 14) — any revival must use self-directed analysis of armrx's own generated code only.** **Lowest EV item here — S1–S4 must be exhausted first.** |
 | L2 | Bigger-RAM device evaluation (fast mode) | hardware | Unlocks the pure-bandwidth fast path; different optimization regime entirely | Not an armrx change — but note the *entire* light-mode compute bottleneck (§0) vanishes with ≥3 GiB RAM. If the deployment target can be a 4 GiB SBC, that dwarfs every software lead in this document. Worth raising as a deployment decision. |
 
 ---

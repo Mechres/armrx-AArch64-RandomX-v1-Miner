@@ -85,7 +85,7 @@ using AesBlock = std::array<std::byte, 16>;
 #if defined(__aarch64__) && defined(__ARM_NEON)
 
 // NEON "vector-permute" AES: a from-scratch, independently-derived-and-verified
-// (see docs/neon-vector-permute-aes.md) alternative to encrypt_transform/decrypt_transform's
+// (see docs/experiments/neon-vector-permute-aes.md) alternative to encrypt_transform/decrypt_transform's
 // 256-entry-per-byte T-table lookups, which don't fit ARM NEON's 16-entry vtbl/vqtbl1q
 // instructions directly. SubBytes is computed via a field isomorphism between GF(2^8) (the
 // AES field) and a "tower" representation GF(2^4)^2, where every sub-step (nibble-split

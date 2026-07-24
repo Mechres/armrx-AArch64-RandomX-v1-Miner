@@ -5,7 +5,7 @@
 
 ## Background
 
-Following the CBRANCH investigation (`docs/branchless-cbranch.md`), which
+Following the CBRANCH investigation (`docs/experiments/branchless-cbranch.md`), which
 found CBRANCH misprediction was never a meaningful real-world lever once
 properly isolated, `Argon2dCache::initialize()` was flagged as a comparably-
 sized, never-independently-investigated contributor to the earlier profiling
@@ -132,4 +132,4 @@ therefore not producing hashes, at each rotation) — it does **not** change
 sustained steady-state hashrate, which is dominated by the JIT'd per-hash
 execution loop this change doesn't touch. This is a real, valuable
 improvement, but shouldn't be conflated with a hashrate gain — the same
-discipline `docs/branchless-cbranch.md` insists on for its own numbers.
+discipline `docs/experiments/branchless-cbranch.md` insists on for its own numbers.
