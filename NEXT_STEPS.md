@@ -1,264 +1,212 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-23
-**HEAD:** b406bd5 (at time of writing; see `git log` for current)
+**Updated:** 2026-07-24
+**HEAD:** 88f4122 (at time of writing; see `git log` for current)
 **Devbox:** 192.168.10.156
 
-This file mirrors the prioritized, actionable subset of `PLAN.md`'s Phase 4 (a fresh
-codebase inspection done 2026-07-22, after Phase 2/3 fully closed out). See `PLAN.md`
-for the full evidence/reasoning behind each item; this is the short-list view.
+This file mirrors the prioritized, actionable subset of `PLAN.md`'s current phase
+(**Phase 6**, 2026-07-24 — a reconciliation of two independent performance master plans,
+`docs/performance-master-plan.md` and `docs/performance-master-plan-20260724.md`). See
+`PLAN.md` for the full evidence/reasoning behind each item; this is the short-list view.
+Phases 1–5 (everything before Phase 6) are **fully resolved** — see
+`docs/archived/plan_completed_phases_1-5.md` for the full narrative, or the "Resolved"
+sections at the bottom of this file for the short form.
+
+---
+
+## Major finding (2026-07-24): this device has two 4-core L2 clusters, not one 8-core cluster
+
+Found while investigating "why can't armrx match XMRig's hashrate here" with a real XMRig run
+on the same device — see `PLAN.md` Phase 6 item 3's "REVISED" section for the full evidence
+chain. Short version:
+
+- Kernel cache-topology sysfs (`/sys/devices/system/cpu/cpu{0,4}/cache/index2/shared_cpu_list`)
+  shows **cores 0-3 share one L2, cores 4-7 share a separate L2** — contradicting `lscpu`'s own
+  "Cluster(s): 1" self-report. **Confirmed (per postmarketOS wiki): the real chip is MSM8929 /
+  Snapdragon 415**, a genuine big.LITTLE-shaped octa-core (4×1.1 GHz + 4×1.4 GHz Cortex-A53) —
+  the "Lenovo MSM8916/Snapdragon 410" ID this project assumed since its earliest docs was wrong.
+- Under full 8-worker contention, cores 0-3 sustain ~4.0-4.26 H/s each, cores 4-7 sustain a flat
+  ~2.13 H/s each — a real, reproducible ~2:1 split (confirmed with a long 240s steady-state
+  window after a short-window test's numbers turned out to be a measurement-quantization
+  artifact from the 64-hash atomic-flush batching).
+- **Not a static per-cluster difference**: pinning 4 workers exclusively to each cluster in
+  isolation gives *identical* cycles/instructions/L2-refills between them (<0.01% apart). The
+  split only appears when both clusters compete for the shared memory path simultaneously — a
+  dynamic interconnect-arbitration effect, not a frequency or cache difference.
+- **This retracts item 3's original "core-count-triggered power/current cap" hypothesis** — the
+  apparent per-core clock drop at 6-8 workers was the average of a full-rate cluster and an
+  arbitration-losing (not slower) cluster once the worker count spanned both.
+- **Fully explains item 2's efficiency curve**: workers 1-4 map to cluster 0 alone (zero
+  cross-cluster contention → 98.5% efficiency, the isolated peak); worker 5 is the first to land
+  on cluster 1 and immediately eats the arbitration penalty (98.5%→89.2%, the sweep's single
+  biggest step); workers 6-8 add the rest of cluster 1 at roughly half rate.
+- **Quantified, cluster-normalized gap to XMRig** (same device, same job, same fallback mode):
+  armrx is at **90.1%** of XMRig on cluster 0 (16.78 vs. 18.62 H/s) and **88.1%** on cluster 1
+  (8.52 vs. 9.67 H/s) — a real, modest **~10-12% gap on both clusters independently**, not the
+  vague "far behind" impression the raw aggregate (24.95 vs. 28.28 H/s) gave by itself.
+- **Where the ~10-12% gap actually comes from** (same Cortex-A53 PMU events attached live to
+  XMRig's own process, 8 threads, real pool job): **not a stall/scheduling problem** — armrx's
+  IPC (0.731) and `ld_dep_stall`% (11.41%) are both *better* than XMRig's (0.612, 16.70%). It's
+  an **instruction-count gap**: armrx needs ~33.5% more instructions per hash (132.93M vs.
+  99.57M), which nets out to ~11.9% more cycles per hash — matching the cluster-normalized gap
+  almost exactly. This is a real, measured instruction-count gap (not the old debunked 31%-
+  branch-miss-era estimate), satisfying `PLAN.md` item 14's gate in spirit, though not yet
+  region-scoped to specific opcodes/phases. See `PLAN.md` Phase 6 item 3 for the full comparison.
+- **Region-scoped breakdown attempted (2026-07-24) — wrong region, both candidates fell apart,
+  a negative result.** `--jit-dump`'s opcode boundary table showed memory-operand opcodes
+  (`*_M`) at 37.13% of code bytes and `CBRANCH` at 19.34%, initially read as two concrete
+  candidates for the instruction-count gap. Neither survived closer scrutiny: (1) this table
+  only covers the *fixed, 2047-instruction main VM program* — measured instructions/hash is
+  ~132.93M, so >99.998% of real instruction volume is elsewhere (almost certainly the
+  superscalar/dataset-derivation path, invoked far more often in light mode, not covered by
+  this dump); (2) `emitAddImmediate` already uses the tightest available encoding for this
+  immediate range (checked by reading it, not assuming); (3) CBRANCH's condition tests an
+  8-bit-wide field, not a single bit, so the `TBZ`/`TBNZ` fusion idea doesn't apply. **No code
+  changed.** Finding the real gap would need new instrumentation for the superscalar path or a
+  binary-level XMRig comparison — both bigger than this pass's "hours" scope. See `PLAN.md`
+  Phase 6 item 3 for the full correction and `changelogs.md` for the dated account.
 
 ---
 
 ## Current Telemetry Invariants (Cortex-A53, Light Mode, JIT)
 
+**Re-baselined 2026-07-24 (Phase 6 items 1–2, done).** Fresh worker-count sweep data
+(two passes, thermal-settled, `README.md` updated to match):
+
+| Workers | Avg H/s | H/s/worker | Efficiency vs. 4.27 H/s single-thread |
+|---|---|---|---|
+| 1 | 4.27 | 4.27 | 100% (baseline) |
+| 4 | 16.82 | 4.20 | 98.5% |
+| 5 | 19.04 | 3.81 | 89.2% |
+| 6 | 21.13 | 3.52 | 82.5% |
+| 7 | 23.21 | 3.32 | 77.7% |
+| 8 | 24.95 | 3.12 | 73.0% |
+
+No plateau anywhere 4→8 — efficiency declines smoothly, 8 workers is still the highest-throughput
+choice. The old 5.18 H/s / 25.28 H/s "linear scaling" figures were stale and did not reproduce
+(see `docs/archived/plan_completed_phases_1-5.md` Phase 5's PGO finding — both PGO and non-PGO
+measure identically at 4.27 H/s on current code). **Scope caveat**: each sweep point is a 60s
+window; long-duration (15–30 min) sustained thermal throttling is a distinct, still-open question
+(item 3, PMU attribution, below).
+
 | Metric | Software AES Baseline (SW) | PGO + SW AES Optimized | Δ |
 |--------|:-------------------------:|:----------------------:|:-:|
-| **Single-thread hashrate** | 4.34 H/s | **5.18 H/s** | **+19.3%** |
-| **8-thread pool hashrate (pinned)** | ~22.0 H/s | **25.28 H/s** | **+14.9%** |
 | **Init scratchpad** | 30,817 μs (12.35%) | 30,817 μs (12.35%) | — |
 | **Get final result** | 23,207 μs (9.30%) | 23,207 μs (9.30%) | — |
 | **Chain execution (VM)** | 194,692 μs (84.6%) | 170,860 μs (68.4%) | **−12.2%** |
-| **Branch miss rate (aggregate, `bench_armrx` no flags)** | 31.6% | **31.08%** (re-measured 2026-07-22) | **essentially unchanged** |
-| **Branch miss rate (isolated `--full-hash-only`, i.e. the real mining hot path)** | — | **2.4%** (measured 2026-07-22) | — |
+| **Branch miss rate (aggregate, `bench_armrx` no flags)** | 31.6% | 31.08% | **not representative — see below** |
+| **Branch miss rate (isolated `--full-hash-only`, i.e. the real mining hot path)** | — | **2.4%** | — |
+| **IPC (isolated hot path)** | — | **0.708** (~35% of dual-issue peak) | — |
 
 The aggregate 31.08% figure does **not** represent the mining hot path — see
 `docs/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining
 hot path" section. It's 94.93% driven by `bench_armrx --attribution-only`'s
 non-representative interpreted-mode comparison run. The real hot path's rate
 (2.4%) costs only ~0.1–0.16% of cycles to misprediction — CBRANCH work has
-been tried (CSEL, 2026-07-22) and closed; see item 5 below.
+been tried (CSEL, 2026-07-22) and closed; see the "Resolved" section below.
+**IPC 0.708 is Phase 6's central fact**: this is a memory-latency-stall-bound
+workload, not instruction-throughput-bound — see `PLAN.md` Phase 6 for why that
+reframes every remaining performance lead.
 
 ---
 
-## Prioritized Next Steps (PLAN.md Phase 4)
+## Prioritized Next Steps (PLAN.md Phase 6, 2026-07-24)
 
-### 1. Correctness — do first, both are small and high-value
-*   [x] ~~Fix `MiningEngine::worker_loop()` permanently killing a worker thread~~ —
-    **done (2026-07-23).** `active = false; return;` → `active = false; continue;`
-    on a bad nonce offset/size, matching every neighboring bad-state path. Regression
-    test `test_worker_survives_bad_nonce_job()` added to `tests/test_mining.cpp`
-    (asserts the *same* worker threads idle through a malformed job, then recover
-    and mine normally once a valid job arrives).
-*   [x] ~~Guard `config.cpp`'s numeric config-file parsing~~ — **done (2026-07-23).**
-    `parse_pool_str()`'s port and `load_config()`'s `workers`/`difficulty`/`seconds`
-    conversions wrapped in `try`/`catch`, matching `cli_parser.cpp`'s existing
-    treatment of the equivalent CLI flags — malformed values now log a warning and
-    fall back to `AppConfig`'s defaults instead of crashing. New
-    `tests/test_config.cpp` (3 cases: malformed fields, valid fields, missing file).
+Synthesis of two independent master plans (`docs/performance-master-plan.md`,
+`docs/performance-master-plan-20260724.md`) — see `PLAN.md` Phase 6 for the full
+agree/diverge reconciliation. Nothing below has started yet.
 
-### 2. Small hardening fix
-*   [x] ~~`MetricsExporter::server_fd_` data race~~ — **done (2026-07-23).**
-    `int server_fd_ = -1;` → `std::atomic<int> server_fd_{-1};`. No test added
-    (one-line, zero-risk fix per the original finding; not TSan-verified this
-    round, existing `-fsanitize=thread` build option covers it if ever re-checked).
+### Short-term (hours, zero/low code risk — on-device only, do first)
+*   [x] **Huge-page residency check — done (2026-07-24), result: no-op.** While mining: `AnonHugePages` covers 97.6% of anon RSS (100% for the 256 MiB Argon2 cache mapping specifically), despite `HugePages_Total: 0` (no real hugetlbfs pool) — THP's `always` policy is already coalescing almost everything. dTLB-load-misses: ~1.6 per million instructions (negligible). **The two contingent items below are closed as no-ops as a result.**
+*   [x] **Worker-count sweep — done (2026-07-24), result: no plateau.** See the telemetry table above. 8 workers remains the highest-throughput choice; there is no free-lunch lower-worker-count default.
+*   [x] **Multi-worker PMU attribution — done (2026-07-24), TLB rejected, "power cap" hypothesis retracted and replaced.** dTLB misses negligible at every worker count (<1.4/million instructions) — TLB is not a factor. L2-refill-rate/instruction and `ld_dep_stall` both rise steeply 1→4 workers (front-loaded memory contention) then flatten. The apparent per-core clock drop at 6-8 workers (~772→641→567 MHz) was **not** a power/current cap — see "Major finding" above: this device has two 4-core L2 clusters, and the drop is just the average of a full-rate cluster (0-3) and an arbitration-losing cluster (4-7) once the worker count spans both. See `PLAN.md` Phase 6 item 3's "REVISED" section for the full evidence chain.
+*   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — **blocked on manual device access (2026-07-24)**: `--rt-priority` needs `setcap`/`CAP_SYS_NICE` (not installed, no passwordless sudo); `isolcpus=`/`nohz_full=` need a kernel-cmdline edit + reboot (needs explicit user sign-off). Deferred until the user grants device access directly. Per item 3, don't expect this to touch the 6→8-worker clock-cap effect if it's a firmware power budget.
 
-### 3. Test coverage (lower priority — but found a real bug anyway)
-*   [x] ~~`cli_parser.cpp` unit tests~~ — **done (2026-07-23).** New
-    `tests/test_cli_parser.cpp` (15 cases: defaults, every flag family, malformed-value
-    exit codes, `--version`/`--help`, unknown-argument handling, config-file/CLI-override
-    precedence). **Found a real, previously-unknown bug while writing it**: `--config=<path>`
-    was consumed by the config pre-scan but never recognized in the main flag loop, so it
-    always fell through to "Unknown argument" and made the process `exit(64)` — i.e. the
-    documented `--config=` flag was completely broken. Confirmed against the built `armrx`
-    binary before fixing. Fixed by explicitly skipping `--config=` in the main loop
-    (`src/cli_parser.cpp`) since the pre-scan already consumed its value.
-    (`miner_app.cpp` remains untested — thin orchestration layer, lower value.)
-*   [x] ~~`fill_aes_1r_x4`/`fill_aes_4r_x4`/`hash_aes_1r_x4`/`hash_and_fill_aes_1r_x4`
-    direct tests~~ — **done (2026-07-23).** New `tests/test_aes_hash.cpp`: golden-output
-    pin for `fill_aes_1r_x4` (captured from the current KAT-verified implementation),
-    determinism + output-prefix-consistency checks for both fill functions, input-
-    sensitivity check for `hash_aes_1r_x4`, and — the main new coverage —
-    `hash_and_fill_aes_1r_x4`'s "combined" hash+fill in one pass is asserted to produce
-    byte-identical results to calling `hash_aes_1r_x4()`/`fill_aes_1r_x4()` separately on
-    the same inputs, pinning down the actual contract the fused function exists to provide.
-*   [ ] `tls_client.cpp`/`tui.cpp` remain fully untested (need a mock TLS server / a
-    terminal-capture harness respectively) — not attempted this round, larger lift.
+### Contingent on the huge-page check — closed, no-op (2026-07-24)
+*   [x] ~~Disclose + prefault the Argon2 cache's huge-page fallback path~~ (`argon2.cpp:270`) — not needed, already ~100% THP-coalesced.
+*   [x] ~~Reserve a persistent hugetlb pool at boot~~ (`vm.nr_hugepages`) — not needed, same reason.
 
-### 4. Open decision — default kept for now, now disclosed (2026-07-23)
-*   [x] ~~JIT buffer W^X vs RWX default~~ — **decision: keep RWX-by-default unchanged,
-    but no longer silent.** `src/virtual_memory.c`'s `setPagesRWX()` still defaults to
-    RWX unless `RANDOMX_FORCE_SECURE` is set at build time (explicit user direction:
-    "let it stay for now... we may or may not change it later"). `JitCompilerA64`'s
-    constructor (`src/jit_compiler_a64.cpp`) now logs which mode is active once per
-    process. Revisit the actual default later if wanted — this item stays open only
-    in the sense that the underlying tradeoff hasn't been re-decided, just disclosed.
+### Medium-term (1-2 weeks, moderate risk — only after short-term verification lands)
+*   [x] ~~Register-offset FP loads~~ — **closed 2026-07-24: stale claim, already implemented** (`JitCompilerA64::emitMemLoadFP()` already emits `ldr dN,[x2,tmp_reg]` directly; no `add`+`ld1` pattern exists anywhere in the file). Matches `ROADMAP.md` `O13`. No code change made.
+*   [x] ~~Static FP load/convert software-pipelining~~ — **closed 2026-07-24: stale claim, already implemented** (the static prologue is already interleaved/pipelined, per its own comment). Matches `ROADMAP.md` `O12`. No code change made.
+*   [x] ~~Superscalar literal-pool relayout~~ — **implemented, measured, reverted (2026-07-24), a real but small regression.** Branches dropped 12.1% as designed, but cycles rose +1.65%, IPC fell (0.761→0.748), and hashrate corroborated it (268→265 hashes/60s, −1.12%). Same "cost relocated, not eliminated" pattern as the Argon2 `memcpy` attempt — likely traded branch/I-fetch savings for worse D-cache locality on the relocated literal loads. Reverted (`git checkout -- src/jit_compiler_a64.cpp`), KATs re-confirmed 12/12. See `PLAN.md` Phase 6 item 9.
+*   [x] ~~Prefetch A/B matrix~~ — **adopted 2026-07-24: real small win, confirmed via low-noise `perf stat` after wall-clock hashrate alone was inconclusive.** Removed all three `prfm` hints from `.Lmain_loop` (`jit_compiler_a64_static.S:381-383`, up to 16,384 executions/hash) permanently. Wall-clock hashrate (2 non-interleaved passes, then 3 interleaved passes) hovered at a suggestive but unconfirmed +0.4% (p≈0.07). Switching to `perf stat` cycles/instructions (much lower noise) settled it: +0.885% more instructions completed in a fixed 20s window, zero overlap between conditions, 7-20× signal-to-noise ratio. KATs/JIT-determinism/equivalence 12/12 on the final adopted build. See `PLAN.md` Phase 6 item 10 for the full three-round methodology writeup — worth reading as a lesson in when wall-clock benchmarking isn't sensitive enough.
+*   [x] ~~Fused hash-and-fill nonce pipeline~~ — **closed 2026-07-24: benchmarked, failed its own gate.** New primitive-level benchmark added to `bench_armrx.cpp` (`--micro-only`): fused `hash_and_fill_aes_1r_x4` (59,124.84 μs) is ~3.6% *slower* than the two separate `hash_aes_1r_x4`+`fill_aes_1r_x4` calls it would replace (57,084.78 μs). No `mining_engine.cpp` integration attempted — the premise failed at the cheap benchmark stage, before any of the real (job-lifecycle bookkeeping) implementation risk. See `PLAN.md` Phase 6 item 11.
 
-### 5. Performance
-*   [x] ~~CBRANCH / JIT branch-misprediction cost reduction~~ — **closed (2026-07-22),
-    no further CBRANCH work planned.** Implemented the CSEL rewrite, measured it
-    cleanly (apples-to-apples `perf stat`, old code rebuilt fresh for a fair
-    baseline), and reverted: +46% branch-misses, flat hashrate, a net regression not
-    an improvement. Separately found the 31.08% aggregate figure that justified this
-    work doesn't represent the mining hot path — the isolated hot path's real rate is
-    2.4%, costing ~0.1–0.16% of cycles, not the previously-estimated ~8.6–11.9%. Full
-    account in `docs/branchless-cbranch.md`.
-*   [x] ~~Argon2 NEON diagonal-step vectorization~~ — **done (2026-07-23).** 26.8%
-    fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-
-    key-rotation latency, not sustained hashrate). Full account in
-    `docs/argon2-neon-diagonal-vectorization.md`.
-*   [x] ~~`memcpy`/copy-elimination lead~~ — **tried, measured, reverted
-    (2026-07-23), no net win.** Gave `permute_block` an out-of-place
-    `permute_block_into(src, dst)` sibling to eliminate `argon2_compress`'s
-    `auto permuted = result;` 1024-byte copy. Apples-to-apples `perf stat`
-    (old code rebuilt fresh, on-device): -2.86% instructions but **+0.35%
-    cycles** (flat-to-worse) — symbol attribution showed the `memcpy` cost
-    (6.77%→3.56%) didn't disappear, it relocated into the new function
-    (12.74%), netting out roughly even. glibc's `memcpy` was already about as
-    fast as the hand-rolled replacement on this hardware. Reverted
-    (`git checkout -- src/argon2.cpp`). Full account in
-    `docs/argon2-compress-copy-elimination.md`.
-*   [x] ~~`Argon2dCache::initialize`'s own driver-code cycle share (23.17%
-    of the original profile)~~ — **investigated and closed (2026-07-23), no
-    action needed.** `perf annotate` (debug-symbol rebuild, instruction-level
-    attribution) found this isn't separate driver overhead: 92% of sampled
-    instructions in the function cost ≈0%, including the actual address/
-    reference-computation arithmetic (`j1`, `square`, `x`, `y`, `relative`,
-    `reference`). Every hot instruction is a NEON `eor`/`ldr q`/`str q` —
-    `argon2_compress()`'s own XOR-combine loops, auto-vectorized and inlined
-    directly into `initialize`'s body by the compiler. It's inherent,
-    spec-required compression work, already well-optimized — not a bug or
-    missed optimization. **This closes out the Argon2 performance backlog**;
-    no further actionable lead from the original profiling pass. Full account
-    in `docs/argon2-compress-copy-elimination.md`.
+### Long-term (weeks, high risk — do not start without a measured hypothesis from medium-term items)
+*   [ ] Conservative 2-3-instruction emitter lookahead scheduler — attacks the IPC-0.708 stall budget directly. Only after the medium-term emitter items land. Est. 2-6%, HIGH risk.
+*   [x] ~~Build real instrumentation for the superscalar/dataset-derivation path~~ — **done 2026-07-24.** Confirmed the mechanism by reading the assembly: `generateSuperscalarHash()` compiles once per seed rotation (`vm.cpp:175`), but the compiled code executes via `bl rx_calc_dataset_item` on *every* main-loop iteration in light mode — 2048 × 8 = **16,384 calls/hash**. Extended the `JitDumpEntry`/`--jit-dump` mechanism to cover this region (new `superscalar_jit_dump_`/`getSuperscalarJitDump()`, instrumented `generateSuperscalarHash()`, extended `dumpJitCode()`'s output). Verified 12/12. Real data: one call = 3,563 instructions/20,916 bytes → ×16,384 ≈ **58.4M instructions/hash, ~44% of the ~132.93M total** — a lower bound (fixed wrapper chunks and the main loop's own per-iteration overhead aren't tracked yet). See `PLAN.md` Phase 6 item 13 for the full per-opcode table and honest scope of what's still unreconciled.
+*   [ ] Region-scoped armrx-vs-XMRig generated-code comparison (`--jit-dump` + objdump) — only opens the full peephole-JIT rewrite if a *real* region-scoped instruction-count gap shows. Do not start the peephole effort on the old 31%-branch-miss-era estimate. Item 13's instrumentation now gives a real number for the dominant region (~44% explained), but the remaining ~55% and a real XMRig-side comparison are still open. See `PLAN.md` Phase 6 item 14.
+*   [ ] Re-run `devbox_pgo_build` after any medium/long-term item lands meaningfully.
+*   [x] ~~Re-baseline `README.md`'s stale H/s figures honestly~~ — **done (2026-07-24)**, using the worker-count sweep data above.
 
-### 5a. Performance — new leads from external audit (`docs/performance-improvement-audit.md`, 2026-07-23)
-
-An untracked audit doc (`docs/performance-improvement-audit.md`, written by another
-agent) proposed several leads. Each claim was independently fact-checked against
-the actual codebase/history before being added here — one citation error was
-found and corrected (see the Newton-Raphson `ROADMAP.md` fix, same date), and
-both substantive recommendations were genuinely non-redundant with prior work
-(confirmed before implementing either). PGO's *wiring gap* claim checked out
-exactly as described; its *payoff* claim (+19.3%) turned out to be stale once
-actually re-measured on the current codebase — see below.
-
-*   [x] ~~PGO devbox wiring~~ — **tool built and shipped (2026-07-23); the
-    claimed +19.3% does NOT reproduce on the current codebase, measured
-    honestly.** Added `devbox_pgo_build` (`tools/devbox/devbox_mcp.py`):
-    orchestrates GENERATE (clean rebuild) → train (`armrx --mine --seconds=N`,
-    sustained light-mode JIT mining per `docs/performance-next-agent-handoff.md`
-    §10.3) → USE (reconfigure + rebuild consuming the collected `.gcda` profile
-    data), all in one call. Verified end-to-end multiple times: KATs pass,
-    `-fprofile-use -fno-lto` genuinely present in `armrx`'s link command, real
-    non-empty `.gcda` files produced and consumed.
-
-    **While validating it, found and fixed a real, pre-existing bug** in the
-    devbox tooling itself: `_stash_and_run`/`tool_status`/`tool_test` were
-    `shlex.quote()`-ing paths built from `cfg.remote_dir`, which single-quotes
-    the string and — since this project's own `remote_dir` config is
-    `"~/armrx"` — silently defeats shell tilde-expansion. This caused every
-    `devbox_build`/`test`/`bench` log to be written to a disconnected, literal
-    `~` directory instead of inside the real repo tree, and made
-    `devbox_status`'s deployed-revision check permanently read `.devbox-revision`
-    from that same bogus location (always reporting no sync had happened, even
-    right after a real one). Confirmed this had been silently active across
-    earlier sessions too (found stale logs from unrelated prior runs sitting in
-    the bogus directory). Fixed by interpolating `remote_dir`-derived paths
-    unquoted (matching how `tool_build`'s own commands already did it
-    correctly) — trusted config-file input, not attacker-controlled, so this is
-    safe. Verified fixed: `devbox_status`'s "deployed" now correctly matches
-    local HEAD; logs land at and are read from the real path.
-
-    **However — measured honestly, apples-to-apples, on THIS codebase's
-    current state, PGO shows no benefit**: a fresh non-PGO build and the
-    `devbox_pgo_build`-produced PGO build (two different `train_seconds`
-    values tried, 15s and 90s, to rule out an under-trained profile) both
-    measured **identical 4.27 H/s** single-thread steady-state (`armrx --mine
-    --seconds=60 --workers=1`), not the historically-claimed 5.18 H/s.
-    `perf stat` on `--micro-only` even showed the PGO build very slightly
-    *worse* (+4.6% instructions, +1.7% cycles) on unrelated microbenchmarks.
-    `.gcda` files were confirmed non-empty and genuinely consumed (real
-    profile data, not an artifact of a broken flow). **Most likely
-    explanation**: a great deal of hot-path code has changed since the
-    2026-07-21 measurement that produced +19.3% (Argon2 diagonal-step
-    vectorization, the JIT startup log line, several correctness fixes,
-    CBRANCH investigation) — the code shape PGO's inlining/branch-prediction
-    decisions were tuned against back then no longer matches today's binary.
-    **The tool is kept** (mechanically correct, useful for future
-    re-evaluation or if a future change reopens a real PGO opportunity), but
-    the "+19.3%, single biggest lever" framing from the external audit is
-    **stale and should not be repeated** without re-measuring on the then-
-    current codebase. `README.md`'s 5.18 H/s figure was not touched — that
-    would need its own honest re-measurement, not assumed from this old number
-    either.
-*   [x] ~~NEON `vtbl`/`vqtbl1q`-vectorized software T-table AES~~ —
-    **implemented, exhaustively verified correct, measured as a real
-    regression (2026-07-23).** Derived a full "vector-permute AES" S-box
-    from scratch in Python (GF(2⁸)↔tower-field GF(2⁴)² isomorphism via a
-    root of AES's defining polynomial) before writing any C++ — verified
-    256/256 against the standard FIPS-197 S-box/inverse-S-box, and the full
-    round structure (ShiftRows/MixColumns/inverses) against 3000 random
-    trials matching this codebase's actual T-table semantics. Implemented in
-    `include/armrx/aes.hpp` as `encrypt_transform_neon`/`decrypt_transform_neon`,
-    gated behind a new `ARMRX_ENABLE_NEON_AES` CMake option (default OFF,
-    matching `ARMRX_ENABLE_JIT_FAST_DIV_SQRT`'s established pattern) —
-    every other call site unchanged. New `tests/test_aes_neon.cpp`: 256/256
-    SubBytes + InvSubBytes exact match, 20,000 random full-round parity
-    trials both directions — **compiled and passed on the first attempt on
-    real hardware, zero bugs found**, thanks to the exhaustive prior Python
-    verification. Full KATs and `test_aes_hash.cpp`'s golden pins byte-
-    identical with the flag ON; full `ctest` 12/12 green.
-
-    **Measured honestly, apples-to-apples (twice, to rule out a thermal
-    artifact): a real ~19.4% regression** on `fill_aes_1r_x4`/
-    `hash_aes_1r_x4` (28.4ms→33.9ms / 28.6ms→34.2ms). Same root cause as the
-    earlier hardware-AES re-enable attempt (`changelogs.md` 2026-07-20):
-    per-block NEON load/store overhead cancels the lookup savings on this
-    Cortex-A53 — this device's NEON pipeline just doesn't favor this
-    operation shape, independent of *which* NEON AES technique is tried.
-    **Kept, not reverted** (flag-gated, so "not adopted" just means leaving
-    the default OFF, unlike CSEL's unconditional-rewrite revert) — the
-    implementation, its exhaustive test coverage, and the mathematical
-    derivation are reusable reference material even though the performance
-    didn't pan out on this hardware. Full account, all verified constants,
-    and the complete derivation in `docs/neon-vector-permute-aes.md`.
-*   [x] ~~`--stagger-ms` default~~ — **already investigated in an earlier
-    session, found ineffective (2026-07-23 re-check, not re-tested this
-    session).** `docs/archived/beyond-parity_v2.md` documents this exact
-    experiment already run on this device: startup stagger tried at 5, 20,
-    100, and 1000ms — **"+0% (tested, ineffective)... a hardware ceiling."**
-    RandomX's memory pressure is continuous (the full 2 MiB scratchpad is
-    touched every single hash iteration, not just at startup), so a one-time
-    launch-time delay can't desync steady-state phase alignment the way the
-    audit's suggestion assumed — the 8-worker efficiency drop is single-
-    channel LPDDR3 bandwidth saturation, not a fixable scheduling artifact.
-    Current default (`stagger_ms_ = 0`, `src/mining_engine.cpp:313`) is
-    correct as-is; no CMake/CLI change made. **Caveat**: this finding predates
-    this session's other changes (Argon2 diagonal-step, worker-thread fix,
-    etc.) and was *not* re-verified against the current codebase — flagged
-    here rather than assumed, in case a future re-check is warranted (same
-    lesson as PGO's stale-claim finding this session), but not treated as an
-    open action item given how strong and mechanism-clear the prior result is.
+**Not adopted / explicitly deprioritized:** full peephole-JIT coalescing without a fresh gap measurement; any further NEON/hardware-AES attempt (three independent measured regressions already); custom allocators/memory pooling (no hot-path allocation exists to pool).
 
 ### Backlog (deprioritized per explicit user direction, not deleted)
 *   QEMU AArch64 GitHub Actions CI.
 *   Stratum V2 protocol support.
 *   `ARMRX_JIT_FAST_DIV_SQRT` CMake flag centralization (low priority — the flag that
     actually caused a crash is already `PRIVATE`).
+*   `tls_client.cpp`/`tui.cpp` test coverage (need a mock TLS server / terminal-capture
+    harness respectively — bigger lift than the `cli_parser.cpp`/`aes_hash.cpp` work already
+    done).
 
 ---
 
-## Resolved Since Last Snapshot (2026-07-23)
+## Resolved — Phase 6 (in progress)
+
+*   [x] **Superscalar literal-pool relayout (item 9), 2026-07-24 — implemented, measured,
+    reverted.** Real regression: cycles +1.65%, IPC 0.761→0.748, hashrate −1.12% (268→265
+    hashes/60s), despite branches dropping 12.1% exactly as designed. Reverted; KATs
+    re-confirmed 12/12 on the restored code. See `PLAN.md` Phase 6 item 9 for the full account.
+*   [x] **Items 7-8 (register-offset FP loads, static FP load/convert pipelining), 2026-07-24 —
+    both stale claims, already implemented in an earlier phase** (`ROADMAP.md` `O13`/`O12`).
+    No code change made or needed; verified by reading the actual current code before touching
+    it, the same discipline that's caught several other stale claims this project's history.
+*   [x] **Multi-worker PMU attribution (item 3), 2026-07-24 — two layered mechanisms, TLB rejected.**
+    Cortex-A53-specific PMU events (`l1d_cache_refill`, `l2d_cache_refill`, `ld_dep_stall`) at
+    1/2/4/6/8 workers. dTLB misses negligible everywhere (rules out TLB). L2-refill-rate/instruction
+    and `ld_dep_stall` both rise steeply 1→4 workers then flatten (front-loaded memory contention).
+    A separate, real per-core clock reduction (derived from cycles/wall-time, since `scaling_cur_freq`
+    isn't exposed) onsets at 6+ workers (~772 MHz flat at 1/2/4 → ~641 MHz at 6 → ~567 MHz at 8)
+    while thermal-zone temps stay mild (36–50°C) — more consistent with a core-count-triggered
+    power/current cap than classic thermal throttling. See `PLAN.md` Phase 6 item 3 for the full table.
+*   [x] **devbox MCP tooling: two real bugs found and fixed while running items 1–2, 2026-07-24.**
+    `tool_test()` used the 120s `"default"` timeout instead of a bench-scale one (always timed
+    out on the full ~400s+ suite) — added a dedicated `"test"` bucket (900s). Separately, the
+    single-threaded blocking server couldn't answer the host's liveness `ping` during any long
+    call, causing mid-call disconnects — fixed by running `tools/call` dispatch in worker
+    threads (with a `_device_lock` still serializing actual device operations). Verified: a real
+    `devbox_test` call ran 612.72s (12/12 passed) with the connection staying up throughout.
+    See `PLAN.md` Phase 6 for the full account.
+
+---
+
+## Resolved — Phases 1–5 (full detail: `docs/archived/plan_completed_phases_1-5.md`)
+
 *   [x] `MiningEngine::worker_loop()` bad-nonce-job worker death — `active = false; return;` → `active = false; continue;`, regression test added.
 *   [x] `config.cpp` numeric config-file parsing crash — `try`/`catch` guards added around `workers`/`difficulty`/`seconds`/pool-port, matching `cli_parser.cpp`'s CLI-flag treatment, regression test added.
 *   [x] `MetricsExporter::server_fd_` data race — now `std::atomic<int>`.
 *   [x] `cli_parser.cpp` test coverage — new `tests/test_cli_parser.cpp`; found and fixed a real bug (`--config=` always exited with "Unknown argument", code 64).
 *   [x] `aes_hash.cpp` direct helper test coverage — new `tests/test_aes_hash.cpp` (golden pins + `hash_and_fill_aes_1r_x4` decomposition-equivalence check).
 *   [x] Argon2 NEON diagonal-step vectorization — 26.8% fewer instructions, 19.0% fewer cycles for `Argon2dCache::initialize()` (seed-key-rotation latency, not sustained hashrate). See `docs/argon2-neon-diagonal-vectorization.md`.
+*   [x] Argon2 `memcpy` copy-elimination — implemented, measured, reverted (no net win, cost relocated not eliminated). See `docs/argon2-compress-copy-elimination.md`.
 *   [x] CBRANCH branch-misprediction work — CSEL implemented, measured, and reverted (net regression); root-caused the 31.08% figure to a non-representative benchmark section, not the mining hot path. See `docs/branchless-cbranch.md`.
 *   [x] On-device LTO link regression (Alpine `fortify-headers` + GCC LTO incompatibility) — root-caused and fixed, `CMakeLists.txt`.
 *   [x] Both documented pool-failover gaps (dead-at-startup pool never failing over; up to ~30s stale-reconnect-thread-join delay) — `src/pool_manager.cpp`, `src/stratum_client.cpp`.
 *   [x] AES round-key constants consolidated into `include/armrx/aes_keys.hpp`.
 *   [x] Scratchpad L3 mask constants unified into `include/armrx/randomx_config.hpp`.
 *   [x] `kCompileHandlers[256]` derived from `instruction_weights.hpp` instead of hand-maintained.
-
-## Resolved Earlier (still valid)
-*   [x] **`MetricsExporter` thread-detach use-after-free** — joins on destroy instead of detaching (the *narrower* `server_fd_` race above is a separate, newly-found issue).
-*   [x] **Worker Thread Reuse for Dataset Initialization** — `MiningEngine::set_job()` reuses long-lived workers; also surfaced and fixed the fast-mode dataset-corruption bug (`docs/fast-mode-dataset-corruption-postmortem.md`).
-*   [x] **Mock Stratum Socket Integration Tests** — `tests/test_pool_protocol.cpp`, 7 scenarios; also surfaced and fixed the `PoolManager` self-deadlock (`docs/pool-failover-deadlock-postmortem.md`).
-*   [x] **JSON Parser Fuzzing** — `tests/fuzz_json.cpp`, 2.5M+ executions, zero findings.
-*   [x] **NEON `permute_block_neon` benchmarking** — ~16% faster than scalar, enabled.
-*   [x] **JIT Buffer Overflow Safety** — root-caused segfaults to PUBLIC flag leaks under GCC 15 LTO; retained doubled 32,768-byte buffer as defense-in-depth.
-*   [x] **PGO Linker Errors** — unblocked compiler profile linkage across Alpine/musl and GCC 15.2.0.
-*   [x] **CTest path caveat** — re-verified 2026-07-22: did not reproduce in any on-device run this session (all 7 tests pass via plain `ctest` every time). If this recurs, re-add a note here with the exact reproduction steps.
+*   [x] PGO devbox wiring (`devbox_pgo_build`) — tool shipped and mechanically correct (also fixed a real tilde-expansion bug affecting the whole devbox toolchain), but the claimed +19.3% payoff did **not** reproduce on current code (measured identical 4.27 H/s PGO vs. non-PGO). Tool kept for future re-evaluation.
+*   [x] NEON `vtbl`/`vqtbl1q`-vectorized software AES — derived from scratch, exhaustively verified correct (256/256 S-box match, 20,000-trial parity, first-try-correct on hardware), measured as a real ~19.4% regression. Kept flag-gated (`ARMRX_ENABLE_NEON_AES`, default OFF) as reference. See `docs/neon-vector-permute-aes.md`.
+*   [x] `--stagger-ms` default — confirmed already tested in an earlier session (`docs/archived/beyond-parity_v2.md`, 4 stagger values, "+0%, hardware ceiling"), not re-run; default (0) left unchanged.
+*   [x] `MiningEngine` worker-thread reuse for dataset initialization — also surfaced and fixed the fast-mode dataset-corruption bug (`docs/fast-mode-dataset-corruption-postmortem.md`).
+*   [x] Mock Stratum socket integration tests — `tests/test_pool_protocol.cpp`, 7 scenarios — also surfaced and fixed the `PoolManager` self-deadlock (`docs/pool-failover-deadlock-postmortem.md`).
+*   [x] JSON parser fuzzing — `tests/fuzz_json.cpp`, 2.5M+ executions, zero findings.
+*   [x] NEON `permute_block_neon` benchmarking — ~16% faster than scalar, enabled.
+*   [x] JIT buffer overflow safety — root-caused segfaults to `PUBLIC` flag leaks under GCC 15 LTO; retained doubled 32,768-byte buffer as defense-in-depth.
+*   [x] PGO linker errors — unblocked compiler profile linkage across Alpine/musl and GCC 15.2.0.
+*   [x] `MetricsExporter` thread-detach use-after-free — joins on destroy instead of detaching.
+*   [x] `main.cpp` split into `CommandLineParser` + `MinerApp`.
+*   [x] JIT buffer W^X vs RWX default — kept RWX (explicit user direction), now disclosed via a startup log line instead of silent.
+*   [x] CTest path caveat — re-verified 2026-07-22: did not reproduce in any on-device run (all 7 tests pass via plain `ctest` every time). If this recurs, re-add a note here with exact reproduction steps.

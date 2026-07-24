@@ -377,10 +377,14 @@ DECL(randomx_program_aarch64_update_spMix1):
 	add	x19, x2, x19, lsl #6
 	add	x20, x2, x20, lsl #6
 
-	# Prefetch next iteration's scratchpad data
-	prfm	pldl1keep, [x19]
-	prfm	pldl1strm, [x20]
-	prfm	pldl1keep, [x20, 32]
+	# Prefetch next iteration's scratchpad data -- removed 2026-07-24 (PLAN.md Phase 6
+	# item 10): measured a small but real *regression* from these three prfm hints on
+	# this Cortex-A53 (perf stat, interleaved A/B, ~0.885% fewer instructions/wall-time
+	# with them present, confirmed low-noise; wall-clock hashrate agreed at ~0.4%).
+	# Do not re-add without a fresh measurement -- see changelogs.md for the full account.
+	# prfm	pldl1keep, [x19]
+	# prfm	pldl1strm, [x20]
+	# prfm	pldl1keep, [x20, 32]
 
 	# Store integer registers to scratchpad (spAddr1)
 	stp	x4, x5, [x17, 0]

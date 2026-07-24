@@ -15,7 +15,8 @@
   "timeout_s": {
     "default": 120,
     "build": 1800,
-    "bench": 600
+    "bench": 600,
+    "test": 900
   },
 
   "_guard_note": "When true, devbox_shell blocks a small catastrophic set (reboot/dd-to-device/mkfs/fork-bomb/rm -rf /). All normal dev commands are unrestricted. Set false only if you understand the risk.",

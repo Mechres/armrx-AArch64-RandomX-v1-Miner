@@ -32,16 +32,25 @@
 
 ## 🏎️ Performance Baseline
 
-Measurements conducted on an **8× Cortex-A53 CPU @ ~1.2 GHz** (Lenovo MSM8916 running postmarketOS):
+Measurements conducted on an **8× Cortex-A53 CPU (4×1.1 GHz + 4×1.4 GHz)** (Lenovo, MSM8929 /
+Snapdragon 415, running postmarketOS — a genuine two-cluster big.LITTLE-shaped part; see
+`ROADMAP.md`'s Baseline section for the cache-topology finding this corrected),
+re-baselined 2026-07-24 (`PLAN.md` Phase 6 item 2 — see there for the full worker-count sweep,
+two passes, thermal-settled between runs). Earlier figures in this table (5.18 H/s / 25.28 H/s,
+"linear scaling") were stale and did not reproduce; see `docs/archived/plan_completed_phases_1-5.md`
+Phase 5 for how that was found (PGO's claimed +19.3% didn't reproduce either — both PGO and non-PGO
+measure identically on current code).
 
 | Mode | Workers | Hashrate | Per-Core Efficiency | Notes |
 |:---|:---:|:---:|:---:|:---|
-| **Light mode JIT** | 1 | **5.18 H/s** | 5.18 H/s | Native hardware division & fast memory paths |
-| **Light mode JIT (Pinned)** | 8 | **25.28 H/s** | 3.16 H/s | Linear scaling up to 8 threads under PGO |
-| **Interpreted Fallback** | 1 | **0.44 H/s** | 0.44 H/s | Portable bytecode fallback (11.7× JIT speedup) |
+| **Light mode JIT** | 1 | **4.27 H/s** | 4.27 H/s | Native hardware division & fast memory paths |
+| **Light mode JIT (Pinned)** | 4 | **16.82 H/s** | 4.20 H/s | 98.5% scaling efficiency |
+| **Light mode JIT (Pinned)** | 6 | **21.13 H/s** | 3.52 H/s | 82.5% scaling efficiency |
+| **Light mode JIT (Pinned)** | 8 | **24.95 H/s** | 3.12 H/s | 73.0% scaling efficiency — **not linear**; efficiency declines smoothly with no plateau across 4→8, so 8 workers is still the highest-throughput choice on this device |
+| **Interpreted Fallback** | 1 | 0.44 H/s | 0.44 H/s | Portable bytecode fallback — not re-measured this pass, ratio to JIT is approximate |
 
 > [!TIP]
-> Pinned execution (`--workers=8` on physical cores) avoids OS scheduling overhead, yielding higher throughput and lower variance than unpinned runs.
+> Pinned execution (`--workers=8` on physical cores) avoids OS scheduling overhead, yielding higher throughput and lower variance than unpinned runs. There is no lower-worker-count "free lunch" on this device — going from 8 down to fewer workers trades real throughput for lower heat/power, it does not recover the same hashrate at a lower core count.
 
 ---
 

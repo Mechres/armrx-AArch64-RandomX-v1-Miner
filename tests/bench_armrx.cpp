@@ -172,6 +172,31 @@ void bench_aes_primitives() {
         armrx::hash_aes_1r_x4(std::span<const std::byte>(aes_buf_2mib), aes_state);
     }, "finalize", 1.0);
     print_result(r_hash);
+
+    // hash_and_fill_aes_1r_x4: fuses the two traversals above into one pass
+    // over the scratchpad (KAT-pinned equivalence in test_aes_hash.cpp), but
+    // unused by production mining today. This benchmark measures the real
+    // primitive-level saving before any mining-engine integration is
+    // attempted (PLAN.md Phase 6 item 11's "bench first" prerequisite).
+    armrx::AesState fused_hash_state{};
+    armrx::AesState fused_fill_state{};
+    auto r_fused = sample_benchmark("hash_and_fill_aes_1r_x4 (2 MiB, fused)", 30, 3, [&] {
+        armrx::hash_and_fill_aes_1r_x4(std::span<std::byte>(aes_buf_2mib), fused_hash_state, fused_fill_state);
+    }, "fused-op", 1.0);
+    print_result(r_fused);
+
+    // Direct comparison: two separate full 2 MiB traversals back to back,
+    // mirroring exactly what the mining hot path does today at a nonce
+    // boundary (hash nonce N's final scratchpad, then fill nonce N+1's
+    // initial scratchpad) -- same total work as the fused call above, done
+    // the unfused way, so the two lines are directly comparable.
+    armrx::AesState separate_hash_state{};
+    armrx::AesState separate_fill_state{};
+    auto r_separate = sample_benchmark("hash_aes_1r_x4 + fill_aes_1r_x4 (2x 2 MiB, separate)", 30, 3, [&] {
+        armrx::hash_aes_1r_x4(std::span<const std::byte>(aes_buf_2mib), separate_hash_state);
+        armrx::fill_aes_1r_x4(separate_fill_state, std::span<std::byte>(aes_buf_2mib));
+    }, "separate-op", 1.0);
+    print_result(r_separate);
 }
 
 void bench_dataset_helpers() {

@@ -405,6 +405,55 @@ void JitCompilerA64::dumpJitCode() const {
 		          << std::hex << std::setw(6) << std::setfill('0') << e.offset << " | "
 		          << std::dec << std::setw(4) << std::setfill(' ') << e.size << '\n';
 	}
+
+	// PLAN.md Phase 6 item 13 (2026-07-24): region-scoped instrumentation for the
+	// superscalar/dataset-derivation path. Unlike the main table above (a fixed,
+	// small, once-per-hash program), this region is what `bl rx_calc_dataset_item`
+	// calls once per main-loop iteration in light mode -- 2048 iterations x 8
+	// programs = 16,384 calls/hash -- so it dominates real per-hash instruction
+	// volume even though it's compiled only once per seed rotation, not per hash.
+	if (!superscalar_jit_dump_.empty()) {
+		static constexpr const char* kSuperscalarNames[] = {
+			"ISUB_R", "IXOR_R", "IADD_RS", "IMUL_R", "IROR_C",
+			"IADD_C7", "IXOR_C7", "IADD_C8", "IXOR_C8", "IADD_C9", "IXOR_C9",
+			"IMULH_R", "ISMULH_R", "IMUL_RCP",
+		};
+		constexpr uint32_t kNumSuperscalarNames =
+			sizeof(kSuperscalarNames) / sizeof(kSuperscalarNames[0]);
+
+		struct Agg { uint64_t count = 0; uint64_t bytes = 0; };
+		std::array<Agg, kNumSuperscalarNames> agg{};
+		uint64_t ss_total_instr = 0, ss_total_bytes = 0;
+		for (const auto& e : superscalar_jit_dump_) {
+			++ss_total_instr;
+			ss_total_bytes += e.size;
+			if (e.opcode < kNumSuperscalarNames) {
+				agg[e.opcode].count += 1;
+				agg[e.opcode].bytes += e.size;
+			}
+		}
+
+		std::cout << "\n--- Superscalar/dataset-derivation dump "
+		          << "(one generateSuperscalarHash() call = one rx_calc_dataset_item "
+		          << "compile; in light mode this executes once per main-loop "
+		          << "iteration, 16,384x/hash) ---\n";
+		std::cout << "Total instructions: " << ss_total_instr
+		          << "  Total bytes: " << ss_total_bytes << "\n\n";
+		std::cout << "  opcode     | count | bytes | avg_size | % of bytes\n";
+		std::cout << "-------------|-------|-------|----------|------------\n";
+		for (uint32_t i = 0; i < kNumSuperscalarNames; ++i) {
+			if (agg[i].count == 0) continue;
+			const double avg = static_cast<double>(agg[i].bytes) / static_cast<double>(agg[i].count);
+			const double pct = ss_total_bytes > 0
+				? (static_cast<double>(agg[i].bytes) / static_cast<double>(ss_total_bytes) * 100.0)
+				: 0.0;
+			std::cout << std::left << std::setw(12) << kSuperscalarNames[i] << std::right
+			          << " | " << std::setw(5) << agg[i].count
+			          << " | " << std::setw(5) << agg[i].bytes
+			          << " | " << std::fixed << std::setprecision(2) << std::setw(8) << avg
+			          << " | " << std::setw(9) << pct << "%\n";
+		}
+	}
 	std::cout << std::flush;
 }
 
@@ -453,6 +502,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 			const Instruction& instr = prog(j);
 			const uint32_t src = instr.src;
 			const uint32_t dst = instr.dst;
+			const uint32_t pos_before_superscalar = codePos;
 
 			switch (static_cast<SuperscalarInstructionType>(instr.opcode))
 			{
@@ -503,6 +553,9 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 				break;
 			default:
 				break;
+			}
+			if (jit_dump_enabled_) {
+				superscalar_jit_dump_.push_back({static_cast<uint32_t>(instr.opcode), pos_before_superscalar, codePos - pos_before_superscalar});
 			}
 		}
 

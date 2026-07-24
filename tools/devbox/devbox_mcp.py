@@ -22,6 +22,7 @@ import re
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -55,7 +56,7 @@ DEFAULTS: dict[str, Any] = {
     "ssh_password": None,   # None = key auth (recommended); else via sshpass -e
     "build_flags": ["-DARMRX_ENABLE_NATIVE=ON", "-DARMRX_BUILD_TESTS=ON"],
     "build_jobs": None,     # None = all available cores (-j)
-    "timeout_s": {"default": 120, "build": 1800, "bench": 600},
+    "timeout_s": {"default": 120, "build": 1800, "bench": 600, "test": 900},
     "destructive_guard": True,
 }
 
@@ -98,6 +99,14 @@ class Config:
 # SSH / rsync / scp helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Tool calls now run off the main stdio-read thread (see handle_request), so
+# the server can keep answering `ping`/tools/list while a build/test/bench
+# runs for minutes. That means multiple tool calls could otherwise overlap on
+# the *device* (e.g. a build racing a test reading the same build/ dir) --
+# this lock serializes actual remote command execution back to the previous
+# one-at-a-time behavior, without blocking the JSON-RPC read loop itself.
+_device_lock = threading.Lock()
+
 class RunResult(dict):
     """Result of a remote/local command, dict-like for easy JSON serialization."""
 
@@ -139,9 +148,10 @@ def _run_remote(cfg: Config, command: str, timeout: int | None = None,
         full = _base_ssh_cmd(cfg) + [command]
 
     try:
-        proc = subprocess.run(
-            full, capture_output=True, text=True, timeout=timeout, env=env,
-        )
+        with _device_lock:
+            proc = subprocess.run(
+                full, capture_output=True, text=True, timeout=timeout, env=env,
+            )
         return RunResult(
             ok=(proc.returncode == 0),
             exit_code=proc.returncode,
@@ -183,8 +193,9 @@ def _rsync(cfg: Config, extra_args: list[str]) -> RunResult:
 
     cmd = ["rsync", "-az", "--delete", "-e", ssh_shell] + extra_args
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=cfg.timeout(), env=env)
+        with _device_lock:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=cfg.timeout(), env=env)
         return RunResult(
             ok=(proc.returncode == 0),
             exit_code=proc.returncode,
@@ -513,7 +524,11 @@ def tool_test(cfg: Config, tests: list[str] | None, parallel: int) -> dict[str, 
     if tests:
         args += ["-R", "^(" + "|".join(re.escape(t) for t in tests) + ")$"]
     cmd = " ".join(a if a.startswith("--test-dir=") else shlex.quote(a) for a in args)
-    res = _stash_and_run(cfg, cmd, "test", cfg.timeout())
+    # NOTE: was cfg.timeout() (the 120s "default" bucket) -- the full,
+    # unfiltered suite (bench_armrx alone ~300s, test_pool_protocol ~65s,
+    # plus everything else) routinely takes 350-400s+, so this always timed
+    # out. Give it its own bucket instead of borrowing "default"/"bench".
+    res = _stash_and_run(cfg, cmd, "test", cfg.timeout("test"))
     parsed = parse_ctest(res["stdout"])
     parsed["ok"] = res["ok"]
     parsed["timed_out"] = res["timed_out"]
@@ -905,9 +920,18 @@ DISPATCH = {
 # MCP JSON-RPC over stdio
 # ─────────────────────────────────────────────────────────────────────────────
 
+_stdout_lock = threading.Lock()
+
+
 def _send(msg: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(msg) + "\n")
-    sys.stdout.flush()
+    # tools/call responses can now arrive from worker threads (see
+    # handle_request) concurrently with the main thread's own replies
+    # (ping, tools/list, ...) -- serialize so two JSON lines never interleave
+    # into one garbled line on stdout.
+    line = json.dumps(msg) + "\n"
+    with _stdout_lock:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def _result(req_id: Any, result: Any) -> None:
@@ -955,21 +979,33 @@ def handle_request(req: dict[str, Any], cfg: Config | None) -> None:
         if handler is None:
             _error(req_id, ERR_METHOD, f"unknown tool: {name}")
             return
-        try:
-            result = handler(cfg, args)
-            text = json.dumps(result, indent=2, default=str)
-            _send({
-                "jsonrpc": "2.0", "id": req_id,
-                "result": {
-                    "content": [{"type": "text", "text": text}],
-                    "isError": bool(result.get("ok") is False),
-                },
-            })
-        except KeyError as e:
-            _error(req_id, ERR_PARAMS, f"missing required argument: {e}")
-        except Exception as e:
-            log(f"tool {name} raised: {type(e).__name__}: {e}")
-            _error(req_id, ERR_INTERNAL, f"{type(e).__name__}: {e}")
+
+        def _run(handler=handler, name=name, args=args, req_id=req_id) -> None:
+            try:
+                result = handler(cfg, args)
+                text = json.dumps(result, indent=2, default=str)
+                _send({
+                    "jsonrpc": "2.0", "id": req_id,
+                    "result": {
+                        "content": [{"type": "text", "text": text}],
+                        "isError": bool(result.get("ok") is False),
+                    },
+                })
+            except KeyError as e:
+                _error(req_id, ERR_PARAMS, f"missing required argument: {e}")
+            except Exception as e:
+                log(f"tool {name} raised: {type(e).__name__}: {e}")
+                _error(req_id, ERR_INTERNAL, f"{type(e).__name__}: {e}")
+
+        # Run off the stdin-read thread. Tool handlers shell out to ssh/rsync
+        # and can legitimately take minutes (test/bench/build) -- previously
+        # this ran inline, so the server couldn't read or answer *anything*
+        # else on stdin (including `ping`) for the whole duration, and the
+        # MCP host would conclude the server had hung and reconnect mid-call.
+        # `_device_lock` (see _run_remote/_rsync) still serializes the actual
+        # remote commands, so this doesn't let two builds/tests race on the
+        # device -- it only frees the JSON-RPC loop to keep responding.
+        threading.Thread(target=_run, name=f"tool-{name}-{req_id}", daemon=True).start()
         return
     if method == "ping":
         _result(req_id, {})

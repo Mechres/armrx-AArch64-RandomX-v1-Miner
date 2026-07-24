@@ -153,11 +153,25 @@ namespace armrx {
 			uint32_t size;     // bytes emitted by this instruction's handler
 		};
 
-		void enableJitDump() { jit_dump_enabled_ = true; jit_dump_.clear(); }
+		void enableJitDump() {
+			jit_dump_enabled_ = true;
+			jit_dump_.clear();
+			superscalar_jit_dump_.clear();
+		}
 		void dumpJitCode() const;
 		const std::vector<JitDumpEntry>& getJitDump() const { return jit_dump_; }
+
+		// PLAN.md Phase 6 item 13 (2026-07-24): region-scoped instrumentation for the
+		// superscalar/dataset-derivation path -- `--jit-dump`'s main table only ever
+		// covered the fixed, 2047-instruction per-hash VM program; this covers
+		// generateSuperscalarHash()'s emitted code instead, which in light mode is
+		// what `bl rx_calc_dataset_item` actually calls once per main-loop iteration
+		// (2048 iterations x 8 programs = 16,384 calls/hash) -- the region that
+		// dominates real instruction volume, not the small fixed program dumped above.
+		const std::vector<JitDumpEntry>& getSuperscalarJitDump() const { return superscalar_jit_dump_; }
 	private:
 		bool jit_dump_enabled_ = false;
 		std::vector<JitDumpEntry> jit_dump_;
+		std::vector<JitDumpEntry> superscalar_jit_dump_;
 	};
 }
