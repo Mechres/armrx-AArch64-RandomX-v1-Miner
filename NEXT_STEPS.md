@@ -62,8 +62,9 @@ chain. Short version:
   this dump); (2) `emitAddImmediate` already uses the tightest available encoding for this
   immediate range (checked by reading it, not assuming); (3) CBRANCH's condition tests an
   8-bit-wide field, not a single bit, so the `TBZ`/`TBNZ` fusion idea doesn't apply. **No code
-  changed.** Finding the real gap would need new instrumentation for the superscalar path or a
-  binary-level XMRig comparison — both bigger than this pass's "hours" scope. See `PLAN.md`
+  changed.** Finding the real gap needed new instrumentation for the superscalar path (item 13
+  built this) — a binary-level XMRig comparison was also considered and is deliberately not
+  pursued; see `PLAN.md`'s clean-room boundary note after Phase 6 item 13. See `PLAN.md`
   Phase 6 item 3 for the full correction and `changelogs.md` for the dated account.
 
 ---
@@ -136,7 +137,7 @@ agree/diverge reconciliation. Nothing below has started yet.
 ### Long-term (weeks, high risk — do not start without a measured hypothesis from medium-term items)
 *   [ ] Conservative 2-3-instruction emitter lookahead scheduler — attacks the IPC-0.708 stall budget directly. Only after the medium-term emitter items land. Est. 2-6%, HIGH risk.
 *   [x] ~~Build real instrumentation for the superscalar/dataset-derivation path~~ — **done 2026-07-24.** Confirmed the mechanism by reading the assembly: `generateSuperscalarHash()` compiles once per seed rotation (`vm.cpp:175`), but the compiled code executes via `bl rx_calc_dataset_item` on *every* main-loop iteration in light mode — 2048 × 8 = **16,384 calls/hash**. Extended the `JitDumpEntry`/`--jit-dump` mechanism to cover this region (new `superscalar_jit_dump_`/`getSuperscalarJitDump()`, instrumented `generateSuperscalarHash()`, extended `dumpJitCode()`'s output). Verified 12/12. Real data: one call = 3,563 instructions/20,916 bytes → ×16,384 ≈ **58.4M instructions/hash, ~44% of the ~132.93M total** — a lower bound (fixed wrapper chunks and the main loop's own per-iteration overhead aren't tracked yet). See `PLAN.md` Phase 6 item 13 for the full per-opcode table and honest scope of what's still unreconciled.
-*   [ ] Region-scoped armrx-vs-XMRig generated-code comparison (`--jit-dump` + objdump) — only opens the full peephole-JIT rewrite if a *real* region-scoped instruction-count gap shows. Do not start the peephole effort on the old 31%-branch-miss-era estimate. Item 13's instrumentation now gives a real number for the dominant region (~44% explained), but the remaining ~55% and a real XMRig-side comparison are still open. See `PLAN.md` Phase 6 item 14.
+*   [ ] Self-directed instruction-count reconciliation for the remaining ~55% of the superscalar/dataset-derivation region (fixed per-call wrapper chunks in `generateSuperscalarHash()`, main VM loop's own fixed per-iteration overhead in `jit_compiler_a64_static.S`) — armrx's own code and first-principles ARM64 reasoning only, no XMRig comparison (see `PLAN.md`'s clean-room boundary note, decided 2026-07-24). Only after this reconciliation lands does it make sense to judge the full peephole-JIT rewrite; do not start it on the old 31%-branch-miss-era estimate. See `PLAN.md` Phase 6 item 14.
 *   [ ] Re-run `devbox_pgo_build` after any medium/long-term item lands meaningfully.
 *   [x] ~~Re-baseline `README.md`'s stale H/s figures honestly~~ — **done (2026-07-24)**, using the worker-count sweep data above.
 

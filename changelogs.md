@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-07-24 — Clean-Room Boundary Decision: No XMRig Internals Inspection, Item 14 Reframed
+
+Prompted by a direct question from the user after item 13 landed: is inspecting XMRig's
+JIT-generated machine code (as item 14 was originally scoped — `--jit-dump` + objdump,
+region-by-region diff against XMRig's own codegen) in tension with this project's identity as
+a clean-room implementation built independently against the RandomX spec, not derived from an
+existing mining client (`CLAUDE.md`)? Answer: yes. Not illegal, but genuinely at odds with the
+project's own stated standard, and worth a permanent line rather than a case-by-case judgment
+call each time it comes up again.
+
+**Decision**: black-box behavioral comparison against XMRig — hashrate, `perf stat` counters,
+whole-process instruction counts — stays legitimate and the findings already obtained this way
+(item 3's two-cluster topology discovery, the ~10-12% cluster-normalized gap, the ~33.5%
+instruction/hash gap) are kept as accurate historical record, unchanged. Inspecting XMRig's
+*internals* (disassembling its generated code, diffing it against armrx's own) is ruled out
+going forward, permanently, not just deprioritized for scope reasons.
+
+**Consequence**: `PLAN.md` Phase 6 item 14 — previously "region-scoped armrx-vs-XMRig
+generated-code comparison (`--jit-dump` + objdump)" — reframed to a self-directed
+instruction-count reconciliation for the superscalar/dataset-derivation region's remaining
+~55% (fixed wrapper chunks, main-loop per-iteration overhead), using only armrx's own code and
+first-principles ARM64 reasoning, the same method items 7-10 already used. `NEXT_STEPS.md`'s
+matching long-term checklist entry and `ROADMAP.md`'s P3 row updated to match — P3 is gated on
+this self-directed reconciliation, not on any XMRig-side comparison. Item 13's changelog entry
+below (unchanged, kept as historical record) refers to "item 14 (the actual region-scoped
+armrx-vs-XMRig comparison...)" — that forward-reference is superseded by this entry; item 13's
+own findings are unaffected. See `PLAN.md`'s clean-room boundary note (added after item 13,
+before the reframed item 14) for the full reasoning.
+
 ## 2026-07-24 — Phase 6 Item 13: Real Instrumentation for the Superscalar/Dataset-Derivation Path
 
 `--jit-dump` only ever covered the fixed, 2047-instruction main VM program (executed once per

@@ -343,12 +343,12 @@ than running them in parallel.
      1-ARM-instruction-per-VM-opcode, suggests the remaining ~10-12%/33.5%-instruction gap is
      **not concentrated in easy, bounded, opcode-encoding-level fixes** the way a short peephole
      pass could catch.
-   **Net conclusion**: finding the real source of the gap would need either (a) proper
-   instrumentation of the superscalar/dataset-derivation path specifically (no existing
-   `--jit-dump`-equivalent covers it — would need new tooling), or (b) actual binary-level
-   comparison against XMRig's generated code. Both are meaningfully bigger asks than the
-   "hours, not weeks" scope this pass was bounded to. **No code was changed as a result of this
-   investigation** — a negative result, documented rather than acted on, same as items 7/8's
+   **Net conclusion**: finding the real source of the gap needs proper instrumentation of the
+   superscalar/dataset-derivation path specifically (no existing `--jit-dump`-equivalent covered
+   it — item 13 built this). A second option considered here — actual binary-level comparison
+   against XMRig's generated code — is **deliberately not pursued**; see the clean-room boundary
+   note after item 13 for why. **No code was changed as a result of this investigation** — a
+   negative result, documented rather than acted on, same as items 7/8's
    stale-claim closures and item 9's reverted regression. See `NEXT_STEPS.md`/`changelogs.md`
    for the same correction and the discussion of what's actually worth pursuing next.
    ---
@@ -540,10 +540,42 @@ than running them in parallel.
     all 16,384 iterations regardless of the small variable VM-instruction region. Those
     remain uninstrumented — this closes the *tooling* gap item 13 was created for, and
     gives the first real, code-confirmed number for the dominant region, but does not yet
-    fully reconcile the remaining ~55% of instructions/hash. That reconciliation, and the
-    actual armrx-vs-XMRig region-scoped comparison, is item 14's job now that it has real
-    tooling to work with instead of none.
-14. Region-scoped armrx-vs-XMRig generated-code comparison (`--jit-dump` + objdump) — only opens the full peephole-JIT rewrite (`docs/peephole-jit-plan.md`, 3-6 week clean-room effort) if this shows a *real*, region-scoped instruction-count gap. Do **not** start the peephole effort on the old, now-debunked 31%-branch-miss-era estimate. **Item 13's instrumentation now exists and gives a real number for the dominant region (58.4M of ~132.93M instructions/hash, ~44%)** — but the remaining ~55% (fixed wrapper chunks, main-loop-per-iteration overhead) is still unreconciled, and there is still no way to see XMRig's *own* generated code for a real side-by-side comparison. A real *whole-process* instruction-count gap vs. XMRig is already measured (~33.5%/hash, item 3's "Follow-up" section) — this item is specifically about narrowing *where in the code* it concentrates, which still isn't fully achieved.
+    fully reconcile the remaining ~55% of instructions/hash. That reconciliation is item
+    14's job now that it has real tooling to work with instead of none — done entirely
+    against armrx's own code, per the clean-room boundary below.
+
+    > **Clean-room boundary — decided 2026-07-24, permanent.** This project is a clean-room
+    > implementation built independently against the RandomX spec, explicitly *not* derived
+    > from an existing mining client (see `CLAUDE.md`). Comparing aggregate, black-box
+    > behavior against XMRig — hashrate, `perf stat` counters, whole-process instruction
+    > counts — is fine and has already produced real findings (item 3's two-cluster
+    > topology discovery, the ~10-12% cluster-normalized gap, the ~33.5% instruction/hash
+    > gap). Inspecting XMRig's *internals* — disassembling its JIT-generated machine code,
+    > diffing it region-by-region against armrx's own codegen — is a different thing:
+    > legally fine, but in real tension with this project's own stated identity, so it's
+    > ruled out going forward. This isn't an oversight or a scope cut for lack of time; it's
+    > a deliberate boundary. Item 14 (below) was reframed on this date to drop the
+    > `--jit-dump` + objdump XMRig-comparison framing it originally had, in favor of
+    > self-directed analysis of armrx's own generated code. Any future task that would
+    > require reading or disassembling another miner's compiled output should be rejected on
+    > sight, not just deprioritized.
+14. **Self-directed instruction-count reconciliation for the superscalar/dataset-derivation
+    region** — item 13's instrumentation accounts for ~44% of instructions/hash (58.4M of
+    ~132.93M); the remaining ~55% is the *fixed* per-call wrapper chunks inside
+    `generateSuperscalarHash()` (prefetch/mix/store-result code repeated across the 8
+    cache-access rounds, not yet counted by the variable-opcode instrumentation) and the
+    main VM loop's own fixed per-iteration overhead in
+    `randomx_program_aarch64_vm_instructions_end_light`
+    (`jit_compiler_a64_static.S`) — interleaved FP/int loads, the `FE_mix` AES tweak,
+    `xor_with_dataset_line`, `spMix` update, prefetch, store. Extend the instrumentation (or
+    just count emitted bytes/instructions directly from the `.S` source and the fixed-chunk
+    emission code) to get a real number for these regions, using only armrx's own code and
+    first-principles ARM64 ISA reasoning — the same method items 7-10 already used
+    successfully. Only after this reconciliation is complete does it make sense to judge
+    whether `docs/peephole-jit-plan.md`'s full peephole-JIT rewrite (3-6 week clean-room
+    effort) is worth starting; do **not** start it on the old, now-debunked 31%-branch-miss-era
+    estimate. No XMRig-side comparison is in scope for this item — see the boundary note
+    above.
 15. Re-run `devbox_pgo_build` (tool already exists, kept from Phase 5) after any medium/long-term item lands meaningfully — PGO nulled out on today's code shape, but a reshaped binary may reopen it. Free to re-check, never rebuild the tooling.
 16. ~~Re-baseline `README.md`'s stale 5.2 H/s single-thread / ~28 H/s 8-worker figures honestly~~ — **✅ done (2026-07-24)**, using item 2's sweep data: `README.md`'s performance table now shows 4.27 H/s (1 worker), and 16.82/21.13/24.95 H/s (4/6/8 workers) with per-point efficiency, replacing the stale "linear scaling" claim.
 
