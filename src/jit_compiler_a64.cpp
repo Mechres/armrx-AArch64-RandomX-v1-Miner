@@ -382,6 +382,16 @@ void JitCompilerA64::dumpJitCode() const {
 
 	std::cout << "--- JIT code dump ---\n";
 	std::cout << "Total code size: " << jit_dump_.back().offset + jit_dump_.back().size << " bytes\n";
+	// PLAN.md Phase 6 item 14 (2026-07-24): the actual mmap'd/RWX-protected buffer
+	// is CodeSize + CalcDatasetItemSize bytes -- bigger than the main table's own
+	// "Total code size" above, which only covers the fixed template + per-hash
+	// program region. Printed here as ground truth for matching this buffer
+	// against a live process's /proc/<pid>/maps (sizes there can otherwise be
+	// ambiguous if THP merges adjacent same-permission allocations).
+	std::cout << "Total allocated buffer size (CodeSize + CalcDatasetItemSize): "
+	          << (CodeSize + CalcDatasetItemSize) << " bytes\n";
+	std::cout << "CodeSize (fixed template + per-hash program region, offsets below this "
+	          << "are NOT superscalar): " << CodeSize << " bytes\n";
 
 	// Print raw hex, 16 bytes per line
 	const uint32_t total_bytes = jit_dump_.back().offset + jit_dump_.back().size;
@@ -455,6 +465,28 @@ void JitCompilerA64::dumpJitCode() const {
 			          << " | " << std::setw(5) << agg[i].bytes
 			          << " | " << std::fixed << std::setprecision(2) << std::setw(8) << avg
 			          << " | " << std::setw(9) << pct << "%\n";
+		}
+
+		// PLAN.md Phase 6 item 14 (2026-07-24): per-entry boundary table for this
+		// region, matching the main program's table above -- needed to correlate
+		// `perf record` sample addresses (offset from this buffer's runtime base)
+		// against individual opcodes, not just aggregate opcode totals. This
+		// buffer is compiled once per seed rotation and reused unmodified across
+		// every main-loop iteration for that seed's whole duration, so a single
+		// snapshot of this table validly describes every sample taken while the
+		// seed doesn't change -- unlike the fixed per-hash program above, which
+		// is regenerated every hash and can't be correlated the same way.
+		std::cout << "\n--- Superscalar opcode boundary table ---\n";
+		std::cout << "  #  | opcode_id | name        | offset  | size\n";
+		std::cout << "-----|-----------|-------------|---------|------\n";
+		for (size_t i = 0; i < superscalar_jit_dump_.size(); ++i) {
+			const auto& e = superscalar_jit_dump_[i];
+			const char* name = e.opcode < kNumSuperscalarNames ? kSuperscalarNames[e.opcode] : "?";
+			std::cout << std::dec << std::setw(4) << i << " | "
+			          << std::setw(9) << e.opcode << " | "
+			          << std::setw(11) << name << " | "
+			          << std::hex << std::setw(6) << std::setfill('0') << e.offset << " | "
+			          << std::dec << std::setw(4) << std::setfill(' ') << e.size << '\n';
 		}
 	}
 	std::cout << std::flush;

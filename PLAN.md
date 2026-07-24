@@ -633,6 +633,44 @@ than running them in parallel.
     attribution *inside* the JIT code, which neither `perf report`'s generic symbolization
     nor the static instruction count alone can produce — a small, self-contained correlation
     script using only armrx's own tooling, not yet built.
+
+    **Correlation script built and run (2026-07-24) — real opcode-level cycle attribution
+    obtained.** `dumpJitCode()` extended to print (a) the per-entry superscalar boundary
+    table (previously only an aggregate was printed, matching the main table's existing
+    per-entry format) and (b) the buffer's true allocated size (`CodeSize +
+    CalcDatasetItemSize`) and `CodeSize` alone, as ground truth for matching against
+    `/proc/<pid>/maps`. New `tools/jit_correlate.py`: parses `--jit-dump` output, a
+    `/proc/<pid>/maps` snapshot, and `perf script -F ip` output; matches worker JIT buffers
+    by size (rounded to the page boundary mmap/mprotect actually use); **critically, THP
+    (`always` policy on this device) was directly observed merging adjacent worker buffers
+    into single VMAs of 1×, 2×, and 4× the per-buffer size in the same snapshot** — handled
+    by splitting any region whose size is a whole multiple of the per-buffer size into that
+    many equal sub-regions, otherwise workers sharing a merged region would be attributed
+    against the wrong (region-start, not buffer-start) base. Two real gotchas hit and fixed
+    along the way: `pgrep -f './armrx --mine'` matched the *invoking shell's own* command
+    line (since the whole capture sequence is itself passed to `sh -c '...'`), not the real
+    process — fixed by matching `/proc/<pid>/comm` exactly instead; and `perf script -F ip`
+    still emits the full call chain per sample as a blank-line-separated block (leaf frame
+    first, then unwound callers), not one address per line — counting every frame as an
+    independent sample would have inflated/skewed the result, fixed by taking only each
+    block's first line.
+
+    **Result** (486K-ish sample run, same methodology as the `perf report` pass above):
+    **14.25%** of samples fall outside any worker JIT buffer — matching the earlier
+    `perf report` finding of ~14-15% named-C++ almost exactly, a strong cross-check between
+    two independently-built methods. Of the **85.75%** inside a JIT buffer, **73.96%**
+    (**63.42% of total samples**) matched a specific superscalar opcode via the boundary
+    table — far more of the profile explained than the ~44%-of-instructions static count
+    alone gave. Per-opcode breakdown of cycles (not just instruction count): **`IMUL_R`
+    (20.98% of all samples) and `IMUL_RCP` (14.30%) together account for over 35% of every
+    cycle spent mining** — by a wide margin the two most expensive superscalar opcodes,
+    consistent with integer multiply's longer pipeline latency on an in-order A53 and this
+    project's own established "memory/latency-stall-bound, not instruction-count-bound"
+    framing. The remaining ~22% of total samples land inside a worker buffer but outside any
+    superscalar entry (the static per-hash VM program/fixed-wrapper region, not attributable
+    per-opcode by this method since it's regenerated every hash). New tool committed at
+    `tools/jit_correlate.py`, fully self-contained (armrx's own `--jit-dump`/`perf`/`/proc`
+    only, no external miner involved, per the clean-room boundary above).
 15. Re-run `devbox_pgo_build` (tool already exists, kept from Phase 5) after any medium/long-term item lands meaningfully — PGO nulled out on today's code shape, but a reshaped binary may reopen it. Free to re-check, never rebuild the tooling.
 16. ~~Re-baseline `README.md`'s stale 5.2 H/s single-thread / ~28 H/s 8-worker figures honestly~~ — **✅ done (2026-07-24)**, using item 2's sweep data: `README.md`'s performance table now shows 4.27 H/s (1 worker), and 16.82/21.13/24.95 H/s (4/6/8 workers) with per-point efficiency, replacing the stale "linear scaling" claim.
 

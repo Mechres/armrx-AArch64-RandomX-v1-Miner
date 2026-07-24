@@ -1,5 +1,60 @@
 # Changelog
 
+## 2026-07-25 — Item 14: `tools/jit_correlate.py` — Real Opcode-Level Cycle Attribution Inside the JIT Buffer
+
+Continuation of the `perf record` work below: built the actual correlation script the
+previous entry identified as the concrete next step. `dumpJitCode()`
+(`src/jit_compiler_a64.cpp`) extended to print (1) a per-entry superscalar boundary table
+matching the main program's existing format (previously only an aggregate-by-opcode table
+existed for this region) and (2) the buffer's true allocated size (`CodeSize +
+CalcDatasetItemSize`) plus `CodeSize` alone, giving ground truth for matching against
+`/proc/<pid>/maps`.
+
+New `tools/jit_correlate.py`: parses `--jit-dump` output, a `/proc/<pid>/maps` snapshot, and
+`perf script -F ip` output; for each sample address, finds which worker's JIT buffer it falls
+in (matched by size, rounded to the page boundary mmap/mprotect actually use) and looks up
+the relative offset in the superscalar opcode table.
+
+**Two real correctness issues found and fixed while building this, both would have silently
+produced wrong numbers**:
+- THP (`always` policy on this device) directly observed merging adjacent worker JIT buffers
+  into single VMAs of 1x, 2x, and 4x the per-buffer size, all present in the same snapshot.
+  Treating a merged region as one buffer would have computed the wrong relative offset for
+  every worker but the first sharing that region. Fixed: any executable region whose size is
+  a whole multiple of the per-buffer size is split into that many equal sub-regions before
+  matching.
+- `perf script -F ip` still emits the full call chain per sample (leaf frame first, then
+  unwound callers) as a blank-line-separated block, not one address per line, since the
+  recording used `-g`. Counting every frame as an independent sample would have inflated the
+  total and skewed the distribution toward whatever functions happen to appear deep in call
+  chains. Fixed: only the first line of each block is a real sample; the rest are ancestor
+  frames, discarded.
+
+Also hit (unrelated to the script itself): `pgrep -f './armrx --mine'` matched the
+*invoking shell's own* command line, not the real `armrx` process, since the whole capture
+sequence was passed to `sh -c '...'` as one string and therefore contains that substring
+itself. Fixed by matching `/proc/<pid>/comm` exactly instead, which is invocation-independent.
+
+**Result**: 473,783 samples processed. **14.25%** fell outside any worker JIT buffer —
+matching the prior `perf report` pass's ~14-15% named-C++ estimate almost exactly, a solid
+cross-check between two independently-built methods. Of the 85.75% inside a JIT buffer,
+**73.96% (63.42% of all samples) matched a specific superscalar opcode** via the boundary
+table. Per-opcode breakdown of *cycles*, not just instruction count: **`IMUL_R` (20.98% of
+all samples) and `IMUL_RCP` (14.30%) together account for over 35% of every cycle spent
+mining** — by a wide margin the two most expensive superscalar opcodes, consistent with
+integer multiply's longer pipeline latency on an in-order Cortex-A53 and this project's
+established "memory/latency-stall-bound" framing (not something to "optimize away" without
+changing RandomX semantics — this is diagnostic, not a TODO). The remaining ~22% of total
+samples are inside a worker buffer but outside any superscalar entry (the per-hash VM
+program/fixed-wrapper region, regenerated every hash, not attributable per-opcode this way).
+
+Verified: build clean on-device (43 warnings, matching the established baseline), all 3
+JIT-relevant tests green (`test_jit_encodings`/`test_jit_determinism`/`test_jit_equivalence`).
+`dumpJitCode()`'s changes only print additional metadata about already-emitted bytes; no
+codegen changed. New tool is fully self-contained (armrx's own `--jit-dump`/`perf`/`/proc`
+only) — no external miner's code or binaries involved, per the clean-room boundary. See
+`PLAN.md` Phase 6 item 14 for the full account.
+
 ## 2026-07-24 — Item 14: Live `perf record` Self-Profiling Corrects the "Missing Instructions Are In C++" Hypothesis
 
 Continuation of item 14's instruction-count reconciliation, this time with a live system
