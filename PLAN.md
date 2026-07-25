@@ -170,4 +170,7 @@ biggest measured win in this project's history** — every prior adopted change 
 
 This is an **operational/deployment recommendation** (kernel boot cmdline), not a code change —
 it can't be shipped in `armrx` itself, but should be recommended to anyone deploying on similar
-asymmetric multi-cluster ARM hardware.
+asymmetric multi-cluster ARM hardware. **Scope caveat**: this is a general OS-scheduling fix, not
+an armrx-specific one — it would very likely help XMRig by a similar margin too (not measured).
+It does not close the ~10-12% cluster-normalized code-level gap to XMRig (Phase 6 item 9), which
+remains open.

@@ -136,6 +136,17 @@ the exact binary and exact question being asked before being trusted as a compar
 consistent with this project's standing discipline, and worth restating because it nearly
 produced a wrong "no effect" conclusion here on what turned out to be a real, large, adopted win.
 
+## This does not close the gap to XMRig
+
+Worth being explicit about scope: this is a general OS-scheduling fix, not something specific to
+`armrx`'s code. The mechanism (background OS work stealing cycles from a pinned worker thread on
+an unisolated core) would very likely help *any* pinned multi-threaded workload on this device,
+XMRig included, by a comparable margin — nothing here was measured against XMRig with the same
+cmdline applied. The ~10-12% cluster-normalized code-level gap to XMRig documented in
+`docs/archived/plan_phase6_completed.md` (item 9) is untouched by this finding and remains open.
+This win is real, but it's an "improve the deployment for any miner on this hardware" result, not
+an "armrx gets closer to XMRig" result.
+
 ## Recommendation for deployment
 
 On asymmetric multi-cluster ARM SoCs (confirmed here: MSM8929/Snapdragon 415, two 4-core L2
