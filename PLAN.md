@@ -129,15 +129,13 @@ Summary:
    because it targeted the wrong JIT region), guessing at a target without narrowing it first
    has a poor hit rate here.
 
-3. **Add `-frounding-math` to `armrx_core`'s compile options** — small, cheap, defensive.
-   Flagged by the Deepseek audit (Phase 6 item 19) and confirmed missing via direct grep; the
-   RandomX VM depends on runtime `fesetround()` changes, and the JIT/interpreter's actual
-   float value paths don't route through compiler-foldable C++ expressions today, so this is
-   low-risk correctness-by-construction rather than a fix for an observed bug. Not yet applied.
+3. ~~**Add `-frounding-math` to `armrx_core`'s compile options**~~ — **done, 2026-07-25.**
+   Flagged by the Deepseek audit (Phase 6 item 19), confirmed missing via direct grep, added to
+   `CMakeLists.txt`. Verified: local x86 full suite 7/7, on-device targeted suite 5/5, no new
+   warning categories. Committed `059b6fe`.
 
-4. **Consider a defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register** — also
-   from the Deepseek audit (Phase 6 item 19), confirmed accurate by tracing the code
-   (`register_usage_[creg] == -1` wraps `pc` to `0` via `int16_t` truncation + `++pc`).
-   Theoretical only — RandomX's program generator spec-guarantees registers are written before
-   being branched on, no known real-world trigger. Zero-cost in release builds. Low priority,
-   not yet applied.
+4. ~~**Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register**~~ — **done,
+   2026-07-25.** Also from the Deepseek audit (Phase 6 item 19), confirmed accurate by tracing
+   the code (`register_usage_[creg] == -1` wraps `pc` to `0` via `int16_t` truncation + `++pc`).
+   Added to `h_CBRANCH` in `src/vm.cpp`. Theoretical-only trigger, zero cost in release builds.
+   Verified 7/7 local, 5/5 on-device. Committed `059b6fe`.

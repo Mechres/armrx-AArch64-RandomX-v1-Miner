@@ -272,8 +272,8 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 |---|------|--------|-------|
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
 | — | Test coverage: `tls_client.cpp`/`tui.cpp` remain fully untested | 🟡 Medium | Need a mock TLS server / terminal-capture harness respectively. `cli_parser.cpp`/`aes_hash.cpp` gaps closed 2026-07-23 — see `PLAN.md` Phase 4 item E. |
-| P7.3 | Add `-frounding-math` to `armrx_core`'s compile options | 🟢 Trivial | Flagged by the Deepseek audit (2026-07-25), confirmed missing via grep. Low-risk correctness-by-construction (the JIT/interpreter's float paths don't route through compiler-foldable C++ expressions today) rather than a fix for an observed bug. `PLAN.md` Phase 7 item 3. |
-| P7.4 | Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register | 🟢 Trivial | Also from the Deepseek audit, confirmed accurate by tracing the code (`register_usage_[creg]==-1` wraps `pc` to `0`). Theoretical only — no known real-world trigger, spec-guaranteed unreachable. Zero-cost in release builds. `PLAN.md` Phase 7 item 4. |
+| ~~P7.3~~ | ~~Add `-frounding-math` to `armrx_core`'s compile options~~ | — | — | — | **Closed 2026-07-25 — done.** Flagged by the Deepseek audit, confirmed missing via grep, added. Verified 7/7 local, 5/5 on-device, no new warning categories. `PLAN.md` Phase 7 item 3. Committed `059b6fe`. |
+| ~~P7.4~~ | ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ | — | — | — | **Closed 2026-07-25 — done.** Also from the Deepseek audit, confirmed accurate by tracing the code (`register_usage_[creg]==-1` wraps `pc` to `0`). Theoretical-only trigger, zero cost in release builds. Verified 7/7 local, 5/5 on-device. `PLAN.md` Phase 7 item 4. Committed `059b6fe`. |
 
 ---
 

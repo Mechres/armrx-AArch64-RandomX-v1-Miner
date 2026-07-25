@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-07-25 — Two Deepseek-Audit Hardening Items Applied (Phase 7 Items 3-4)
+
+Both small, cheap, optional items flagged by the Deepseek audit (see the "Full Codebase Audit"
+entry below): added `-frounding-math` to `armrx_core`'s compile options (correctness-by-
+construction for the RandomX VM's runtime `fesetround()` dependency, not a fix for an observed
+bug), and a defensive `ARMRX_ASSERT` in `h_CBRANCH` for a target register that was never written
+(`register_usage_[creg] == -1` would otherwise wrap `pc` to `0` via `int16_t` truncation +
+`++pc`, silently restarting the program instead of a defined branch — theoretical only, RandomX's
+program generator spec-guarantees this can't happen, zero cost in release builds). Verified:
+local x86 full suite 7/7, on-device (AArch64) targeted suite 5/5, no new warning categories.
+Committed `059b6fe`. Closes Phase 7's two optional items — `--rt-priority` (blocked on device
+access) and peephole JIT (still gated) are the only genuinely open items remaining.
+
 ## 2026-07-25 — `PLAN.md` Phase 6 Archived, Docs Refreshed Project-Wide
 
 Phase 6 had grown to ~710 of `PLAN.md`'s 770 lines of now-completed history — the same size

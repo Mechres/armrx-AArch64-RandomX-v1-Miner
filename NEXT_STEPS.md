@@ -11,8 +11,8 @@ open work now lives in `PLAN.md`'s **Phase 7**:
 
 *   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — blocked on manual device access (see below).
 *   [ ] Peephole JIT coalescing — still gated (see `PLAN.md` Phase 7 item 2 for the current gate status).
-*   [ ] Add `-frounding-math` to `armrx_core`'s compile options — small, cheap, optional (Deepseek audit).
-*   [ ] Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register — small, cheap, optional (Deepseek audit).
+*   [x] ~~Add `-frounding-math` to `armrx_core`'s compile options~~ — **done 2026-07-25**, commit `059b6fe`.
+*   [x] ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ — **done 2026-07-25**, commit `059b6fe`.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.
@@ -158,7 +158,7 @@ agree/diverge reconciliation. Nothing below has started yet.
     verified against actual code/live device state. No new bugs; one previously-open question
     (scratchpad huge-page residency) closed as a non-issue (verified live: merges with the
     Argon2 cache mapping into one 258 MiB region, 100% `AnonHugePages`); one small optional
-    hardening item found (`-frounding-math`, not yet applied — see Phase 7 above).
+    hardening items found (`-frounding-math`, CBRANCH assert) — both applied same day, see above.
 *   [x] ~~Re-baseline `README.md`'s stale H/s figures honestly~~ — **done (2026-07-24)**, using the worker-count sweep data above.
 
 **Not adopted / explicitly deprioritized:** full peephole-JIT coalescing without a fresh gap measurement; any further NEON/hardware-AES attempt (three independent measured regressions already); custom allocators/memory pooling (no hot-path allocation exists to pool).
