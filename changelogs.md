@@ -1,5 +1,30 @@
 # Changelog
 
+## 2026-07-25 — Performance-Planning Docs Reconciled; Phase 7 Archived
+
+A second agent independently wrote `docs/plans/performance-plan-20260725.md` (gated, prioritized
+steps) and `docs/plans/experimental-performance-ideas-20260725.md` (speculative backlog) on top
+of this session's `docs/plans/future-performance-ideas-20260725.md`, creating three overlapping
+docs. Fact-checked both new docs against the actual codebase before reconciling:
+
+- Verified accurate: the region-IPC table, the Argon2-cache-lacks-`MADV_POPULATE_WRITE` claim
+  (`src/vm.cpp:147` vs `src/argon2.cpp:277`), the superscalar `IMUL_RCP` register-pre-assignment
+  asymmetry claim, and that `-fvisibility=hidden`/`-fno-semantic-interposition` and an explicit
+  non-ASAN frame-pointer directive are both genuinely absent from `CMakeLists.txt`.
+- Fixed a broken cross-reference in `performance-plan-20260725.md` (pointed at the wrong sibling
+  doc for "the full speculative backlog").
+- Re-labeled `experimental-performance-ideas-20260725.md`'s double-buffered-JIT "~1.76% max"
+  figure as an estimated upper bound, not a measured result; flagged its `.p2align 6` idea as a
+  duplicate of an already-known Deepseek-audit item.
+- Merged `future-performance-ideas-20260725.md`'s unique content (PGO re-check tracking, tooling
+  reconciliation note, misc. audit-flagged items) into `experimental-performance-ideas-20260725.md`
+  as items 13-15, then retired the now-superseded original to
+  `docs/archived/future-performance-ideas-20260725.md`.
+- Split `PLAN.md`'s now-fully-closed Phase 7 into `docs/archived/plan_phase7_completed.md`
+  (same pattern as Phases 1-5/6), leaving only the one open item (`--rt-priority`) as the new
+  Phase 8. Updated all downstream references (`README.md`, `ROADMAP.md`, `CLAUDE.md`,
+  `REASONIX.md`, `docs/experiments/memory-op-scheduler-attempt.md`).
+
 ## 2026-07-25 — Doc Organization: Experiment Writeup, Audit Moved, Future-Ideas Backlog
 
 Follow-up housekeeping after the memory-op scheduler attempt and Deepseek audit (both below):

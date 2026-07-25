@@ -4,12 +4,14 @@ This document is the live master plan for the `armrx` RandomX AArch64 miner — 
 only. It used to also carry the full narrative for every completed phase; that grew to 400+
 lines of 100%-done history sitting in front of the actually-open work, so it was split out
 2026-07-24 into **[`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md)**,
-and Phase 6 was split out the same way 2026-07-25 into
-**[`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md)** once it hit
-the same size. Read this file for what's still open; read the archives for the full why-and-how
-behind everything already shipped. The chronological, dated record of the same history lives in
-`changelogs.md`; the short-list actionable view at any point in time lives in `NEXT_STEPS.md`;
-completed/remaining status tables live in `ROADMAP.md`.
+Phase 6 was split out the same way 2026-07-25 into
+**[`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md)**, and
+Phase 7's closed items followed the same pattern the same day into
+**[`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md)** once only
+one open item remained. Read this file for what's still open; read the archives for the full
+why-and-how behind everything already shipped. The chronological, dated record of the same
+history lives in `changelogs.md`; the short-list actionable view at any point in time lives in
+`NEXT_STEPS.md`; completed/remaining status tables live in `ROADMAP.md`.
 
 ---
 
@@ -107,11 +109,40 @@ Summary:
 
 ---
 
-## Phase 7 — current (2026-07-25): open items
+## Completed — Phase 7 (2026-07-25)
 
-*Speculative future performance ideas beyond this section's items — not scheduled/gated work —
-are tracked separately in
-[`docs/plans/future-performance-ideas-20260725.md`](docs/plans/future-performance-ideas-20260725.md).*
+Full detail in **[`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md)**.
+Summary:
+
+- **Peephole JIT coalescing — closed on evidence, not deferred.** Extended
+  `tools/jit_correlate.py` to split the region-split's "unattributed" bucket by the `code_size`
+  boundary, isolating a real, precise finding: the main per-hash VM program region carries ~9%
+  of dynamic instructions but ~20% of cycles — a **~2.2× IPC penalty**, a memory-op (scratchpad)
+  stall signature, not an instruction-count one. This is evidence *against* peephole's entire
+  premise (code-density reduction), matching every prior instruction-count-reduction attempt's
+  outcome (CSEL, Newton-Raphson, NEON AES ×3, superscalar literal-pool relayout, `IMUL_RCP`
+  literal-load elimination — all reverted for the same reason).
+- **`-frounding-math` added** to `armrx_core`'s compile options (Deepseek audit finding,
+  confirmed missing, fixed). Committed `059b6fe`.
+- **CBRANCH-unwritten-target-register assert — added, then removed.** A Deepseek audit claim
+  that this case was "theoretical only" was disproved empirically (fired repeatedly on normal
+  test runs); traced to confirm the existing behavior is correct and intentional, assert
+  removed. Committed `4da77f0`.
+- **Emitter scheduler extended to memory-load (`*_M`) opcodes — tried, caused a real
+  JIT/interpreter divergence, reverted.** Root cause not conclusively identified; full
+  writeup at `docs/experiments/memory-op-scheduler-attempt.md`. Performance work reached a
+  natural stopping point this phase.
+- **Same-day doc consolidation**: three overlapping future-performance planning docs were
+  reconciled into two — see the pointer below.
+
+## Phase 8 — current (2026-07-25): open items
+
+*Forward-looking performance work, if resumed, is planned in
+[`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) (gated,
+evidence-first steps against the one open quantified lead above) with a speculative backlog in
+[`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md)
+(ideas targeting other regions). Neither is scheduled/gated work in the sense the items below
+are — they're what to read first if "make armrx faster" becomes the priority again.*
 
 1. **`--rt-priority` + `isolcpus=`/`nohz_full=`** — **blocked on manual device access.**
    `--rt-priority` currently falls back silently to the default scheduler (needs `setcap`,
@@ -122,89 +153,3 @@ are tracked separately in
    was never going to touch the 6→8-worker degradation directly — it might help the
    front-loaded memory-contention component marginally at best. Deferred until the user grants
    device access directly.
-
-2. ~~**Peephole JIT coalescing**~~ ([`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md)) —
-   **closed 2026-07-25, deprioritized on evidence, not just deferred.** The ~22% of cycles left
-   unreconciled by item 14's opcode-level correlation ("inside a worker buffer but outside any
-   superscalar entry") was narrowed by extending `tools/jit_correlate.py` to use the `code_size`
-   boundary it already parsed but never applied — splitting that bucket cleanly by whether an
-   address falls before or after the superscalar region starts. Two live `perf record` captures
-   on the same 8-worker mining workload (one `-e cycles`, one `-e instructions`, same
-   methodology as item 14) show the split precisely:
-
-   | Region | % of instructions | % of cycles | relative IPC |
-   |---|---|---|---|
-   | Main per-hash VM program (offset < CodeSize) | 9.23% | 20.04% | **0.461×** avg |
-   | Superscalar, opcode-attributed | 72.71% | 63.52% | 1.145× avg |
-   | Superscalar, unattributed (fixed wrapper chunks) | 2.49% | 2.38% | 1.046× avg |
-   | Outside any JIT buffer (named C++) | 15.56% | 14.05% | 1.107× avg |
-
-   **The main VM program region carries ~9% of dynamic instructions but ~20% of cycles — a
-   ~2.2× IPC penalty relative to the rest of the pipeline.** This is a stall signature, not an
-   instruction-count signature: this region is where the memory-operand opcodes (`*_M`,
-   `ISTORE` — ~48% of this region's code bytes per the original static breakdown) live, doing
-   genuinely random 64-byte reads/writes into the 2 MiB scratchpad. Branch misprediction is
-   already ruled out separately (2.4% hot-path miss rate, ~0.1-0.16% of cycles). The superscalar
-   unattributed slice, once isolated, turned out proportionate (~1.0× IPC) — not a real lead at
-   all, just measurement noise from the old lumped-together bucket.
-
-   **Conclusion: this is evidence against peephole JIT coalescing, not just an unmet gate.**
-   Peephole's entire premise is code-density/instruction-count reduction; the one remaining
-   unexplained slice of cycles is disproportionately expensive *because of memory-latency
-   stalls*, which code-density reduction cannot fix. This is also the same conclusion every
-   single instruction-count-reduction attempt this project has tried has independently reached
-   (CSEL, Newton-Raphson, NEON-AES ×3, superscalar literal-pool relayout, `IMUL_RCP`
-   literal-load elimination — all implemented, measured, and reverted for exactly this reason).
-   Not starting the 3-6 week clean-room rewrite against evidence that specifically points away
-   from it. `tools/jit_correlate.py`'s region-split extension is kept as reusable diagnostic
-   infrastructure regardless of this outcome.
-
-5. ~~**Extend the emitter lookahead scheduler to hide memory-op latency in the main VM
-   program**~~ — **tried 2026-07-25, caused a real JIT/interpreter divergence, reverted.** The
-   natural follow-on to item 2's finding above: the same *mechanism* that already produced a
-   real, measured win for the superscalar region's `IMUL_R`/`IMUL_RCP` stalls (reordering to
-   hide long-latency-op stalls, not reducing instruction count) was a plausible, specific,
-   falsifiable hypothesis for the main VM program's 2.2× IPC penalty too. Implemented: flagged
-   the memory-load opcodes (`*_M`) as `is_long_latency` in `computeFootprint()`, making them
-   eligible as swap triggers (`P`) — no new hazard-model change was believed necessary, since
-   the existing memory-memory-always-hazard rule already prevents a `*_M` op from ever swapping
-   past another `*_M` op.
-
-   `test_jit_equivalence` failed immediately on its first (and most basic) seed/input pair —
-   the first time this test has failed in the project's history. Reverting the change alone
-   (keeping everything else) made it pass again, confirming the memory-op extension itself is
-   the cause. Investigated the mechanism at length: checked whether `emitMemLoad`'s own
-   `src==dst` shared-scratch-register special case (structurally similar to the *original*
-   `src==dst` hazard from item 12) was responsible — but that pattern was already reviewed by
-   the three independent code reviews and confirmed self-contained regardless of position, so
-   it doesn't explain this. **The exact mechanism was not conclusively identified.** Given the
-   failure mode is silent wrong hashes and this was an explicitly speculative, "may be a null
-   result" experiment from the outset, the responsible choice was to fully revert rather than
-   ship a targeted exclusion without being able to verify it — matching this project's own
-   standing rule to trust empirical results over an unconfirmed theory, but here without a
-   working fix to trust, just a clean revert. `tools/jit_correlate.py`'s region-split extension
-   (item 2) is unaffected and kept.
-
-   **Side fix, found and corrected while investigating**: the CBRANCH defensive `ARMRX_ASSERT`
-   added in Phase 7 item 4 fired repeatedly during this investigation on a completely normal
-   `test_jit_equivalence` run — its premise (that a CBRANCH targeting a never-written register
-   is "theoretical only") was factually wrong. Traced why the existing behavior is actually
-   correct and intentional (register_usage_[creg]==-1 wraps `pc` to 0, i.e. "restart from VM
-   instruction 0," matching the JIT's own `reg_changed_offset[]` reset to `PrologueSize` before
-   every compile). Removed the incorrect assert. Committed `4da77f0`.
-
-   **Performance work is now closed out for this session** — both the direct lead (peephole
-   JIT, item 2) and its evidence-backed follow-on (this item) have been tried or ruled out. The
-   two genuinely open items are `--rt-priority` (item 1, blocked on device access) and nothing
-   else on the performance side without a new measured hypothesis.
-
-3. ~~**Add `-frounding-math` to `armrx_core`'s compile options**~~ — **done, 2026-07-25.**
-   Flagged by the Deepseek audit (Phase 6 item 19), confirmed missing via direct grep, added to
-   `CMakeLists.txt`. Verified: local x86 full suite 7/7, on-device targeted suite 5/5, no new
-   warning categories. Committed `059b6fe`.
-
-4. ~~**Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register**~~ — **done,
-   2026-07-25.** Also from the Deepseek audit (Phase 6 item 19), confirmed accurate by tracing
-   the code (`register_usage_[creg] == -1` wraps `pc` to `0` via `int16_t` truncation + `++pc`).
-   Added to `h_CBRANCH` in `src/vm.cpp`. Theoretical-only trigger, zero cost in release builds.
-   Verified 7/7 local, 5/5 on-device. Committed `059b6fe`.

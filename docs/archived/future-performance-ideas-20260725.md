@@ -1,4 +1,13 @@
-# armrx — Future Performance Ideas (2026-07-25)
+# armrx — Future Performance Ideas (2026-07-25, superseded)
+
+**Superseded same-day** by a more detailed pair of docs written independently on top of this
+one: [`docs/plans/performance-plan-20260725.md`](../plans/performance-plan-20260725.md) (gated,
+prioritized plan — a fleshed-out version of Section 1 below) and
+[`docs/plans/experimental-performance-ideas-20260725.md`](../plans/experimental-performance-ideas-20260725.md)
+(speculative backlog covering regions this doc didn't touch). This file's unique content
+(Section 3's lower-confidence items) was merged into the experimental-ideas doc as items 13-15.
+Kept here for historical reference only — **do not treat as current**, read the two docs above
+instead.
 
 **Status:** speculative backlog, not an active plan. Nothing here is scheduled or gated the way
 `PLAN.md`'s Phase 7 items are — this is "if someone wants to keep pushing on performance, here's

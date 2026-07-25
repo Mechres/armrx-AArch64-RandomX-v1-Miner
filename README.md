@@ -133,9 +133,9 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
 | [`changelogs.md`](changelogs.md) | Chronological, dated record of every change and why it was made. |
 | [`docs/audits/`](docs/audits/) | Correctness, security, and performance audits (internal and third-party). |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
-| [`docs/plans/`](docs/plans/) | Forward-looking performance plans, including [future ideas](docs/plans/future-performance-ideas-20260725.md) if performance work resumes. |
+| [`docs/plans/`](docs/plans/) | Forward-looking performance plans: [gated plan](docs/plans/performance-plan-20260725.md) and [speculative backlog](docs/plans/experimental-performance-ideas-20260725.md), if performance work resumes. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
-| [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives ([Phases 1–5](docs/archived/plan_completed_phases_1-5.md), [Phase 6](docs/archived/plan_phase6_completed.md)) and old plans. |
+| [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives ([Phases 1–5](docs/archived/plan_completed_phases_1-5.md), [Phase 6](docs/archived/plan_phase6_completed.md), [Phase 7](docs/archived/plan_phase7_completed.md)) and old plans. |
 
 `PLAN.md` used to carry the full narrative for every completed phase inline; once a phase's
 narrative grows past a few hundred lines it gets split into `docs/archived/`, keeping `PLAN.md`

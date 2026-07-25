@@ -111,7 +111,8 @@ legitimate program behavior as if it were exceptional. Removed (`4da77f0`).
   whatever the hazard is, but this wasn't tested.
 - **This region's ~2.2× IPC penalty remains real and unaddressed.** It's the most concrete,
   quantified performance lead this project currently has on record — just not one with a
-  currently-known safe fix. See `docs/plans/future-performance-ideas-20260725.md` for other
+  currently-known safe fix. See `docs/plans/performance-plan-20260725.md` (a gated bisection
+  path is Step 3 there) and `docs/plans/experimental-performance-ideas-20260725.md` for other
   angles that don't require extending this specific scheduler mechanism.
 - `tools/jit_correlate.py`'s region-split extension (splitting by `code_size`) is kept as reusable
   diagnostic infrastructure regardless of this outcome — it's how the 2.2× IPC finding was made
