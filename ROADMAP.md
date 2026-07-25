@@ -1,26 +1,27 @@
 # armrx — Status Tracker
 
 > **Status tracker for completed and remaining work.**
-> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md) (current: Phase 6).
+> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md) (current: Phase 7).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
-> For the full narrative behind everything already completed (Phases 1–5), see
-> [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md).
+> For the full narrative behind everything already completed, see
+> [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) (Phases 1–5) and
+> [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6).
 
-> **Current status (2026-07-24):** Phases 1–5 are fully resolved (correctness fixes, structural
-> refactors, test coverage, and the CBRANCH/Argon2/PGO/NEON-AES/`--stagger-ms` performance
-> investigations — see the archive linked above). **Current work is Phase 6**: two independent
-> performance master plans (`docs/plans/performance-master-plan.md`, `docs/plans/performance-master-plan-20260724.md`)
-> were reconciled into one adopted plan. Both agree the device runs **light mode** (2 GiB RAM
-> can't fit the fast-mode dataset) and IPC 0.708 means the workload is memory-latency-stall-
-> bound, not instruction-throughput-bound. **Items 1–2 (the two highest-EV short-term
-> verifications) are now done, both closed as no-ops/negative-but-useful results**: huge-page
-> residency is already ~97.6% THP-coalesced (no hugetlbfs pool exists, but THP's `always` policy
-> covers it anyway — dTLB misses negligible), and the worker-count sweep shows a smooth,
-> monotonic efficiency decline from 98.5% (4 workers) to 73.0% (8 workers) with **no plateau** —
-> 8 workers remains the highest-throughput default, there is no free-lunch lower-worker-count
-> option. `README.md` re-baselined with the real numbers. Also fixed two real bugs in the devbox
-> MCP tooling found while running this verification (timeout bucket + a blocking-server/
-> disconnect issue) — see `PLAN.md` Phase 6 for the full account of all of the above.
+> **Current status (2026-07-25):** Phases 1–5 and Phase 6 are both fully resolved. Phase 6's
+> headline results: two independent performance master plans reconciled into one adopted plan;
+> huge-page residency and a worker-count sweep both closed as no-ops (already ~97.6-100%
+> THP-coalesced, 8 workers remains the highest-throughput default, no plateau); a major
+> unplanned finding that this device has two asymmetric 4-core L2 clusters with a dynamic
+> interconnect-arbitration effect under contention (not thermal, not a power cap); an emitter
+> lookahead scheduler implemented, extended to the actual hot JIT region after an initial null
+> result, measured as a small real IPC/cycle win (+0.233%/−0.036%, `taskset`-pinned) and adopted;
+> three independent code reviews of that scheduler plus a full third-party audit, all verified
+> claim-by-claim; and PGO re-checked on the post-scheduler code shape, still a confirmed null
+> (after catching and correcting a misleading unpinned core-cluster measurement artifact).
+> **Current work is Phase 7**: two genuinely open items remain — `--rt-priority`/`isolcpus=`
+> (blocked on user device access) and peephole JIT coalescing (still gated on a fuller
+> region-scoped instruction-count reconciliation) — plus two small, optional hardening items
+> from the third-party audit. See `PLAN.md` for the live, short version of all of this.
 >
 > **Major finding, same day, later session:** this device actually has **two separate 4-core L2
 > cache clusters** (cores 0-3 / cores 4-7, confirmed via kernel cache-topology sysfs), not one
@@ -204,7 +205,7 @@
 | `cli_parser.cpp` test coverage added (`tests/test_cli_parser.cpp`) — found and fixed a real bug: `--config=` always exited with "Unknown argument" (code 64) | ✅ |
 | `aes_hash.cpp` direct helper test coverage added (`tests/test_aes_hash.cpp`) — golden pins + `hash_and_fill_aes_1r_x4` decomposition-equivalence check | ✅ |
 
-## ✅ Completed — Phase 6 (in progress, 2026-07-24)
+## ✅ Completed — Phase 6 (2026-07-24 through 2026-07-25)
 
 | Item | Status |
 |------|--------|
@@ -222,6 +223,9 @@
 | **Major finding**: this device has two separate 4-core L2 clusters (cores 0-3 / 4-7), confirmed via kernel cache-topology sysfs and cross-validated against a real XMRig run on the same hardware; a dynamic interconnect-arbitration effect (not a static clock/cache difference) costs cluster 1 ~half its throughput under full contention — retracts item 3's "power cap" hypothesis, fully explains item 2's efficiency curve, and gives a real cluster-normalized gap to XMRig of ~10-12% (not the "far behind" impression raw aggregates gave) | ✅ |
 | Item 13: built real instrumentation for the superscalar/dataset-derivation path — confirmed via assembly reading that `generateSuperscalarHash()` compiles once per seed rotation but its output executes 16,384×/hash (`bl rx_calc_dataset_item` on every light-mode main-loop iteration); extended `JitDumpEntry`/`--jit-dump` to cover this region, verified 12/12; real data shows ~58.4M instructions/hash from this region alone (~44% of the ~132.93M total, a lower bound — fixed wrapper chunks and main-loop overhead still untracked) | ✅ |
 | P6.10: conservative emitter lookahead scheduler — **adopted, 2026-07-25**. First version (main VM program only) measured as a clean null (IPC +0.016%) plus a real +24.9% branch-miss cost, because the actual dominant IMUL cost (item 14) lives in the superscalar/dataset-derivation path, a separate JIT emission path the scheduler didn't touch. Extended to that path (`scheduleSuperscalarProgram()`) with its own hazard (`IMUL_RCP` literal-pool ordering, found by code reading) fixed via a Q/R exclusion. Two dedicated stress tests (450-pair main-program, 200-pair/100-seed superscalar) plus the full suite all green. Final 3-way `perf stat` comparison (`taskset`-pinned, 2 reversed-order rounds, 6 samples/condition): full vs baseline IPC +0.233%, cycles −0.036%, consistent both rounds — smaller than the original 2-6% estimate but a real, reproducible win | ✅ |
+| Three independent code reviews of the emitter scheduler (Deepseek, Gemini, Hermes) — all confirm no constructible failure scenario; two of three independently caught a real doc-comment error (the `src==dst` exclusion's stated "x20 race" mechanism was factually wrong about `h_IROL_R`), Gemini missed it and restated the false claim. Doc comment rewritten to record what's proven (the exclusion's necessity, via the original bisection) vs. still open (its exact mechanism); added a fail-safe assert in `resolveInstructionType()` and a load-bearing-pin comment for `num32bitLiterals`. Committed `c92a1a9` | ✅ |
+| PGO re-checked after the scheduler landed — still a confirmed null (`taskset`-pinned same-core: 4.47 vs 4.48 H/s). An unpinned first attempt showed a misleading ~2x gap that turned out to be purely a core-cluster scheduling artifact (caught mid-session before being documented as real) — the identical non-PGO binary alone gave 4.48 H/s on core 0 and 2.24 H/s on core 4 | ✅ |
+| Dual external audit (Gemini, Hermes) + a third full-codebase audit (Deepseek): every concrete claim independently verified before acting; 4 real issues fixed (OOB dataset-read guard, `BigOnly` affinity hardcoding, `worker_hashes_` false sharing, a stale comment), several claims refuted with reasoning, one previously-open question (scratchpad huge-page residency) closed as a non-issue via live verification | ✅ |
 
 ---
 
@@ -236,11 +240,11 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | # | Item | Site | Est. impact | Risk | Notes |
 |---|------|------|-------------|------|-------|
 | ~~P4~~ | ~~Reduce JIT execution branch-misprediction cost (CSEL for CBRANCH)~~ | `jit_compiler_a64.cpp` | — | — | **Closed 2026-07-22 — implemented, measured, reverted.** CSEL gave +46% branch-misses and flat hashrate vs. the existing `bne`/`b`, not an improvement (BTB-aliasing: the JIT buffer regenerates every hash, so no encoding trick fixes the predictor-history problem). Separately found the 31.08% figure this item's "~8.6–11.9% of cycles" estimate was based on doesn't represent the mining hot path at all — the isolated hot path's real miss rate is 2.4%, costing ~0.1–0.16% of cycles. See `docs/experiments/branchless-cbranch.md`. No further CBRANCH JIT work planned. |
-| **P3** | **Peephole JIT coalescing** — [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | **Re-scoped by Phase 6 (2026-07-24): lowest-EV surviving code lead.** A real whole-process instruction-count gap vs. XMRig was measured once as a black-box reference point (~33.5%/hash, `PLAN.md` item 3) — a region-scoped attempt at the main VM program (`--jit-dump`) initially targeted the wrong region, but item 13's new instrumentation now covers the actual dominant region (superscalar/dataset-derivation, ~44% of instructions/hash explained). **The region-scoped gate item 14 requires is still not fully met** — ~55% of instructions/hash remains unreconciled, via armrx's own code/instrumentation only (no XMRig-side comparison — a deliberate clean-room boundary, see `PLAN.md` after item 13). Do not start P3 without closing that gap. |
+| **P3** | **Peephole JIT coalescing** — [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | `jit_compiler_a64.cpp`, `static.S` | ~+5–10% | 🟡 Medium | **Still gated — tracked as Phase 7 item 2.** A real whole-process instruction-count gap vs. XMRig was measured once as a black-box reference point (~33.5%/hash). Region-scoped progress since: `tools/jit_correlate.py`'s opcode-level cycle correlation now explains ~63% of all mining cycles (`IMUL_R`/`IMUL_RCP` alone over 35%), and the emitter scheduler already captured the easy latency-hiding win in that region (+0.233% IPC — small, meaning little further stall-hiding room exists there). **~22% of cycles still land inside a JIT buffer but outside any attributable superscalar entry** — the region-scoped gate is closer to met than before but not fully closed. Do not start P3 without narrowing that remaining slice further; per this project's own repeated lesson this phase, guessing at a target without narrowing it first has a poor hit rate. |
 | ~~P6.1~~ | ~~Huge-page residency check~~ | — | — | — | **Closed 2026-07-24 — done, no-op.** ~97.6% of anon RSS already THP-coalesced (100% for the Argon2 cache mapping), dTLB misses negligible, despite no real hugetlbfs pool existing. `PLAN.md` Phase 6 item 1. |
 | ~~P6.2~~ | ~~Worker-count sweep, 4→8 workers~~ | — | — | — | **Closed 2026-07-24 — done.** Smooth monotonic decline 98.5%→73.0% efficiency, no plateau; 8 workers confirmed highest-throughput. `README.md` re-baselined. `PLAN.md` Phase 6 item 2. |
 | ~~P6.3~~ | ~~Multi-worker PMU attribution~~ | — | — | — | **Closed 2026-07-24 — done, revised later same day.** TLB definitively rejected (dTLB misses <1.4/million instructions at every worker count). The original "core-count-triggered power/current cap" hypothesis for the apparent 6-8-worker clock drop is **retracted** — this device has two separate 4-core L2 clusters (cores 0-3, cores 4-7; see P6.11), and the drop was just the average of a full-rate cluster and an arbitration-losing cluster once the worker count spanned both. `PLAN.md` Phase 6 item 3's "REVISED" section. |
-| P6.4 | `--rt-priority` + `isolcpus=`/`nohz_full=` experiment | system config, no code | lower jitter | 🟢 None | **Blocked on manual device access (2026-07-24)** — needs `setcap`/root (not available) and a kernel-cmdline edit + reboot (needs explicit user sign-off). Deferred. Also now known not to touch the cluster-arbitration effect (P6.11) even if unblocked — this is an interconnect-hardware fact, not scheduler-visible. `PLAN.md` Phase 6 item 4. |
+| P7.1 | `--rt-priority` + `isolcpus=`/`nohz_full=` experiment | system config, no code | lower jitter | 🟢 None | **Blocked on manual device access** — needs `setcap`/root (not available) and a kernel-cmdline edit + reboot (needs explicit user sign-off). Deferred. Also now known not to touch the cluster-arbitration effect (P6.11) even if unblocked — this is an interconnect-hardware fact, not scheduler-visible. `PLAN.md` Phase 7 item 1. |
 | ~~P6.11~~ | ~~Two-L2-cluster interconnect-arbitration discovery~~ | — | — | — | **Closed 2026-07-24 — major finding, not originally in either master plan.** Found via a real head-to-head XMRig run on this device. Kernel cache-topology sysfs confirms two separate 4-core L2 clusters (cores 0-3, cores 4-7), not one 8-core cluster as `lscpu` claims. Under full 8-way contention, cluster 1 loses ~half its throughput to cluster 0 — a dynamic interconnect-arbitration effect (confirmed *not* a static frequency/cache difference: identical when either cluster runs alone). Fully explains P2's efficiency curve. Cluster-normalized comparison against XMRig: armrx at ~90%/88% of XMRig on clusters 0/1 — a real ~10-12% gap, not the "far behind" impression raw aggregates gave. See `PLAN.md` Phase 6 item 3's "REVISED" section. |
 | ~~P6.5~~ | ~~Disclose + prefault Argon2 cache huge-page fallback~~ | — | — | — | **Closed 2026-07-24 — no-op**, per P6.1's result (already coalesced). `PLAN.md` Phase 6 item 5. |
 | ~~P6.6~~ | ~~Register-offset FP loads~~ | — | — | — | **Closed 2026-07-24 — stale claim, already implemented** (`emitMemLoadFP()` already emits `ldr dN,[x2,tmp_reg]` directly; decoded the raw instruction encoding by hand to confirm). Matches Phase 1's `O13`. No code change made. `PLAN.md` Phase 6 item 7. |
@@ -268,6 +272,8 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 |---|------|--------|-------|
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
 | — | Test coverage: `tls_client.cpp`/`tui.cpp` remain fully untested | 🟡 Medium | Need a mock TLS server / terminal-capture harness respectively. `cli_parser.cpp`/`aes_hash.cpp` gaps closed 2026-07-23 — see `PLAN.md` Phase 4 item E. |
+| P7.3 | Add `-frounding-math` to `armrx_core`'s compile options | 🟢 Trivial | Flagged by the Deepseek audit (2026-07-25), confirmed missing via grep. Low-risk correctness-by-construction (the JIT/interpreter's float paths don't route through compiler-foldable C++ expressions today) rather than a fix for an observed bug. `PLAN.md` Phase 7 item 3. |
+| P7.4 | Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register | 🟢 Trivial | Also from the Deepseek audit, confirmed accurate by tracing the code (`register_usage_[creg]==-1` wraps `pc` to `0`). Theoretical only — no known real-world trigger, spec-guaranteed unreachable. Zero-cost in release builds. `PLAN.md` Phase 7 item 4. |
 
 ---
 
@@ -278,6 +284,8 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/plans/performance-master-plan.md`](docs/plans/performance-master-plan.md) | Phase 6 source doc (this assistant, 2026-07-24): light-mode/IPC-0.708 framing, huge-page + worker-sweep verification plan |
 | [`docs/plans/performance-master-plan-20260724.md`](docs/plans/performance-master-plan-20260724.md) | Phase 6 source doc (Hermes agent, 2026-07-24): concrete JIT-emitter latency-hiding proposals |
 | [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) | Full narrative for every completed Phase 1–5 item, split out of `PLAN.md` 2026-07-24 |
+| [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) | Full narrative for every completed Phase 6 item, split out of `PLAN.md` 2026-07-25 |
+| [`docs/audits/emitter-scheduler-review.md`](docs/audits/emitter-scheduler-review.md), [`jit_scheduler_code_review_gemini.md`](docs/audits/jit_scheduler_code_review_gemini.md), [`scheduler-review-2026-07-25.md`](docs/audits/scheduler-review-2026-07-25.md) | Three independent code reviews of the emitter scheduler (Deepseek, Gemini, Hermes), 2026-07-25 |
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |

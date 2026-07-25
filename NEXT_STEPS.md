@@ -1,16 +1,21 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-24
-**HEAD:** 88f4122 (at time of writing; see `git log` for current)
+**Updated:** 2026-07-25
+**HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-This file mirrors the prioritized, actionable subset of `PLAN.md`'s current phase
-(**Phase 6**, 2026-07-24 — a reconciliation of two independent performance master plans,
-`docs/plans/performance-master-plan.md` and `docs/plans/performance-master-plan-20260724.md`). See
-`PLAN.md` for the full evidence/reasoning behind each item; this is the short-list view.
-Phases 1–5 (everything before Phase 6) are **fully resolved** — see
-`docs/archived/plan_completed_phases_1-5.md` for the full narrative, or the "Resolved"
-sections at the bottom of this file for the short form.
+Phases 1–5 and Phase 6 (everything below except the "Phase 7" section) are **fully resolved** —
+see `docs/archived/plan_completed_phases_1-5.md` and `docs/archived/plan_phase6_completed.md`
+for the full narrative, or the "Resolved" sections in this file for the short form. Genuinely
+open work now lives in `PLAN.md`'s **Phase 7**:
+
+*   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — blocked on manual device access (see below).
+*   [ ] Peephole JIT coalescing — still gated (see `PLAN.md` Phase 7 item 2 for the current gate status).
+*   [ ] Add `-frounding-math` to `armrx_core`'s compile options — small, cheap, optional (Deepseek audit).
+*   [ ] Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register — small, cheap, optional (Deepseek audit).
+
+Everything from here down is Phase 6's history, kept as the short-list view of already-completed
+work. See `PLAN.md` for the full evidence/reasoning behind each item.
 
 ---
 
@@ -139,7 +144,21 @@ agree/diverge reconciliation. Nothing below has started yet.
 *   [x] ~~Conservative 2-3-instruction emitter lookahead scheduler~~ — **adopted, 2026-07-25.** First version (main VM program only) measured as a clean null (IPC +0.016%) plus a real +24.9% branch-miss cost — the actual dominant `IMUL_R`/`IMUL_RCP` cost (item 14) lives in the superscalar/dataset-derivation path, a separate JIT emission path the scheduler didn't originally touch. Extended to that path (`scheduleSuperscalarProgram()`, its own `IMUL_RCP` literal-pool-ordering hazard found by code reading and fixed via a Q/R exclusion). Two dedicated differential stress tests (450-pair main-program `tests/test_jit_scheduler_stress.cpp`, 200-pair/100-seed superscalar `tests/test_jit_superscalar_scheduler_stress.cpp`) plus the full existing suite all green. Final `perf stat` measurement (`taskset`-pinned, 2 reversed-order rounds, 6 samples/condition): full vs baseline IPC +0.233%, cycles −0.036%, consistent both rounds — smaller than the original 2-6% estimate but real and reproducible. See `PLAN.md` Phase 6 item 12.
 *   [x] ~~Build real instrumentation for the superscalar/dataset-derivation path~~ — **done 2026-07-24.** Confirmed the mechanism by reading the assembly: `generateSuperscalarHash()` compiles once per seed rotation (`vm.cpp:175`), but the compiled code executes via `bl rx_calc_dataset_item` on *every* main-loop iteration in light mode — 2048 × 8 = **16,384 calls/hash**. Extended the `JitDumpEntry`/`--jit-dump` mechanism to cover this region (new `superscalar_jit_dump_`/`getSuperscalarJitDump()`, instrumented `generateSuperscalarHash()`, extended `dumpJitCode()`'s output). Verified 12/12. Real data: one call = 3,563 instructions/20,916 bytes → ×16,384 ≈ **58.4M instructions/hash, ~44% of the ~132.93M total** — a lower bound (fixed wrapper chunks and the main loop's own per-iteration overhead aren't tracked yet). See `PLAN.md` Phase 6 item 13 for the full per-opcode table and honest scope of what's still unreconciled.
 *   [x] ~~Self-directed instruction-count reconciliation for the superscalar/dataset-derivation region~~ — **done (2026-07-24): static counting, live `perf record` profiling, and a real opcode-level correlation script all landed.** `perf record -g` on `./armrx --mine` first showed only ~14-15% of self-time in named C++ symbols (corrected the earlier hypothesis that the missing instructions live in C++ — AES/Blake2b are separately measured at 0.3%/0.0% of hash time, too small). New `tools/jit_correlate.py` then correlated raw `perf` sample addresses against item 13's `JitDumpEntry` offset tables (matching worker JIT buffers in `/proc/<pid>/maps` by size, splitting THP-merged multi-worker regions back into individual buffers): **63.42% of all cycles matched a specific superscalar opcode**, dominated by `IMUL_R` (20.98%) and `IMUL_RCP` (14.30%) — together over 35% of every cycle spent mining. 14.25% of samples fell outside any JIT buffer, cross-validating almost exactly against the earlier ~14-15% named-C++ estimate. No XMRig comparison, per `PLAN.md`'s clean-room boundary note. See `PLAN.md` Phase 6 item 14 for the full account, including two real tooling gotchas (a `pgrep -f` false match, and `perf script`'s call-graph output needing leaf-frame-only filtering) hit and fixed along the way.
-*   [ ] Re-run `devbox_pgo_build` after any medium/long-term item lands meaningfully.
+*   [x] ~~Re-run `devbox_pgo_build` after any medium/long-term item lands meaningfully~~ — **done
+    2026-07-25, still a confirmed null after the scheduler landed.** See the PGO entry in
+    "Resolved — Phases 1–5" below for the full account, including the core-cluster measurement
+    artifact caught and corrected mid-session.
+*   [x] ~~Three independent code reviews of the emitter scheduler (Deepseek, Gemini, Hermes)~~ —
+    **done 2026-07-25.** All confirm no constructible failure scenario; two of three
+    independently caught a real doc-comment error (the `src==dst` exclusion's stated mechanism
+    was factually wrong about `h_IROL_R`). Fixed the doc comment, added a fail-safe assert in
+    `resolveInstructionType()`, documented why `num32bitLiterals=64` is load-bearing. Committed
+    `c92a1a9`. Full reports in `docs/audits/`.
+*   [x] ~~Full codebase audit (Deepseek)~~ — **done 2026-07-25.** Every concrete, checkable claim
+    verified against actual code/live device state. No new bugs; one previously-open question
+    (scratchpad huge-page residency) closed as a non-issue (verified live: merges with the
+    Argon2 cache mapping into one 258 MiB region, 100% `AnonHugePages`); one small optional
+    hardening item found (`-frounding-math`, not yet applied — see Phase 7 above).
 *   [x] ~~Re-baseline `README.md`'s stale H/s figures honestly~~ — **done (2026-07-24)**, using the worker-count sweep data above.
 
 **Not adopted / explicitly deprioritized:** full peephole-JIT coalescing without a fresh gap measurement; any further NEON/hardware-AES attempt (three independent measured regressions already); custom allocators/memory pooling (no hot-path allocation exists to pool).
@@ -155,7 +174,7 @@ agree/diverge reconciliation. Nothing below has started yet.
 
 ---
 
-## Resolved — Phase 6 (in progress)
+## Resolved — Phase 6 (completed 2026-07-25)
 
 *   [x] **Superscalar literal-pool relayout (item 9), 2026-07-24 — implemented, measured,
     reverted.** Real regression: cycles +1.65%, IPC 0.761→0.748, hashrate −1.12% (268→265

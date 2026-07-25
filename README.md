@@ -17,8 +17,13 @@
     *   🚀 **AArch64 JIT compiler (Default):** Generates native machine instructions on-the-fly, leveraging NEON registers and hardware-accelerated instructions.
     *   ⚙️ **Bytecode Interpreter (Fallback):** A highly portable C++ dispatch loop. Used on non-AArch64 platforms (e.g. x86_64 host builds).
 *   **Microarchitectural Tuning (Cortex-A53 focus):**
-    *   **Instruction Scheduling:** Out-of-order execution optimizations for in-order pipeline cores.
-    *   **PGO Enabled:** Profile-Guided Optimization pipelines unblocked and tuned for Musl/GCC 15.2.0.
+    *   **Emitter Lookahead Scheduler:** Conservative JIT instruction reordering to hide long-latency
+        multiply stalls on this in-order core — measured +0.23% IPC / -0.04% cycles, `taskset`-pinned
+        (`PLAN.md` Phase 6 item 12).
+    *   **PGO tooling available, measured null on current code:** the `devbox_pgo_build` pipeline
+        (GENERATE→train→USE) works end-to-end, but profile-guided optimization has not produced a
+        measurable win on this codebase in either of two independent, pinned A/B measurements —
+        kept for future re-evaluation, not claimed as a current performance feature.
     *   **Memory Tiering:** Automated huge-pages mapping (`MAP_HUGETLB` + `MADV_HUGEPAGE`) to eliminate TLB miss penalties under heavy cache pressure.
 *   **Robust Network Layer:**
     *   Dual-protocol client supporting standard **Stratum V1** and **CryptoNote** stratum variants.
@@ -110,5 +115,8 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
 *   **AArch64 JIT Engine:** ✅ Fully verified on physical target platforms.
 *   **Security hardeners (S1–S8):** ✅ Fully active.
 *   **Prometheus Metrics Server:** ✅ Operational.
-*   **PGO compiler profiles:** ✅ Integrated into CMake.
+*   **Emitter lookahead scheduler:** ✅ Adopted — small, measured, reproducible IPC win.
+*   **PGO compiler profiles:** ⚠️ Tooling integrated into CMake and works end-to-end, but measured
+    as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
+    landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.

@@ -1,5 +1,54 @@
 # Changelog
 
+## 2026-07-25 — `PLAN.md` Phase 6 Archived, Docs Refreshed Project-Wide
+
+Phase 6 had grown to ~710 of `PLAN.md`'s 770 lines of now-completed history — the same size
+threshold that triggered the Phases 1-5 archive split on 2026-07-24. Split it out the same way
+into `docs/archived/plan_phase6_completed.md`, following the established precedent exactly.
+Folded in the scheduler-review fixes and the Deepseek audit verification (both entries below)
+before archiving, so the historical record is complete. `PLAN.md` is down to 143 lines: Phases 1-5 summary (unchanged), a
+new Phase 6 summary, and a renamed "Phase 7" section listing the two genuinely open items
+(`--rt-priority`, blocked; peephole JIT, still gated) plus the two small optional hardening items
+from the Deepseek audit.
+
+Also refreshed `README.md` (corrected the "PGO Enabled"/"Instruction Scheduling" feature claims —
+PGO is tooling-available-but-measured-null, not a performance feature; added the emitter
+scheduler as an actual adopted feature), `ROADMAP.md` (Phase 6 table closed out with the missing
+rows, P3/`--rt-priority` relabeled under Phase 7, two new Deepseek-audit hardening rows), and
+`NEXT_STEPS.md` (fixed a stale unchecked PGO-recheck checkbox, added a Phase 7 summary at the
+top). Committed `405755f` for the `PLAN.md`/archive split; this pass covers the remaining docs.
+
+## 2026-07-25 — Full Codebase Audit (Deepseek) Reviewed and Verified
+
+User supplied `PROJECT_AUDIT_REPORT_20260725_Deepseek.md` (kept at repo root, not moved into
+`docs/audits/` — not explicitly requested). Per this project's standing discipline, verified
+every concrete, checkable claim against actual code/live device state before accepting any of it:
+
+- **§1.1, scratchpad huge-page residency "unverified"** — refuted. Verified live on-device:
+  `/proc/<pid>/smaps` merges adjacent same-protection anonymous VMAs into one entry, so the
+  2 MiB scratchpad doesn't appear as a separate line item — it merges with the 256 MiB Argon2
+  cache into one 258 MiB (264192 kB) region showing `AnonHugePages=264192`, i.e. 100%
+  huge-page-backed for the combined region. Not a real gap; already covered by the original
+  Phase 6 item 1 finding.
+- **§1.2/§1.3 (`register_usage_[8]` initializer, rounding-mode sentinel)** — accurate but not
+  new: both already have inline code comments explaining why they're safe. §1.3's specific claim
+  traced through `reset_rounding_mode()` and confirmed a non-issue (it sets the cache to 0 *and*
+  calls `fesetround(FE_TONEAREST)` in the same call, keeping cache and hardware state in sync).
+- **§4.1 (CBRANCH with an unwritten target register wraps `pc` to 0)** — confirmed accurate by
+  tracing `h_CBRANCH` → `execute_bytecode()`'s `pc = ibc.target` → `for (int pc = 0; pc < 256;
+  ++pc)`. Correctly characterized by the audit as theoretical (RandomX's program generator
+  spec-guarantees registers are written before being branched on) — no known real-world trigger.
+- **§3.2 (`-frounding-math` missing from `CMakeLists.txt`)** — confirmed real via direct grep;
+  the audit's own risk assessment (JIT emits raw AArch64 FP instructions, interpreter uses
+  runtime bytecode dispatch, so the compiler can't constant-fold VM float values) holds up. The
+  one genuinely actionable item from this audit — cheap, defensible, not yet applied.
+- §2.1's cited scheduler IPC numbers (+0.233%/−0.036%) matched this project's own actual
+  measurements exactly — a good signal the audit is grounded in real project docs, not
+  fabricated.
+
+**No new bugs found. No code changed** — one previously-open question (§1.1) closed as a
+non-issue; one small optional hardening item (`-frounding-math`) tracked in `PLAN.md` Phase 7.
+
 ## 2026-07-25 — PGO Re-Check After Scheduler Landing: Confirmed Null (and a Core-Pinning Near-Miss)
 
 Re-ran `devbox_pgo_build` (PLAN.md item 15) now that both scheduler commits changed the JIT's
@@ -25,6 +74,50 @@ project.
 not just `perf stat -p <pid>` A/B trials — must pin to a specific core. This generalizes item 12's
 own `taskset` lesson (originally learned for `perf stat` comparisons) to plain wall-clock
 benchmarking too.
+
+## 2026-07-25 — Three Independent Scheduler Code Reviews (Deepseek, Gemini, Hermes) Acted On
+
+Requested a deep, skeptical review of the emitter scheduler commits (`be94b1f`, `6712479`) given
+it's consensus-critical code (silent-wrong-hash risk, not a crash risk) that had just gone
+through a non-trivial correctness arc (two empirically-found hazards). Three independent
+reviews, all converging on "no constructible failure scenario in the shipped code" — CBRANCH
+anchor logic, the superscalar `IMUL_RCP` exclusion, index bounds, and cross-scheduler
+independence all check out across all three.
+
+**One real, convergent finding**: two of three (Deepseek, Hermes) independently caught that the
+`src==dst` exclusion's doc comment was factually wrong about `h_IROL_R` — it claimed the handler
+uses the shared x20 scratch register when `src==dst`; the actual code does the opposite (x20
+only when `src!=dst`; `src==dst` takes a different, x20-free `ROR_IMM` path). Gemini restated
+the original (wrong) claim without checking it against the handler's actual code — a real
+quality gap in that review, not just noise. User chose not to use Gemini for future
+scheduler-adjacent reviews as a result.
+
+**Fixed**: rewrote the doc comment to drop the falsified "x20 race" theory and record what's
+actually settled (the exclusion's *necessity* was already proven by the original bisection — a
+real divergence reproduced with it disabled, for a genuine `src==dst` case,
+`R=ISUB_R(dst==src==7)`) vs. still open (the exact mechanism — Hermes's sharper argument is that
+the ordinary register-hazard check already covers same-register cases, so the exclusion can only
+matter in the no-shared-register case, where the x20 story gives no hazard either). Also added,
+per Hermes: a fail-safe assert in `resolveInstructionType()` (previously silently collapsed any
+future unrecognized JIT handler to a NOP footprint — no hazard bits — permitting an unsafe swap
+across it; now asserts loudly and fails safe, treating it as a barrier), and a comment
+documenting why `generateSuperscalarHash()`'s `num32bitLiterals=64` pin is load-bearing for
+scheduler safety.
+
+**A side attempt to resolve the `src==dst` mechanism definitively — abandoned, not shipped.**
+Tried building a hand-crafted-`Program` differential test (a new `VirtualMachine::
+run_with_program_for_testing()` test hook, bypassing blake2b generation) to force the excluded
+swap and observe directly whether it diverges. Hit an unrelated methodological trap instead:
+comparing VM state after a single `run()` call (rather than the full 8-round
+`randomx_calculate_hash()` chain) shows spurious divergence for any program that never touches
+float registers — plausibly `run_jit()`'s `eMask`-into-`f[0]` side-channel trick leaving stale
+data when nothing overwrites it, though this wasn't confirmed before the attempt was abandoned as
+out of scope. Reverted the test-only hook and the test file entirely (`git checkout --
+include/armrx/vm.hpp src/vm.cpp`) rather than ship half-understood infrastructure.
+
+Verified 5/5 on-device after the doc/assert changes. Full review reports in
+`docs/audits/{emitter-scheduler-review,jit_scheduler_code_review_gemini,scheduler-review-2026-07-25}.md`.
+Committed `c92a1a9`.
 
 ## 2026-07-25 — Emitter Lookahead Scheduler Extended to Superscalar Path, Measured, Adopted
 
