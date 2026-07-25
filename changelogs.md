@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-07-25 — Peephole JIT Coalescing Closed on Evidence; Memory-Op Scheduler Extension Started
+
+Followed up on the ~22% of mining cycles item 14's opcode-level correlation left unattributed
+("inside a worker JIT buffer but outside any superscalar entry"). Extended
+`tools/jit_correlate.py` to split that bucket using the `code_size` boundary the tool already
+parsed but never actually used to classify sample addresses — offsets below `CodeSize` are the
+main per-hash VM program (regenerated every hash), offsets at/above it are the superscalar/
+dataset-derivation region.
+
+Ran two live `perf record` captures on the identical 8-worker mining workload used for item 14's
+original correlation — one `-e cycles` (the existing default), one `-e instructions` (new) — to
+get region-level relative IPC, not just a cycle-share number:
+
+| Region | % of instructions | % of cycles | relative IPC |
+|---|---|---|---|
+| Main per-hash VM program | 9.23% | 20.04% | **0.461×** avg |
+| Superscalar, opcode-attributed | 72.71% | 63.52% | 1.145× avg |
+| Superscalar, unattributed (fixed wrapper chunks) | 2.49% | 2.38% | 1.046× avg |
+| Outside any JIT buffer (named C++) | 15.56% | 14.05% | 1.107× avg |
+
+**The main VM program region carries ~9% of dynamic instructions but ~20% of cycles — a ~2.2×
+IPC penalty relative to the rest of the pipeline.** This is a stall signature (this region is
+where the memory-operand opcodes `*_M`/`ISTORE` — ~48% of its code bytes per the original static
+breakdown — do genuinely random 64-byte reads/writes into the 2 MiB scratchpad), not an
+instruction-count signature. Branch misprediction was already ruled out separately (2.4%
+hot-path miss rate, ~0.1-0.16% of cycles). The superscalar unattributed slice, once isolated,
+turned out proportionate (~1.05× IPC) — not a real lead, just noise from the old lumped bucket.
+
+**Conclusion: this is evidence against peephole JIT coalescing, not merely an unmet gate.**
+Peephole's whole premise is code-density/instruction-count reduction; the one remaining
+unexplained slice of cycles is expensive because of memory-latency stalls, which code-density
+reduction can't fix. This is the same root cause every single instruction-count-reduction
+attempt this project has tried has independently reached (CSEL, Newton-Raphson, NEON-AES ×3,
+superscalar literal-pool relayout, `IMUL_RCP` literal-load elimination — all implemented,
+measured, reverted). **Closed** — not starting the 3-6 week clean-room peephole rewrite against
+evidence that specifically points away from it.
+
+**In its place**: started extending the emitter lookahead scheduler to hide the main VM
+program's memory-op latency — the same mechanism (reordering to hide stalls, not reducing
+instruction count) that already produced a real, measured win for the superscalar region's
+`IMUL_R`/`IMUL_RCP` stalls. `tools/jit_correlate.py`'s region-split extension is kept as
+reusable diagnostic infrastructure regardless of how this turns out.
+
 ## 2026-07-25 — Two Deepseek-Audit Hardening Items Applied (Phase 7 Items 3-4)
 
 Both small, cheap, optional items flagged by the Deepseek audit (see the "Full Codebase Audit"

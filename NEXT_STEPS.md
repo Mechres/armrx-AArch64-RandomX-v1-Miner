@@ -10,7 +10,13 @@ for the full narrative, or the "Resolved" sections in this file for the short fo
 open work now lives in `PLAN.md`'s **Phase 7**:
 
 *   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — blocked on manual device access (see below).
-*   [ ] Peephole JIT coalescing — still gated (see `PLAN.md` Phase 7 item 2 for the current gate status).
+*   [x] ~~Peephole JIT coalescing~~ — **closed 2026-07-25, deprioritized on evidence.** Extending
+    `tools/jit_correlate.py` to split the old ~22%-unattributed bucket by the `CodeSize` region
+    boundary found the main VM program carries 9.23% of instructions but 20.04% of cycles (a
+    2.2× IPC penalty — a memory-op stall signature, not an instruction-count one). See
+    `PLAN.md` Phase 7 item 2 for the full evidence chain.
+*   [ ] Extend emitter scheduler to hide memory-op latency in the main VM program — **started
+    2026-07-25**, in place of peephole JIT. `PLAN.md` Phase 7 item 5.
 *   [x] ~~Add `-frounding-math` to `armrx_core`'s compile options~~ — **done 2026-07-25**, commit `059b6fe`.
 *   [x] ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ — **done 2026-07-25**, commit `059b6fe`.
 

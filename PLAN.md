@@ -119,15 +119,50 @@ Summary:
    front-loaded memory-contention component marginally at best. Deferred until the user grants
    device access directly.
 
-2. **Peephole JIT coalescing** ([`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md),
-   est. +5-10%, medium risk) — **still gated.** Phase 6 item 14's region-scoped instruction-count
-   reconciliation explained ~63% of mining cycles (opcode-level, via `tools/jit_correlate.py`)
-   but explicitly left ~22% of cycles ("inside a worker buffer but outside any superscalar
-   entry") and the whole-process ~33.5% instruction-count gap to XMRig not fully reconciled at
-   the region level. Do not start this without closing that gap further — per this project's
-   own repeated lesson this phase (a correctly-implemented scheduler measured as a null purely
-   because it targeted the wrong JIT region), guessing at a target without narrowing it first
-   has a poor hit rate here.
+2. ~~**Peephole JIT coalescing**~~ ([`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md)) —
+   **closed 2026-07-25, deprioritized on evidence, not just deferred.** The ~22% of cycles left
+   unreconciled by item 14's opcode-level correlation ("inside a worker buffer but outside any
+   superscalar entry") was narrowed by extending `tools/jit_correlate.py` to use the `code_size`
+   boundary it already parsed but never applied — splitting that bucket cleanly by whether an
+   address falls before or after the superscalar region starts. Two live `perf record` captures
+   on the same 8-worker mining workload (one `-e cycles`, one `-e instructions`, same
+   methodology as item 14) show the split precisely:
+
+   | Region | % of instructions | % of cycles | relative IPC |
+   |---|---|---|---|
+   | Main per-hash VM program (offset < CodeSize) | 9.23% | 20.04% | **0.461×** avg |
+   | Superscalar, opcode-attributed | 72.71% | 63.52% | 1.145× avg |
+   | Superscalar, unattributed (fixed wrapper chunks) | 2.49% | 2.38% | 1.046× avg |
+   | Outside any JIT buffer (named C++) | 15.56% | 14.05% | 1.107× avg |
+
+   **The main VM program region carries ~9% of dynamic instructions but ~20% of cycles — a
+   ~2.2× IPC penalty relative to the rest of the pipeline.** This is a stall signature, not an
+   instruction-count signature: this region is where the memory-operand opcodes (`*_M`,
+   `ISTORE` — ~48% of this region's code bytes per the original static breakdown) live, doing
+   genuinely random 64-byte reads/writes into the 2 MiB scratchpad. Branch misprediction is
+   already ruled out separately (2.4% hot-path miss rate, ~0.1-0.16% of cycles). The superscalar
+   unattributed slice, once isolated, turned out proportionate (~1.0× IPC) — not a real lead at
+   all, just measurement noise from the old lumped-together bucket.
+
+   **Conclusion: this is evidence against peephole JIT coalescing, not just an unmet gate.**
+   Peephole's entire premise is code-density/instruction-count reduction; the one remaining
+   unexplained slice of cycles is disproportionately expensive *because of memory-latency
+   stalls*, which code-density reduction cannot fix. This is also the same conclusion every
+   single instruction-count-reduction attempt this project has tried has independently reached
+   (CSEL, Newton-Raphson, NEON-AES ×3, superscalar literal-pool relayout, `IMUL_RCP`
+   literal-load elimination — all implemented, measured, and reverted for exactly this reason).
+   Not starting the 3-6 week clean-room rewrite against evidence that specifically points away
+   from it. `tools/jit_correlate.py`'s region-split extension is kept as reusable diagnostic
+   infrastructure regardless of this outcome.
+
+5. **Extend the emitter lookahead scheduler to hide memory-op latency in the main VM program —
+   started 2026-07-25.** The natural follow-on to item 2's finding above: the same *mechanism*
+   that already produced a real, measured win for the superscalar region's `IMUL_R`/`IMUL_RCP`
+   stalls (reordering to hide long-latency-op stalls, not reducing instruction count) is a
+   plausible, specific, falsifiable hypothesis for the main VM program's newly-quantified 2.2×
+   IPC penalty too — reuses proven, already-verified scheduler infrastructure rather than
+   guessing at a new mechanism. May be a null result; that's still useful information given how
+   specific and evidence-backed the target is this time.
 
 3. ~~**Add `-frounding-math` to `armrx_core`'s compile options**~~ — **done, 2026-07-25.**
    Flagged by the Deepseek audit (Phase 6 item 19), confirmed missing via direct grep, added to

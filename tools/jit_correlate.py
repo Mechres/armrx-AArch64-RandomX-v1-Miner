@@ -198,7 +198,20 @@ def main():
     lookup_opcode = make_opcode_lookup(entries)
 
     outside_buffer = 0
-    in_buffer_unattributed = 0
+    # PLAN.md Phase 7 item 2 narrowing (2026-07-25): code_size is the exact
+    # buffer-absolute boundary between the main per-hash VM program region
+    # (offsets < code_size) and the superscalar/dataset-derivation region
+    # (offsets >= code_size) -- dumpJitCode() says so explicitly ("offsets
+    # below this are NOT superscalar") and generateSuperscalarHash() starts
+    # its own codePos at exactly CodeSize, so superscalar_jit_dump_ entries'
+    # offsets are already buffer-absolute, directly comparable to rel. This
+    # was parsed but never used to classify samples -- splitting on it turns
+    # the old single "in_buffer_unattributed" bucket (originally described as
+    # "static wrapper / per-hash VM program region, or un-instrumented fixed
+    # superscalar template bytes" -- three different things conflated) into
+    # two precisely-separated ones.
+    main_vm_region = 0
+    ss_region_unattributed = 0
     attributed = defaultdict(int)
 
     for addr in addrs:
@@ -207,15 +220,20 @@ def main():
             outside_buffer += 1
             continue
         rel = addr - base
+        if code_size is not None and rel < code_size:
+            main_vm_region += 1
+            continue
         name = lookup_opcode(rel)
         if name:
             attributed[name] += 1
         else:
-            in_buffer_unattributed += 1
+            ss_region_unattributed += 1
 
     total = len(addrs)
     in_buffer = total - outside_buffer
+    in_buffer_unattributed = main_vm_region + ss_region_unattributed
     ss_total = sum(attributed.values())
+    ss_region_total = ss_region_unattributed + ss_total
 
     print(f"Total samples parsed:            {total}")
     print(f"Superscalar buffer size (ground truth): {total_buf_size} bytes"
@@ -228,13 +246,21 @@ def main():
           f"{outside_buffer:>8} ({outside_buffer/total*100:6.2f}% of total)")
     print(f"Inside a worker JIT buffer, total:                     "
           f"{in_buffer:>8} ({in_buffer/total*100:6.2f}% of total)")
-    print(f"  -- of which, matched a superscalar opcode entry:     "
+    print(f"  -- main per-hash VM program region (offset < CodeSize, "
+          f"regenerated every hash, not opcode-attributable by this method): "
+          f"{main_vm_region:>8} ({main_vm_region/total*100:6.2f}% of total, "
+          f"{main_vm_region/in_buffer*100 if in_buffer else 0:6.2f}% of in-buffer)")
+    print(f"  -- superscalar/dataset-derivation region (offset >= CodeSize), total: "
+          f"{ss_region_total:>8} ({ss_region_total/total*100:6.2f}% of total, "
+          f"{ss_region_total/in_buffer*100 if in_buffer else 0:6.2f}% of in-buffer)")
+    print(f"       of which, matched a superscalar opcode entry:     "
           f"{ss_total:>8} ({ss_total/total*100:6.2f}% of total, "
-          f"{ss_total/in_buffer*100 if in_buffer else 0:6.2f}% of in-buffer)")
-    print(f"  -- of which, unattributed (static wrapper / per-hash "
-          f"VM program region, or un-instrumented fixed superscalar template bytes): "
-          f"{in_buffer_unattributed:>8} ({in_buffer_unattributed/total*100:6.2f}% of total, "
-          f"{in_buffer_unattributed/in_buffer*100 if in_buffer else 0:6.2f}% of in-buffer)")
+          f"{ss_total/ss_region_total*100 if ss_region_total else 0:6.2f}% of ss-region)")
+    print(f"       of which, unattributed (fixed wrapper chunks -- entry/prefetch/"
+          f"jump/mix/reg-update/store, not individually dumped -- or un-instrumented "
+          f"fixed template bytes): "
+          f"{ss_region_unattributed:>8} ({ss_region_unattributed/total*100:6.2f}% of total, "
+          f"{ss_region_unattributed/ss_region_total*100 if ss_region_total else 0:6.2f}% of ss-region)")
     print()
     print(f"{'opcode':<12} {'samples':>10} {'% of ss-attributed':>19} {'% of total':>12}")
     for name, count in sorted(attributed.items(), key=lambda kv: -kv[1]):
