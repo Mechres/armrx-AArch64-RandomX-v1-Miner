@@ -482,6 +482,13 @@ void VirtualMachine::h_CBRANCH(const Instruction& instr, int i, InstructionByteC
     ibc.type = InstructionType::CBRANCH;
     int creg = instr.dst % 8;
     ibc.idst = &reg_.r[creg];
+    // register_usage_[creg] == -1 means creg was never written in this program --
+    // theoretical only (RandomX's program generator spec-guarantees a register is
+    // written before being branched on), but if it ever happened, -1 truncates into
+    // ibc.target's int16_t and then wraps `pc` to 0 via the execute loop's `++pc`,
+    // silently restarting the program instead of a defined branch (flagged by
+    // external audit review, 2026-07-25).
+    ARMRX_ASSERT(register_usage_[creg] >= 0, "CBRANCH target register never written");
     ibc.target = register_usage_[creg];
     int shift = instr.getModCond() + 8;
     ibc.imm = signExtend2sCompl(instr.getImm32()) | (1ULL << shift);
