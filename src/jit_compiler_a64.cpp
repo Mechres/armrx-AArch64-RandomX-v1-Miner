@@ -322,6 +322,7 @@ struct InstrFootprint {
 	bool is_barrier = false;   // CBRANCH or CFROUND -- no reordering across
 	bool is_cbranch = false;   // specifically CBRANCH -- domain boundary
 	bool is_long_latency = false; // IMUL_R / IMUL_RCP / IMULH_R / ISMULH_R
+	bool is_imul_rcp = false; // superscalar path only -- see scheduleSuperscalarProgram()
 };
 
 InstrFootprint computeFootprint(const Instruction& instr, InstructionType type) {
@@ -434,6 +435,105 @@ bool hasHazard(const InstrFootprint& a, const InstrFootprint& b) {
 	return false;
 }
 
+// ── Superscalar/dataset-derivation scheduler (PLAN.md Phase 6 item 12
+// extension, 2026-07-25) ────────────────────────────────────────────────
+//
+// item 14's own perf-correlation finding (>35% of ALL mining cycles in
+// IMUL_R/IMULH_R/ISMULH_R/IMUL_RCP) was measured in THIS region
+// (generateSuperscalarHash()'s output, executed via `bl
+// rx_calc_dataset_item` 16,384x/hash in light mode) -- not the main VM
+// program scheduleProgram() above targets, which is a much smaller share
+// of total instruction volume. The first version of this scheduler only
+// covered the main program and measured as a clean null (see
+// changelogs.md's "PLAN.md Phase 6 Item 12" entries) for exactly this
+// reason: it was reordering the wrong region.
+//
+// This region's instruction set (SuperscalarInstructionType, 14 opcodes)
+// is structurally simpler than the main VM program's in three ways that
+// matter for the scheduler's correctness argument:
+//   1. No CBRANCH/CFROUND exist here at all -- superscalar programs are
+//      spec-defined as straight-line integer-only sequences (dataset
+//      expansion, not general VM execution). No barriers, no anchors.
+//   2. No memory operations exist here -- every opcode is register-to-
+//      register or register-to-immediate. No memory-aliasing rule needed.
+//   3. A single flat 8-register integer file (r[0..7], mapped directly to
+//      physical x0..x7 by generateSuperscalarHash()'s emission switch) --
+//      no separate f/e float files to track.
+// computeSuperscalarFootprint() below reuses InstrFootprint but only ever
+// populates int_read/int_write/is_long_latency/is_imul_rcp.
+//
+// A fourth hazard exists that has NO analogue in the main-program
+// scheduler, found by reading generateSuperscalarHash() itself (not by
+// stress-test bisection this time): IMUL_RCP's reciprocal literals are
+// populated by a PRE-PASS, in original program order, into a pool
+// immediately after the program's jump-over-pool instruction; the main
+// emission loop then consumes that pool via a simple incrementing
+// `literal_pos` pointer, once per IMUL_RCP instruction IT encounters, in
+// WHATEVER ORDER IT EMITS THEM. This is safe under scheduling only as
+// long as no two IMUL_RCP instructions ever have their relative emission
+// order changed -- if two swapped, the k-th IMUL_RCP encountered during
+// emission would consume the (k-th original-order IMUL_RCP)'s literal
+// slot instead of its own, silently multiplying by the wrong reciprocal.
+// (This is the superscalar-path analogue of the main scheduler's src==dst
+// hazard -- an implicit ordering assumption invisible to a pure
+// register-level hazard model. The main path's own h_IMUL_RCP was
+// checked and does NOT have this problem: it computes its `literal_id`
+// from its own call count and writes its own reciprocal in the same call,
+// entirely self-contained regardless of emission order -- see
+// jit_compiler_a64.cpp's h_IMUL_RCP. Only this pre-pass/sequential-
+// consume design is order-sensitive.) Since every swap here only ever
+// reorders two *adjacent* instructions within one local 3-instruction
+// window, excluding any swap where either moving instruction (Q or R) is
+// IMUL_RCP is sufficient to guarantee no two IMUL_RCP instructions ever
+// have their relative order perturbed (P, the anchor, never moves at
+// all) -- simpler to state and verify than the tighter "only unsafe if
+// BOTH Q and R are IMUL_RCP" condition, matching this file's established
+// bias toward over-approximating hazards rather than under-approximating
+// them.
+InstrFootprint computeSuperscalarFootprint(const Instruction& instr, SuperscalarInstructionType type) {
+	InstrFootprint fp;
+	const std::uint8_t dst = static_cast<std::uint8_t>(instr.dst);
+	const std::uint8_t src = static_cast<std::uint8_t>(instr.src);
+
+	switch (type) {
+	case SuperscalarInstructionType::ISUB_R:
+	case SuperscalarInstructionType::IXOR_R:
+	case SuperscalarInstructionType::IADD_RS:
+	case SuperscalarInstructionType::IMUL_R:
+	case SuperscalarInstructionType::IMULH_R:
+	case SuperscalarInstructionType::ISMULH_R:
+		fp.int_read = static_cast<std::uint8_t>((1u << dst) | (1u << src));
+		fp.int_write = static_cast<std::uint8_t>(1u << dst);
+		fp.is_long_latency = (type == SuperscalarInstructionType::IMUL_R ||
+		                      type == SuperscalarInstructionType::IMULH_R ||
+		                      type == SuperscalarInstructionType::ISMULH_R);
+		break;
+	case SuperscalarInstructionType::IROR_C:
+	case SuperscalarInstructionType::IADD_C7:
+	case SuperscalarInstructionType::IADD_C8:
+	case SuperscalarInstructionType::IADD_C9:
+	case SuperscalarInstructionType::IXOR_C7:
+	case SuperscalarInstructionType::IXOR_C8:
+	case SuperscalarInstructionType::IXOR_C9:
+		// Immediate operand (compile-time constant) -- only dst
+		// participates as a VM register. IXOR_C*'s transient physical
+		// tmp_reg=x12 (MOVZ/MOVK then immediate EOR) is written and
+		// consumed entirely within this one instruction's own emission,
+		// never read by any other instruction -- not a cross-instruction
+		// hazard, so not tracked here.
+		fp.int_read = fp.int_write = static_cast<std::uint8_t>(1u << dst);
+		break;
+	case SuperscalarInstructionType::IMUL_RCP:
+		fp.int_read = fp.int_write = static_cast<std::uint8_t>(1u << dst);
+		fp.is_long_latency = true;
+		fp.is_imul_rcp = true;
+		break;
+	default:
+		break;
+	}
+	return fp;
+}
+
 } // namespace
 
 InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
@@ -519,6 +619,42 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 		    !fp[i + 1].is_barrier && !fp[i + 2].is_barrier &&
 		    !is_anchor[i + 1] && !is_anchor[i + 2] &&
 		    !q_src_eq_dst && !r_src_eq_dst &&
+		    hasHazard(fp[i], fp[i + 1]) &&
+		    !hasHazard(fp[i], fp[i + 2]) &&
+		    !hasHazard(fp[i + 1], fp[i + 2])) {
+			order.push_back(i);
+			order.push_back(i + 2);
+			order.push_back(i + 1);
+			i += 3;
+		} else {
+			order.push_back(i);
+			++i;
+		}
+	}
+	return order;
+}
+
+// See the doc comment above computeSuperscalarFootprint() (anonymous
+// namespace, above) for the full correctness argument -- no barriers, no
+// memory ops, no anchors needed here, but IMUL_RCP must never be Q or R
+// of a swap (literal-pool ordering hazard, distinct from the main
+// program's src==dst hazard).
+std::vector<uint32_t> JitCompilerA64::scheduleSuperscalarProgram(const SuperscalarProgram& program) const {
+	const uint32_t size = program.size();
+	std::vector<InstrFootprint> fp(size);
+	for (uint32_t i = 0; i < size; ++i) {
+		const Instruction& instr = program(i);
+		fp[i] = computeSuperscalarFootprint(instr, static_cast<SuperscalarInstructionType>(instr.opcode));
+	}
+
+	std::vector<uint32_t> order;
+	order.reserve(size);
+	uint32_t i = 0;
+	while (i < size) {
+		const bool q_is_imul_rcp = i + 1 < size && fp[i + 1].is_imul_rcp;
+		const bool r_is_imul_rcp = i + 2 < size && fp[i + 2].is_imul_rcp;
+		if (fp[i].is_long_latency && i + 2 < size &&
+		    !q_is_imul_rcp && !r_is_imul_rcp &&
 		    hasHazard(fp[i], fp[i + 1]) &&
 		    !hasHazard(fp[i], fp[i + 2]) &&
 		    !hasHazard(fp[i + 1], fp[i + 2])) {
@@ -861,8 +997,10 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		uint32_t literal_pos = jmp_pos;
 		emit32(ARMV8A::B | ((codePos - jmp_pos) / 4), code, literal_pos);
 
-		for (size_t j = 0; j < progSize; ++j)
+		const std::vector<uint32_t> emit_order = scheduleSuperscalarProgram(prog);
+		for (size_t idx = 0; idx < emit_order.size(); ++idx)
 		{
+			const size_t j = emit_order[idx];
 			const Instruction& instr = prog(j);
 			const uint32_t src = instr.src;
 			const uint32_t dst = instr.dst;

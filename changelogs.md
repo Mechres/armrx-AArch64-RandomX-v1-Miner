@@ -1,5 +1,53 @@
 # Changelog
 
+## 2026-07-25 — Emitter Lookahead Scheduler Extended to Superscalar Path, Measured, Adopted
+
+Follow-on to the same day's earlier scheduler entry (below). First measured the main-program-only
+scheduler with `perf stat` (3 interleaved trials, `taskset`-pinned): a clean null (IPC +0.016%,
+noise-level) plus a real, reproducible **+24.9% branch-misses** with no compensating benefit.
+Root cause: `scheduleProgram()` was only wired into `emitPrologueMix()` (the main VM program,
+executed once per hash), but item 14's own `perf`-correlation found the actual dominant `IMUL_R`/
+`IMUL_RCP` cost (>35% of all mining cycles) lives in `generateSuperscalarHash()`'s output — the
+dataset-derivation region, executed via `bl rx_calc_dataset_item` 16,384x/hash in light mode — a
+completely separate JIT emission path the scheduler never touched. User chose to extend the
+scheduler to the right region rather than revert.
+
+**Extension**: `scheduleSuperscalarProgram()` + `computeSuperscalarFootprint()` in
+`jit_compiler_a64.cpp`, targeting `SuperscalarInstructionType`'s 14 opcodes. Structurally simpler
+than the main path: no CBRANCH/CFROUND (superscalar programs are spec-defined straight-line
+integer sequences, so no barriers/anchors needed), no memory ops, a single flat 8-register file.
+A new hazard specific to this path was found by *reading* the code, not stress-test bisection:
+`IMUL_RCP`'s reciprocal literals are populated by a pre-pass in original program order, then
+consumed by the main emission loop via a simple incrementing pointer — safe only if no two
+`IMUL_RCP` instructions ever have their relative emission order changed by scheduling. Fixed by
+excluding `IMUL_RCP` from a swap's two moving positions (checked the main path's own `h_IMUL_RCP`
+too — it does *not* have this problem, since it computes its literal slot from its own call count,
+entirely self-contained per call, unlike the superscalar pre-pass design).
+
+**Verification**: a second dedicated stress test, `tests/test_jit_superscalar_scheduler_stress.cpp`
+— deliberately shaped around **many distinct seeds** (100 seeds x 2 inputs = 200 pairs across 800
+individual superscalar programs) rather than many inputs per seed, since `generateSuperscalarHash()`
+compiles once per seed rotation and reuses that compiled code for every hash against that seed,
+unlike the main program which recompiles fresh every hash. Both stress tests (test_jit_scheduler_stress
+re-run: 450/450 still green with both schedulers active; test_jit_superscalar_scheduler_stress:
+200/200) plus the full existing suite all green on-device.
+
+**Final performance measurement**: 3-way `perf stat` comparison (baseline `906b96e` / main-only
+`be94b1f` / full — separate git worktrees built side-by-side, `taskset -c 0`-pinned single-worker
+steady-state windows via `perf stat -p <pid>` after a 10s cache-init warmup, 2 independent rounds
+with reversed run order to rule out thermal drift, 6 samples/condition total). An unpinned first
+attempt showed a sign flip between rounds (this device has two asymmetric 4-core L2 clusters,
+previously documented) — pinning resolved it to a consistent signal: **full vs baseline: IPC
++0.233%, cycles −0.036%** (both rounds agreed: +0.183%/+0.284%); **full vs main-only: IPC +0.318%**
+(+0.285%/+0.352%) — the superscalar extension is what makes this a net positive; main-only alone
+remained a small, consistent regression vs baseline (−0.085% IPC) even after the extension's fixes.
+Branch-miss rate rose from 2.54% to 3.14% (+23.8% relative) — a real cost, but net cycles/IPC still
+improved, meaning the stall-hiding benefit outweighs it. Smaller than the original "2-6%" estimate
+in `PLAN.md`, but a genuine, reproducibly-measured win (signal clearly exceeds the ~0.02-0.23%
+spreads at each condition, matching the "perf stat is the right tool for single-digit-percent
+effects" lesson from item 10's prefetch investigation). **Adopted.** See `PLAN.md` Phase 6 item 12
+for the full account.
+
 ## 2026-07-25 — Emitter Lookahead Scheduler (PLAN.md Phase 6 Item 12): Implemented, Correctness-Verified
 
 Direct follow-on from item 14's `perf`-correlation finding (`IMUL_R`/`IMULH_R`/`ISMULH_R`/`IMUL_RCP`
@@ -31,9 +79,11 @@ a hang; raised to 2400s after measuring the real per-hash cost directly. Full ex
 (`armrx_tests`, `test_mining`, `test_jit_encodings`, `test_jit_determinism`, `test_jit_equivalence`)
 also green on-device.
 
-**Not yet done**: actual performance measurement (hashrate / `perf stat` cycles). Correctness was
-prioritized first per this project's own standing rule (KATs green before any benchmark) and because
-the failure mode here is silent wrong output, not a crash. See `PLAN.md` Phase 6 item 12.
+Performance measurement (deferred at the time this entry was written, prioritizing correctness
+first per this project's own standing rule) found this main-program-only version to be a clean
+null with a real branch-miss cost — see the entry above this one dated the same day for the full
+story and the eventual adopted fix (extending the scheduler to the superscalar path). Kept here
+unedited as the accurate record of what was known at this point in the session.
 
 ## 2026-07-25 — Dual External Audit Reviewed, Verified, Acted On
 

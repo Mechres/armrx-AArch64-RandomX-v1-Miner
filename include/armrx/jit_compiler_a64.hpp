@@ -100,6 +100,19 @@ namespace armrx {
 		InstructionType resolveInstructionType(uint8_t opcode) const;
 		std::vector<uint32_t> scheduleProgram(Program& program, uint32_t size) const;
 
+		// Extension (2026-07-25): same idea applied to the superscalar
+		// dataset-derivation region, where item 14's dominant IMUL cost
+		// actually lives (the main-program scheduler above measured as a
+		// null result precisely because it doesn't touch this region --
+		// see changelogs.md). Structurally simpler (no CBRANCH/CFROUND, no
+		// memory ops, single flat 8-register file) but has its own hazard
+		// with no main-program analogue: IMUL_RCP's literal pool is
+		// consumed via a sequential pointer that assumes emission order
+		// never reorders IMUL_RCP instructions relative to each other.
+		// Full design comment above computeSuperscalarFootprint() in
+		// jit_compiler_a64.cpp.
+		std::vector<uint32_t> scheduleSuperscalarProgram(const SuperscalarProgram& program) const;
+
 		static InstructionGeneratorA64 engine[256];
 		uint32_t reg_changed_offset[8];
 		uint8_t* code;

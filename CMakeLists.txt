@@ -264,6 +264,21 @@ if(ARMRX_BUILD_TESTS)
     # device's documented thermal variance between runs.
     set_tests_properties(test_jit_scheduler_stress PROPERTIES TIMEOUT 2400)
 
+    # Seed-diversity differential stress test for the superscalar/dataset-
+    # derivation scheduler extension (PLAN.md Phase 6 item 12, 2026-07-25) —
+    # generateSuperscalarHash() compiles once per seed rotation, so unlike
+    # the main-program scheduler above, coverage here needs many distinct
+    # seeds, not many inputs against few seeds. See the test file's own
+    # header comment.
+    add_executable(test_jit_superscalar_scheduler_stress tests/test_jit_superscalar_scheduler_stress.cpp)
+    target_link_libraries(test_jit_superscalar_scheduler_stress PRIVATE armrx_core)
+    add_test(NAME test_jit_superscalar_scheduler_stress COMMAND test_jit_superscalar_scheduler_stress)
+    # Same per-unit costs as test_jit_scheduler_stress above (~7.2s cache
+    # init, ~2.6s/hash-pair interpreter-dominated): 100 seeds x (7.2s +
+    # 2x2.6s) =~ 1240s. 2400s budget matches the sibling test for the same
+    # thermal-variance headroom reasoning.
+    set_tests_properties(test_jit_superscalar_scheduler_stress PROPERTIES TIMEOUT 2400)
+
     # NEON vector-permute AES parity tests (PLAN.md Phase 5 / NEXT_STEPS.md §5a) — AArch64/NEON-
     # only, always exercises both encrypt_transform/decrypt_transform (scalar) and
     # encrypt_transform_neon/decrypt_transform_neon directly by name, independent of whether
@@ -328,6 +343,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
             set_property(TARGET test_jit_determinism PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_equivalence PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_scheduler_stress PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_property(TARGET test_jit_superscalar_scheduler_stress PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_aes_neon PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         endif()
     endif()
