@@ -136,6 +136,26 @@ the exact binary and exact question being asked before being trusted as a compar
 consistent with this project's standing discipline, and worth restating because it nearly
 produced a wrong "no effect" conclusion here on what turned out to be a real, large, adopted win.
 
+## Critical deployment footgun found the same night: default worker count silently drops to 1
+
+Running `armrx --pool=... --wallet=...` **without** an explicit `--workers=N` on this
+isolated-core kernel picks **1 worker, not 8** — confirmed live during a real overnight pool-
+mining run (`Selected mode (1 workers): light` in the log, despite 8 online cores). Root cause:
+`src/cli_parser.cpp:35` defaults to `std::max(1U, std::thread::hardware_concurrency())`. On this
+device's musl libc toolchain, `hardware_concurrency()` is implemented via `sched_getaffinity()` —
+the *calling process's* current affinity mask, not a true online-CPU-count. `isolcpus=1-7`
+restricts new processes' default affinity to core 0 only, so this returns 1 — identical to why
+plain `nproc` also returns 1 in the same shell state. Same mechanism, same fix needed, at
+`src/mining_engine.cpp:35` and `:236` (secondary uses of the same call).
+
+**This means the `isolcpus` recommendation above is actively dangerous without a companion fix
+or a loud warning**: naive deployment following just "add isolcpus to the cmdline" silently
+loses 7/8 of the device's throughput, a much bigger loss than the 14% gained. Until
+`src/cli_parser.cpp`'s default-detection is fixed to use a true online-CPU-count method (e.g.
+parsing `/sys/devices/system/cpu/online` or an equivalent unaffected by process affinity),
+**always pass `--workers=<N>` explicitly on any host with `isolcpus` set.** Not yet fixed in
+code as of this writing — flagged for the next session.
+
 ## This does not close the gap to XMRig
 
 Worth being explicit about scope: this is a general OS-scheduling fix, not something specific to

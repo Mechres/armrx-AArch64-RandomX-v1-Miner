@@ -18,6 +18,14 @@ Phases 1–8 are all **fully resolved** — see `docs/archived/plan_completed_ph
     recommendation (boot cmdline), not a code change. Full account, including two corrected false
     starts, in `docs/experiments/isolcpus-rt-priority-win.md`.
 
+*   [ ] **New, real bug found the same night — not yet fixed**: with `isolcpus` set, running
+    `armrx` without an explicit `--workers=N` silently picks 1 worker instead of 8 (confirmed
+    live during a real overnight pool-mining run). `src/cli_parser.cpp:35`'s default
+    (`std::thread::hardware_concurrency()`) reads the calling process's own affinity mask on this
+    musl toolchain, which `isolcpus` restricts new processes to (core 0 only). Fix: use a true
+    online-CPU-count method (e.g. parse `/sys/devices/system/cpu/online`) instead. Workaround
+    until fixed: always pass `--workers=<N>` explicitly on an `isolcpus`-configured host.
+
 No genuinely open items remain as of 2026-07-25. If performance work resumes, see
 `docs/plans/performance-plan-20260725.md` (gated steps) or
 `docs/plans/experimental-performance-ideas-20260725.md` (speculative backlog).

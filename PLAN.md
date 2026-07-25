@@ -174,3 +174,12 @@ asymmetric multi-cluster ARM hardware. **Scope caveat**: this is a general OS-sc
 an armrx-specific one — it would very likely help XMRig by a similar margin too (not measured).
 It does not close the ~10-12% cluster-normalized code-level gap to XMRig (Phase 6 item 9), which
 remains open.
+
+**Real bug found the same night, not yet fixed**: with `isolcpus` set, running `armrx` without
+an explicit `--workers=N` silently picks **1 worker instead of 8** — confirmed live during a real
+overnight pool-mining run. `src/cli_parser.cpp:35`'s default (`std::thread::hardware_concurrency()`)
+is affinity-based on this device's musl toolchain (via `sched_getaffinity()`), and `isolcpus`
+restricts new processes' default affinity to core 0 only. This makes the `isolcpus` win actively
+dangerous without a companion warning or fix — naive deployment loses far more (7/8 of
+throughput) than the 14% gained. **Not yet fixed**; always pass `--workers=<N>` explicitly on any
+`isolcpus`-configured host in the meantime. See `docs/experiments/isolcpus-rt-priority-win.md`.

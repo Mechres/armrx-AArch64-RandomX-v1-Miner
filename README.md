@@ -60,6 +60,9 @@ measure identically on current code).
 > [!TIP]
 > **Deployment tuning, not shown in the table above**: on asymmetric multi-cluster ARM SoCs like this one, adding `isolcpus=<N>-<N> rcu_nocbs=<N>-<N>` (covering every core except core 0) to the kernel boot cmdline measured a reproducible **~28.4 H/s (+14%)** on this device — the biggest win this project has found, bigger than any code change. It's a root-only, reboot-required OS setting, so it can't be baked into `armrx` itself; see [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) for the full measurement and mechanism (background OS work was stealing cycles from pinned workers on the weaker cluster; isolation stops it).
 
+> [!CAUTION]
+> **If you set `isolcpus`, always pass `--workers=<N>` explicitly.** The default worker-count auto-detection (`std::thread::hardware_concurrency()`) reads the *calling process's own CPU affinity mask*, which `isolcpus` restricts new processes to (core 0 only) — so an un-flagged run silently mines on 1 core instead of all of them, losing far more than the 14% gained above. Confirmed live on this device; not yet fixed in code.
+
 ---
 
 ## 🚀 Quick Start
