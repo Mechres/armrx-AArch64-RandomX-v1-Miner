@@ -155,14 +155,44 @@ Summary:
    from it. `tools/jit_correlate.py`'s region-split extension is kept as reusable diagnostic
    infrastructure regardless of this outcome.
 
-5. **Extend the emitter lookahead scheduler to hide memory-op latency in the main VM program —
-   started 2026-07-25.** The natural follow-on to item 2's finding above: the same *mechanism*
-   that already produced a real, measured win for the superscalar region's `IMUL_R`/`IMUL_RCP`
-   stalls (reordering to hide long-latency-op stalls, not reducing instruction count) is a
-   plausible, specific, falsifiable hypothesis for the main VM program's newly-quantified 2.2×
-   IPC penalty too — reuses proven, already-verified scheduler infrastructure rather than
-   guessing at a new mechanism. May be a null result; that's still useful information given how
-   specific and evidence-backed the target is this time.
+5. ~~**Extend the emitter lookahead scheduler to hide memory-op latency in the main VM
+   program**~~ — **tried 2026-07-25, caused a real JIT/interpreter divergence, reverted.** The
+   natural follow-on to item 2's finding above: the same *mechanism* that already produced a
+   real, measured win for the superscalar region's `IMUL_R`/`IMUL_RCP` stalls (reordering to
+   hide long-latency-op stalls, not reducing instruction count) was a plausible, specific,
+   falsifiable hypothesis for the main VM program's 2.2× IPC penalty too. Implemented: flagged
+   the memory-load opcodes (`*_M`) as `is_long_latency` in `computeFootprint()`, making them
+   eligible as swap triggers (`P`) — no new hazard-model change was believed necessary, since
+   the existing memory-memory-always-hazard rule already prevents a `*_M` op from ever swapping
+   past another `*_M` op.
+
+   `test_jit_equivalence` failed immediately on its first (and most basic) seed/input pair —
+   the first time this test has failed in the project's history. Reverting the change alone
+   (keeping everything else) made it pass again, confirming the memory-op extension itself is
+   the cause. Investigated the mechanism at length: checked whether `emitMemLoad`'s own
+   `src==dst` shared-scratch-register special case (structurally similar to the *original*
+   `src==dst` hazard from item 12) was responsible — but that pattern was already reviewed by
+   the three independent code reviews and confirmed self-contained regardless of position, so
+   it doesn't explain this. **The exact mechanism was not conclusively identified.** Given the
+   failure mode is silent wrong hashes and this was an explicitly speculative, "may be a null
+   result" experiment from the outset, the responsible choice was to fully revert rather than
+   ship a targeted exclusion without being able to verify it — matching this project's own
+   standing rule to trust empirical results over an unconfirmed theory, but here without a
+   working fix to trust, just a clean revert. `tools/jit_correlate.py`'s region-split extension
+   (item 2) is unaffected and kept.
+
+   **Side fix, found and corrected while investigating**: the CBRANCH defensive `ARMRX_ASSERT`
+   added in Phase 7 item 4 fired repeatedly during this investigation on a completely normal
+   `test_jit_equivalence` run — its premise (that a CBRANCH targeting a never-written register
+   is "theoretical only") was factually wrong. Traced why the existing behavior is actually
+   correct and intentional (register_usage_[creg]==-1 wraps `pc` to 0, i.e. "restart from VM
+   instruction 0," matching the JIT's own `reg_changed_offset[]` reset to `PrologueSize` before
+   every compile). Removed the incorrect assert. Committed `4da77f0`.
+
+   **Performance work is now closed out for this session** — both the direct lead (peephole
+   JIT, item 2) and its evidence-backed follow-on (this item) have been tried or ruled out. The
+   two genuinely open items are `--rt-priority` (item 1, blocked on device access) and nothing
+   else on the performance side without a new measured hypothesis.
 
 3. ~~**Add `-frounding-math` to `armrx_core`'s compile options**~~ — **done, 2026-07-25.**
    Flagged by the Deepseek audit (Phase 6 item 19), confirmed missing via direct grep, added to

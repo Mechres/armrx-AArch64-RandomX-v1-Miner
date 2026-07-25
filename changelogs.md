@@ -1,5 +1,48 @@
 # Changelog
 
+## 2026-07-25 — Memory-Op Scheduler Extension Tried, Reverted; a Real Assert Bug Found Along the Way
+
+Follow-up to the entry below (peephole JIT closed, memory-op scheduler extension started).
+Implemented the extension: flagged the memory-load opcodes (`*_M`) as `is_long_latency` in
+`computeFootprint()`, making them eligible as swap triggers (`P`) the same way `IMUL_R`/
+`IMUL_RCP` already were. No new hazard-model change seemed necessary — the existing
+memory-memory-always-hazard rule already prevents a `*_M` op from ever swapping past another
+`*_M` op, so marking it long-latency should only ever fill a stall with an independent register
+op.
+
+`test_jit_equivalence` failed immediately, on its first and most basic (seed, input) pair — the
+first time this specific test has ever failed in this project's history. Reverting the memory-op
+change alone (keeping everything else) made it pass again, confirming the extension itself is
+the cause. Investigated the mechanism: checked whether `emitMemLoad`'s own `src==dst`
+shared-physical-scratch-register special case (structurally similar to the *original* `src==dst`
+hazard that required item 12's Q/R exclusion) was responsible, but that exact pattern was already
+reviewed by the three independent code reviews (Deepseek, Gemini, Hermes) and confirmed
+self-contained regardless of swap position — so it doesn't explain this divergence.
+
+**The exact hazard mechanism was not conclusively identified.** Given the failure mode is silent
+wrong hashes and this was an explicitly speculative, "may be a null result" experiment from the
+outset, fully reverted rather than ship a targeted exclusion without being able to verify it —
+this project's own standing rule is to trust empirical results over incomplete theory, but here
+there was no working fix to trust, just a clean revert back to the known-good state.
+`tools/jit_correlate.py`'s region-split extension (kept, unaffected) remains valuable diagnostic
+infrastructure regardless of this outcome.
+
+**Real bug found and fixed while investigating**: the CBRANCH defensive `ARMRX_ASSERT` added
+earlier the same day (see the "Two Deepseek-Audit Hardening Items" entry below) fired repeatedly
+during this investigation — on a completely normal `test_jit_equivalence` run, not the "may not
+be" scenario. Its premise (that a CBRANCH targeting a never-written register is "theoretical
+only," per the Deepseek audit's characterization) was factually wrong. Traced why the existing
+behavior is actually correct and intentional: `register_usage_[creg] == -1` wraps `pc` to `0` via
+the execute loop's `++pc`, i.e. "restart from VM instruction 0" — this exactly matches the JIT's
+own `reg_changed_offset[]`, which is reset to `PrologueSize` (VM instruction 0's own code offset)
+before every compile in `emitPrologueMix`. Both paths already handle this correctly; the assert
+was flagging normal behavior as if it were exceptional. Removed (`4da77f0`).
+
+**Performance work is closed out for this session.** Both the direct lead (peephole JIT) and its
+evidence-backed follow-on (this memory-op extension) have now been tried or ruled out with
+reasoning. The only genuinely open item remaining is `--rt-priority`/`isolcpus=` (blocked on
+user device access).
+
 ## 2026-07-25 — Peephole JIT Coalescing Closed on Evidence; Memory-Op Scheduler Extension Started
 
 Followed up on the ~22% of mining cycles item 14's opcode-level correlation left unattributed

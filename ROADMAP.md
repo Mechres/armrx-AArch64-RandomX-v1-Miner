@@ -18,15 +18,18 @@
 > three independent code reviews of that scheduler plus a full third-party audit, all verified
 > claim-by-claim; and PGO re-checked on the post-scheduler code shape, still a confirmed null
 > (after catching and correcting a misleading unpinned core-cluster measurement artifact).
-> **Current work is Phase 7**: the two small optional hardening items from the third-party audit
-> are done (`-frounding-math`, a defensive CBRANCH assert). Peephole JIT coalescing is now
-> **closed** — extending `tools/jit_correlate.py` to split its old ~22%-unattributed bucket by
-> the `CodeSize` region boundary found the main VM program carries 9.23% of instructions but
-> 20.04% of cycles (a 2.2× IPC penalty, a memory-op stall signature, not an instruction-count
-> one) — evidence against starting it, not just an unmet gate. In its place: extending the
-> emitter scheduler to hide that same region's memory-op latency, the same mechanism that
-> already won for the superscalar region. `--rt-priority`/`isolcpus=` remains blocked on user
-> device access. See `PLAN.md` for the live, short version of all of this.
+> **Current work is Phase 7**: `-frounding-math` is applied; the CBRANCH assert was added then
+> removed the same day (its "theoretical only" premise was factually wrong). Peephole JIT
+> coalescing is **closed** — extending `tools/jit_correlate.py` to split its old
+> ~22%-unattributed bucket by the `CodeSize` region boundary found the main VM program carries
+> 9.23% of instructions but 20.04% of cycles (a 2.2× IPC penalty, a memory-op stall signature,
+> not an instruction-count one) — evidence against starting it, not just an unmet gate. The
+> natural follow-on (extending the emitter scheduler to hide that same region's memory-op
+> latency) was tried and **reverted** — it caused a real JIT/interpreter divergence whose exact
+> mechanism wasn't conclusively identified; reverting fully was the responsible choice given the
+> failure mode is silent wrong hashes. **Performance work is closed out for this session.**
+> `--rt-priority`/`isolcpus=` remains blocked on user device access — the only open item. See
+> `PLAN.md` for the live, short version of all of this.
 >
 > **Major finding, same day, later session:** this device actually has **two separate 4-core L2
 > cache clusters** (cores 0-3 / cores 4-7, confirmed via kernel cache-topology sysfs), not one
@@ -246,7 +249,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 |---|------|------|-------------|------|-------|
 | ~~P4~~ | ~~Reduce JIT execution branch-misprediction cost (CSEL for CBRANCH)~~ | `jit_compiler_a64.cpp` | — | — | **Closed 2026-07-22 — implemented, measured, reverted.** CSEL gave +46% branch-misses and flat hashrate vs. the existing `bne`/`b`, not an improvement (BTB-aliasing: the JIT buffer regenerates every hash, so no encoding trick fixes the predictor-history problem). Separately found the 31.08% figure this item's "~8.6–11.9% of cycles" estimate was based on doesn't represent the mining hot path at all — the isolated hot path's real miss rate is 2.4%, costing ~0.1–0.16% of cycles. See `docs/experiments/branchless-cbranch.md`. No further CBRANCH JIT work planned. |
 | ~~P3~~ | ~~Peephole JIT coalescing~~ — [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | — | — | — | **Closed 2026-07-25 — deprioritized on evidence, not just deferred.** Extended `tools/jit_correlate.py` to split the old ~22%-unattributed bucket by the `CodeSize` boundary (already parsed, never used). Two live `perf record` captures (cycles + instructions, same 8-worker workload) show the main per-hash VM program region carries 9.23% of dynamic instructions but 20.04% of cycles — a **2.2× IPC penalty**, a stall signature (memory-op scratchpad access, ~48% of that region's code bytes are `*_M`/`ISTORE`), not an instruction-count signature. The superscalar unattributed slice, isolated, turned out proportionate (~1.05× IPC) — not a real lead. Peephole's premise (code-density reduction) can't fix a memory-latency stall; this is the same conclusion every instruction-count-reduction attempt this project has tried has independently reached (CSEL, Newton-Raphson, NEON-AES ×3, superscalar literal-pool relayout, `IMUL_RCP` literal-load elimination). `PLAN.md` Phase 7 item 2. |
-| P7.5 | Extend emitter scheduler to hide memory-op latency in the main VM program | `jit_compiler_a64.cpp` | unknown, may be null | 🟡 Medium | **Started 2026-07-25.** Natural follow-on to P3's closure — same latency-hiding mechanism that already won for the superscalar region's `IMUL_R`/`IMUL_RCP` stalls, applied to the main VM program's newly-quantified 2.2× IPC penalty (likely scratchpad memory-op stalls). Reuses proven scheduler infrastructure rather than a new mechanism. `PLAN.md` Phase 7 item 5. |
+| ~~P7.5~~ | ~~Extend emitter scheduler to hide memory-op latency in the main VM program~~ | — | — | — | **Closed 2026-07-25 — tried, caused a real JIT/interpreter divergence, reverted.** Flagging `*_M` opcodes as `is_long_latency` broke `test_jit_equivalence` on its first, most basic seed/input pair — the first test failure of this kind in the project's history. Confirmed the memory-op change was the sole cause by reverting it alone. The exact hazard mechanism was not conclusively identified (checked `emitMemLoad`'s own `src==dst` scratch-register pattern, already reviewed and ruled out by the three independent code reviews). Given the failure mode is silent wrong hashes and this was an explicitly speculative experiment, fully reverted rather than ship an unverified targeted exclusion. A real, unrelated bug was found and fixed along the way: the CBRANCH defensive assert from P7.4 fired on entirely normal program behavior — its "theoretical only" premise was wrong, removed (`4da77f0`). `PLAN.md` Phase 7 item 5. |
 | ~~P6.1~~ | ~~Huge-page residency check~~ | — | — | — | **Closed 2026-07-24 — done, no-op.** ~97.6% of anon RSS already THP-coalesced (100% for the Argon2 cache mapping), dTLB misses negligible, despite no real hugetlbfs pool existing. `PLAN.md` Phase 6 item 1. |
 | ~~P6.2~~ | ~~Worker-count sweep, 4→8 workers~~ | — | — | — | **Closed 2026-07-24 — done.** Smooth monotonic decline 98.5%→73.0% efficiency, no plateau; 8 workers confirmed highest-throughput. `README.md` re-baselined. `PLAN.md` Phase 6 item 2. |
 | ~~P6.3~~ | ~~Multi-worker PMU attribution~~ | — | — | — | **Closed 2026-07-24 — done, revised later same day.** TLB definitively rejected (dTLB misses <1.4/million instructions at every worker count). The original "core-count-triggered power/current cap" hypothesis for the apparent 6-8-worker clock drop is **retracted** — this device has two separate 4-core L2 clusters (cores 0-3, cores 4-7; see P6.11), and the drop was just the average of a full-rate cluster and an arbitration-losing cluster once the worker count spanned both. `PLAN.md` Phase 6 item 3's "REVISED" section. |
@@ -279,7 +282,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | — | Cross-compile CI (GitHub Actions + qemu-user) | 🟡 Medium | Optional — you test on real hardware |
 | — | Test coverage: `tls_client.cpp`/`tui.cpp` remain fully untested | 🟡 Medium | Need a mock TLS server / terminal-capture harness respectively. `cli_parser.cpp`/`aes_hash.cpp` gaps closed 2026-07-23 — see `PLAN.md` Phase 4 item E. |
 | ~~P7.3~~ | ~~Add `-frounding-math` to `armrx_core`'s compile options~~ | — | — | — | **Closed 2026-07-25 — done.** Flagged by the Deepseek audit, confirmed missing via grep, added. Verified 7/7 local, 5/5 on-device, no new warning categories. `PLAN.md` Phase 7 item 3. Committed `059b6fe`. |
-| ~~P7.4~~ | ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ | — | — | — | **Closed 2026-07-25 — done.** Also from the Deepseek audit, confirmed accurate by tracing the code (`register_usage_[creg]==-1` wraps `pc` to `0`). Theoretical-only trigger, zero cost in release builds. Verified 7/7 local, 5/5 on-device. `PLAN.md` Phase 7 item 4. Committed `059b6fe`. |
+| ~~P7.4~~ | ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ | — | — | — | **Added then removed, 2026-07-25.** Added per the Deepseek audit's claim this case was "theoretical only" (`059b6fe`) — but it fired repeatedly on a completely normal `test_jit_equivalence` run while investigating P7.5, disproving that premise. Traced why the existing behavior is correct and intentional regardless (matches the JIT's own `reg_changed_offset[]` reset semantics); removed the assert (`4da77f0`). Net: no code change from this item's original state, but a real doc/understanding correction. `PLAN.md` Phase 7 item 4. |
 
 ---
 

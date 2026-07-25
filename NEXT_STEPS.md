@@ -10,15 +10,23 @@ for the full narrative, or the "Resolved" sections in this file for the short fo
 open work now lives in `PLAN.md`'s **Phase 7**:
 
 *   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — blocked on manual device access (see below).
+    **This is the only genuinely open item as of 2026-07-25 — performance work is closed out
+    for this session (see the two items below).**
 *   [x] ~~Peephole JIT coalescing~~ — **closed 2026-07-25, deprioritized on evidence.** Extending
     `tools/jit_correlate.py` to split the old ~22%-unattributed bucket by the `CodeSize` region
     boundary found the main VM program carries 9.23% of instructions but 20.04% of cycles (a
     2.2× IPC penalty — a memory-op stall signature, not an instruction-count one). See
     `PLAN.md` Phase 7 item 2 for the full evidence chain.
-*   [ ] Extend emitter scheduler to hide memory-op latency in the main VM program — **started
-    2026-07-25**, in place of peephole JIT. `PLAN.md` Phase 7 item 5.
+*   [x] ~~Extend emitter scheduler to hide memory-op latency in the main VM program~~ — **tried
+    2026-07-25, caused a real JIT/interpreter divergence, reverted.** Flagging `*_M` opcodes as
+    `is_long_latency` broke `test_jit_equivalence` on its first, most basic seed/input pair —
+    confirmed by reverting the change alone. Exact hazard mechanism not conclusively identified;
+    fully reverted rather than ship an unverified fix, given the failure mode is silent wrong
+    hashes. See `PLAN.md` Phase 7 item 5 for the full account.
 *   [x] ~~Add `-frounding-math` to `armrx_core`'s compile options~~ — **done 2026-07-25**, commit `059b6fe`.
-*   [x] ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ — **done 2026-07-25**, commit `059b6fe`.
+*   [x] ~~Defensive `ARMRX_ASSERT` for CBRANCH-with-unwritten-target-register~~ — **added then
+    removed 2026-07-25.** Its "theoretical only" premise was factually wrong — it fired on
+    entirely normal program behavior while investigating the item above. Removed, `4da77f0`.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.
