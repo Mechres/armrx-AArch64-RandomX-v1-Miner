@@ -19,7 +19,7 @@
 *   **Microarchitectural Tuning (Cortex-A53 focus):**
     *   **Emitter Lookahead Scheduler:** Conservative JIT instruction reordering to hide long-latency
         multiply stalls on this in-order core — measured +0.23% IPC / -0.04% cycles, `taskset`-pinned
-        (`PLAN.md` Phase 6 item 12).
+        (see [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) item 12).
     *   **PGO tooling available, measured null on current code:** the `devbox_pgo_build` pipeline
         (GENERATE→train→USE) works end-to-end, but profile-guided optimization has not produced a
         measurable win on this codebase in either of two independent, pinned A/B measurements —
@@ -120,3 +120,24 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
+
+---
+
+## 📚 Documentation
+
+| Doc | What it's for |
+|---|---|
+| [`PLAN.md`](PLAN.md) | Live master plan — genuinely open work only. Start here for "what's next." |
+| [`ROADMAP.md`](ROADMAP.md) | Status tracker — completed/remaining item tables, hardware baseline. |
+| [`NEXT_STEPS.md`](NEXT_STEPS.md) | Short-list actionable view of the current phase. |
+| [`changelogs.md`](changelogs.md) | Chronological, dated record of every change and why it was made. |
+| [`docs/audits/`](docs/audits/) | Correctness, security, and performance audits (internal and third-party). |
+| [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
+| [`docs/plans/`](docs/plans/) | Forward-looking performance plans, including [future ideas](docs/plans/future-performance-ideas-20260725.md) if performance work resumes. |
+| [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
+| [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives ([Phases 1–5](docs/archived/plan_completed_phases_1-5.md), [Phase 6](docs/archived/plan_phase6_completed.md)) and old plans. |
+
+`PLAN.md` used to carry the full narrative for every completed phase inline; once a phase's
+narrative grows past a few hundred lines it gets split into `docs/archived/`, keeping `PLAN.md`
+itself focused on what's actually still open. Read `PLAN.md` for what's open, the archives for
+the full why-and-how behind everything already shipped.
