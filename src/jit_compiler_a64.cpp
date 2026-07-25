@@ -217,6 +217,323 @@ void JitCompilerA64::emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_
 	}
 }
 
+// ── Emitter lookahead scheduler (PLAN.md Phase 6 item 12/L1, 2026-07-25) ──
+//
+// Goal: reorder VM-instruction *emission* order (never their computed
+// results) to fill the stall right after a long-latency multiply
+// (IMUL_R/IMUL_RCP/IMULH_R/ISMULH_R -- item 14's own `perf`-measured
+// dominant cost, >35% of all mining cycles combined, not a guess) with
+// independent work, instead of letting the very next instruction stall
+// on it uselessly. Deliberately narrow in scope (single adjacent-pair
+// swaps, not a general list scheduler) to keep the correctness argument
+// tractable for consensus-critical code.
+//
+// Correctness constraints, in order of subtlety:
+//
+// 1. Register/memory hazards: a swap of two VM instructions is only safe
+//    if there's no RAW/WAR/WAW dependency between them on any register
+//    they touch (across the int r[], float f[], and float e[] register
+//    files independently), and not if either is a memory op (scratchpad
+//    addresses are dynamic/unknown at compile time, so ANY two memory
+//    ops are conservatively treated as potentially aliasing -- never
+//    reordered relative to each other, matching the plan's own rule).
+//    computeFootprint()/hasHazard() below implement this, deliberately
+//    over-approximating register reads where a per-instance src==dst
+//    substitution (see vm.cpp's compile_alu_reg) would otherwise reduce
+//    a dependency -- a false "this is a hazard" only forgoes a
+//    reordering opportunity, never causes an incorrect reorder.
+//
+// 2. CBRANCH/CFROUND are hard scheduling barriers: nothing may be
+//    reordered across either, in either direction. CFROUND changes the
+//    FP rounding mode used by every subsequent FP op (implicit global
+//    state); CBRANCH's own dst/src semantics are handled by (3) below.
+//
+// 3. The CBRANCH "anchor" hazard -- the one that isn't obvious from a
+//    simple data-dependency reading. CBRANCH doesn't just branch: per
+//    RandomX spec (and this codebase's reg_changed_offset/
+//    register_usage_ mechanism, see vm.cpp h_CBRANCH and
+//    jit_compiler_a64.cpp h_CBRANCH), it jumps *backward* to the code
+//    position of the last instruction that wrote its target register,
+//    and everything between that position and the branch is
+//    *re-executed* on every taken iteration -- a real loop in the
+//    generated code, not a conditional skip. The interpreter's loop body
+//    is the *index range* [last-writer-index, branch-index] in original
+//    program order, always, regardless of any JIT-side reordering.
+//    If a swap moved some instruction X from *after* that last-writer
+//    instruction W to *before* it, X would end up *outside* the JIT's
+//    physical loop body (only W's position and everything after it are
+//    inside), executing once instead of being re-executed each
+//    iteration the interpreter would re-execute it -- a silent
+//    byte-level divergence between JIT and interpreter output for that
+//    specific program shape, undetectable except by running exactly the
+//    right seed. This is why W (the "anchor") must never have its
+//    position perturbed relative to its neighbors within the domain: the
+//    fix is to precompute, for each CBRANCH, which single instruction is
+//    its anchor (a plain backward scan for the last writer of its target
+//    register within the same reset domain -- CBRANCH resets tracking
+//    for *all* registers when it executes, so no anchor search ever
+//    needs to cross an earlier CBRANCH; confirmed by both vm.cpp's
+//    std::fill(register_usage_, -1) once at program-compile start and
+//    every CBRANCH's own for-loop resetting all 8 afterward) and simply
+//    never swap either half of a candidate pair against that anchor
+//    index.
+//
+// 4. The src==dst shared-physical-scratch-register hazard -- found by the
+//    stress test below, not anticipated by design. Several opcode
+//    handlers (h_ISUB_R, h_IMUL_R, h_IXOR_R, h_IROL_R, and transitively
+//    anything routing through emitAddImmediate's large-immediate path or
+//    emitMovImmediate) special-case `src==dst` by materializing the
+//    instruction's compile-time immediate into a shared physical scratch
+//    register (x20) instead of using the VM register file. This is
+//    *invisible* to the register/memory hazard model above, which only
+//    tracks the 8 VM logical registers -- x20 is a physical ARM64
+//    register outside that space entirely. A concrete failure was
+//    isolated by bisection (binary-searching how many swaps could fire
+//    globally before a stress-test hash diverged, down to one exact
+//    swap) and confirmed by a targeted before/after test: whenever the
+//    instruction moved into the "R" (or "Q") position of a swap has
+//    src==dst, excluding it from the swap eliminates the divergence.
+//    The precise byte-level mechanism wasn't fully traced (the write and
+//    read of x20 are adjacent within one handler's own emission, so the
+//    hazard isn't the simple "two handlers race on x20" story it first
+//    looks like) -- given the failure mode is a silent wrong hash, the
+//    empirically-validated fix (never move an instruction with
+//    src==dst) was adopted over a theory that wasn't fully nailed down.
+//    Applies to Q and R (the two instructions whose relative order
+//    actually changes); P never moves, so P having src==dst is left
+//    unrestricted and is covered by the stress test below regardless.
+//
+// Verified with a dedicated large-N-random-seed JIT/interpreter
+// differential stress test (tests/test_jit_scheduler_stress.cpp), not
+// just the existing 16-seed test_jit_equivalence -- the failure mode
+// here is silent wrong output for specific rare program shapes, which a
+// small fixed seed corpus has no particular reason to hit. This is how
+// constraint 4 above was actually found: the stress test failed, was
+// bisected down to a single swap via an internal debug build (not
+// shipped), and root-caused from there.
+
+namespace {
+
+struct InstrFootprint {
+	std::uint8_t int_read = 0, int_write = 0;   // bit i = register r[i]
+	std::uint8_t f_read = 0, f_write = 0;       // bit i = register f[i]
+	std::uint8_t e_read = 0, e_write = 0;       // bit i = register e[i]
+	bool is_memory_op = false;
+	bool is_barrier = false;   // CBRANCH or CFROUND -- no reordering across
+	bool is_cbranch = false;   // specifically CBRANCH -- domain boundary
+	bool is_long_latency = false; // IMUL_R / IMUL_RCP / IMULH_R / ISMULH_R
+};
+
+InstrFootprint computeFootprint(const Instruction& instr, InstructionType type) {
+	InstrFootprint fp;
+	const std::uint8_t dst8 = instr.dst;   // already normalized %8 by caller
+	const std::uint8_t src8 = instr.src;   // already normalized %8 by caller
+	const std::uint8_t dst4 = dst8 % 4;
+
+	switch (type) {
+	case InstructionType::IADD_RS:
+	case InstructionType::ISUB_R:
+	case InstructionType::IMUL_R:
+	case InstructionType::IMULH_R:
+	case InstructionType::ISMULH_R:
+	case InstructionType::IXOR_R:
+	case InstructionType::IROR_R:
+	case InstructionType::IROL_R:
+		fp.int_read = static_cast<std::uint8_t>((1u << dst8) | (1u << src8));
+		fp.int_write = static_cast<std::uint8_t>(1u << dst8);
+		fp.is_long_latency = (type == InstructionType::IMUL_R ||
+		                      type == InstructionType::IMULH_R ||
+		                      type == InstructionType::ISMULH_R);
+		break;
+	case InstructionType::IADD_M:
+	case InstructionType::ISUB_M:
+	case InstructionType::IMUL_M:
+	case InstructionType::IMULH_M:
+	case InstructionType::ISMULH_M:
+	case InstructionType::IXOR_M:
+		fp.int_read = static_cast<std::uint8_t>((1u << dst8) | (1u << src8));
+		fp.int_write = static_cast<std::uint8_t>(1u << dst8);
+		fp.is_memory_op = true;
+		break;
+	case InstructionType::IMUL_RCP:
+		// No src register read at all: the divisor is a compile-time
+		// immediate (instr.getImm32()), not derived from instr.src --
+		// see h_IMUL_RCP in both vm.cpp and this file.
+		fp.int_read = static_cast<std::uint8_t>(1u << dst8);
+		fp.int_write = static_cast<std::uint8_t>(1u << dst8);
+		fp.is_long_latency = true;
+		break;
+	case InstructionType::INEG_R:
+		fp.int_read = static_cast<std::uint8_t>(1u << dst8);
+		fp.int_write = static_cast<std::uint8_t>(1u << dst8);
+		break;
+	case InstructionType::ISWAP_R:
+		// Conservatively read+write both dst and src, even though
+		// src==dst is a runtime NOP (h_ISWAP_R) -- see the
+		// over-approximation note above.
+		fp.int_read = static_cast<std::uint8_t>((1u << dst8) | (1u << src8));
+		fp.int_write = static_cast<std::uint8_t>((1u << dst8) | (1u << src8));
+		break;
+	case InstructionType::FSWAP_R:
+		// dst%8 (not %4!) selects F[0..3] or E[0..3] -- matches h_FSWAP_R
+		// exactly (both vm.cpp's and this file's).
+		if (dst8 < 4) { fp.f_read = fp.f_write = static_cast<std::uint8_t>(1u << dst8); }
+		else          { fp.e_read = fp.e_write = static_cast<std::uint8_t>(1u << (dst8 - 4)); }
+		break;
+	case InstructionType::FADD_R:
+	case InstructionType::FSUB_R:
+	case InstructionType::FSCAL_R:
+		// src (for FADD_R/FSUB_R) selects an A-group register -- a
+		// read-only per-program constant that no instruction ever
+		// writes, so it can never hazard and isn't tracked.
+		fp.f_read = fp.f_write = static_cast<std::uint8_t>(1u << dst4);
+		break;
+	case InstructionType::FMUL_R:
+	case InstructionType::FSQRT_R:
+		fp.e_read = fp.e_write = static_cast<std::uint8_t>(1u << dst4);
+		break;
+	case InstructionType::FADD_M:
+	case InstructionType::FSUB_M:
+		fp.f_read = fp.f_write = static_cast<std::uint8_t>(1u << dst4);
+		fp.int_read = static_cast<std::uint8_t>(1u << src8); // address register
+		fp.is_memory_op = true;
+		break;
+	case InstructionType::FDIV_M:
+		fp.e_read = fp.e_write = static_cast<std::uint8_t>(1u << dst4);
+		fp.int_read = static_cast<std::uint8_t>(1u << src8);
+		fp.is_memory_op = true;
+		break;
+	case InstructionType::CBRANCH:
+		fp.int_read = fp.int_write = static_cast<std::uint8_t>(1u << dst8);
+		fp.is_barrier = true;
+		fp.is_cbranch = true;
+		break;
+	case InstructionType::CFROUND:
+		fp.int_read = static_cast<std::uint8_t>(1u << src8);
+		fp.is_barrier = true;
+		break;
+	case InstructionType::ISTORE:
+		// Writes scratchpad memory, not a register -- reads dst (address)
+		// and src (value to store) as int registers.
+		fp.int_read = static_cast<std::uint8_t>((1u << dst8) | (1u << src8));
+		fp.is_memory_op = true;
+		break;
+	case InstructionType::NOP:
+	default:
+		break;
+	}
+	return fp;
+}
+
+bool hasHazard(const InstrFootprint& a, const InstrFootprint& b) {
+	if (a.is_barrier || b.is_barrier) return true;
+	if (a.is_memory_op && b.is_memory_op) return true;
+	if ((a.int_write & b.int_read) || (a.int_read & b.int_write) || (a.int_write & b.int_write)) return true;
+	if ((a.f_write & b.f_read) || (a.f_read & b.f_write) || (a.f_write & b.f_write)) return true;
+	if ((a.e_write & b.e_read) || (a.e_read & b.e_write) || (a.e_write & b.e_write)) return true;
+	return false;
+}
+
+} // namespace
+
+InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
+	const InstructionGeneratorA64 h = engine[opcode];
+	if (h == &JitCompilerA64::h_IADD_RS) return InstructionType::IADD_RS;
+	if (h == &JitCompilerA64::h_IADD_M) return InstructionType::IADD_M;
+	if (h == &JitCompilerA64::h_ISUB_R) return InstructionType::ISUB_R;
+	if (h == &JitCompilerA64::h_ISUB_M) return InstructionType::ISUB_M;
+	if (h == &JitCompilerA64::h_IMUL_R) return InstructionType::IMUL_R;
+	if (h == &JitCompilerA64::h_IMUL_M) return InstructionType::IMUL_M;
+	if (h == &JitCompilerA64::h_IMULH_R) return InstructionType::IMULH_R;
+	if (h == &JitCompilerA64::h_IMULH_M) return InstructionType::IMULH_M;
+	if (h == &JitCompilerA64::h_ISMULH_R) return InstructionType::ISMULH_R;
+	if (h == &JitCompilerA64::h_ISMULH_M) return InstructionType::ISMULH_M;
+	if (h == &JitCompilerA64::h_IMUL_RCP) return InstructionType::IMUL_RCP;
+	if (h == &JitCompilerA64::h_INEG_R) return InstructionType::INEG_R;
+	if (h == &JitCompilerA64::h_IXOR_R) return InstructionType::IXOR_R;
+	if (h == &JitCompilerA64::h_IXOR_M) return InstructionType::IXOR_M;
+	if (h == &JitCompilerA64::h_IROR_R) return InstructionType::IROR_R;
+	if (h == &JitCompilerA64::h_IROL_R) return InstructionType::IROL_R;
+	if (h == &JitCompilerA64::h_ISWAP_R) return InstructionType::ISWAP_R;
+	if (h == &JitCompilerA64::h_FSWAP_R) return InstructionType::FSWAP_R;
+	if (h == &JitCompilerA64::h_FADD_R) return InstructionType::FADD_R;
+	if (h == &JitCompilerA64::h_FADD_M) return InstructionType::FADD_M;
+	if (h == &JitCompilerA64::h_FSUB_R) return InstructionType::FSUB_R;
+	if (h == &JitCompilerA64::h_FSUB_M) return InstructionType::FSUB_M;
+	if (h == &JitCompilerA64::h_FSCAL_R) return InstructionType::FSCAL_R;
+	if (h == &JitCompilerA64::h_FMUL_R) return InstructionType::FMUL_R;
+	if (h == &JitCompilerA64::h_FDIV_M) return InstructionType::FDIV_M;
+	if (h == &JitCompilerA64::h_FSQRT_R) return InstructionType::FSQRT_R;
+	if (h == &JitCompilerA64::h_CBRANCH) return InstructionType::CBRANCH;
+	if (h == &JitCompilerA64::h_CFROUND) return InstructionType::CFROUND;
+	if (h == &JitCompilerA64::h_ISTORE) return InstructionType::ISTORE;
+	return InstructionType::NOP;
+}
+
+std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t size) const {
+	std::vector<InstrFootprint> fp(size);
+	for (uint32_t i = 0; i < size; ++i) {
+		const Instruction& instr = program(i);
+		fp[i] = computeFootprint(instr, resolveInstructionType(instr.opcode));
+	}
+
+	// Per-domain CBRANCH anchors (see constraint 3 above). A domain is a
+	// CBRANCH-to-CBRANCH range (CBRANCH resets tracking for all 8
+	// registers, so no anchor search ever needs to cross one).
+	std::vector<bool> is_anchor(size, false);
+	{
+		uint32_t domain_start = 0;
+		for (uint32_t i = 0; i < size; ++i) {
+			if (fp[i].is_cbranch) {
+				const std::uint8_t creg = program(i).dst;
+				for (uint32_t j = i; j-- > domain_start; ) {
+					if (fp[j].int_write & (1u << creg)) {
+						is_anchor[j] = true;
+						break;
+					}
+				}
+				domain_start = i + 1;
+			}
+		}
+	}
+
+	// Greedy single-swap scheduling. At each long-latency instruction P,
+	// if the very next instruction Q would stall on P anyway, and the
+	// instruction after that (R) is independent of both P and Q, and
+	// neither Q nor R is a domain anchor or has src==dst (constraint 4),
+	// emit P, R, Q instead of P, Q, R -- R fills the slot that would have
+	// stalled, Q (which needed to wait regardless) moves one slot later
+	// where it no longer costs anything extra.
+	std::vector<uint32_t> order;
+	order.reserve(size);
+	uint32_t i = 0;
+	while (i < size) {
+		if (fp[i].is_barrier) {
+			order.push_back(i);
+			++i;
+			continue;
+		}
+		const bool q_src_eq_dst = i + 1 < size && program(i + 1).src == program(i + 1).dst;
+		const bool r_src_eq_dst = i + 2 < size && program(i + 2).src == program(i + 2).dst;
+		if (fp[i].is_long_latency && i + 2 < size &&
+		    !fp[i + 1].is_barrier && !fp[i + 2].is_barrier &&
+		    !is_anchor[i + 1] && !is_anchor[i + 2] &&
+		    !q_src_eq_dst && !r_src_eq_dst &&
+		    hasHazard(fp[i], fp[i + 1]) &&
+		    !hasHazard(fp[i], fp[i + 2]) &&
+		    !hasHazard(fp[i + 1], fp[i + 2])) {
+			order.push_back(i);
+			order.push_back(i + 2);
+			order.push_back(i + 1);
+			i += 3;
+		} else {
+			order.push_back(i);
+			++i;
+		}
+	}
+	return order;
+}
+
 void JitCompilerA64::emitPrologueMix(Program& program, uint32_t& codePos) {
 	codePos = PrologueSize;
 	literalPos = ImulRcpLiteralsEnd;
@@ -225,11 +542,23 @@ void JitCompilerA64::emitPrologueMix(Program& program, uint32_t& codePos) {
 	for (uint32_t i = 0; i < RegistersCount; ++i)
 		reg_changed_offset[i] = codePos;
 
-	for (uint32_t i = 0; i < program.getSize(flags); ++i)
-	{
+	const uint32_t size = static_cast<uint32_t>(program.getSize(flags));
+
+	// Normalize dst/src to register-file range first, as a separate pass
+	// (order-independent, so safe to do before scheduling) -- matches
+	// what the original single-pass loop did inline for every
+	// instruction before its handler ran.
+	for (uint32_t i = 0; i < size; ++i) {
 		Instruction& instr = program(i);
 		instr.src %= RegistersCount;
 		instr.dst %= RegistersCount;
+	}
+
+	const std::vector<uint32_t> emit_order = scheduleProgram(program, size);
+
+	for (uint32_t idx : emit_order)
+	{
+		Instruction& instr = program(idx);
 		ARMRX_ASSERT(engine[instr.opcode] != nullptr, "null JIT handler for opcode");
 		const uint32_t pos_before = codePos;
 		(this->*engine[instr.opcode])(instr, codePos);

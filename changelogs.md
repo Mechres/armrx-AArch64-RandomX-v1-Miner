@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-07-25 — Emitter Lookahead Scheduler (PLAN.md Phase 6 Item 12): Implemented, Correctness-Verified
+
+Direct follow-on from item 14's `perf`-correlation finding (`IMUL_R`/`IMULH_R`/`ISMULH_R`/`IMUL_RCP`
+dominate mining cycles, >35% combined) — a conservative 2-3-instruction emitter lookahead scheduler
+in `src/jit_compiler_a64.cpp` (`scheduleProgram()`) reorders VM-instruction *emission* order (never
+their computed results) to fill the in-order Cortex-A53's stall after a long-latency multiply with
+independent work.
+
+**Correctness design** (full comment in `jit_compiler_a64.cpp` above `scheduleProgram()`):
+RAW/WAR/WAW hazard analysis across the int/f/e register files independently; CBRANCH/CFROUND as
+hard barriers; a CBRANCH "anchor" constraint (CBRANCH's generated code is a real backward-jumping
+loop over a *physical code range*, so the last writer of its target register must never move
+relative to its neighbors, unlike the interpreter's index-range loop body); and a fourth hazard
+found only empirically by the stress test below — several ALU handlers (`h_ISUB_R`, `h_IMUL_R`,
+`h_IXOR_R`, `h_IROL_R`) materialize a compile-time immediate into a shared physical scratch register
+(x20) when the VM instruction's `src==dst`, invisible to a hazard model that only tracks the 8
+VM-logical registers. Root-caused via bisection (binary-searching a global swap-count budget down to
+one exact failing swap across 8 chained programs) and fixed by excluding any `src==dst` instruction
+from a swap's two moving positions.
+
+**Verification**: a new `tests/test_jit_scheduler_stress.cpp` — 450 (seed, input) JIT-vs-interpreter
+differential pairs across 3 separate Argon2 caches, deliberately larger than the standard 16-seed
+`test_jit_equivalence` suite, since the failure mode is a silent wrong hash for rare program shapes
+that a small fixed corpus has no particular reason to hit. First run caught the `src==dst` bug
+immediately; after the fix, all 450 pairs byte-identical. On-device runtime is genuinely ~2069s
+(interpreter-dominated, ~2.6s/hash vs. JIT's ~0.23s/hash) — the initial 1200s `ctest` TIMEOUT budget
+was too tight and produced a spurious timeout with zero mismatches reported before being killed, not
+a hang; raised to 2400s after measuring the real per-hash cost directly. Full existing suite
+(`armrx_tests`, `test_mining`, `test_jit_encodings`, `test_jit_determinism`, `test_jit_equivalence`)
+also green on-device.
+
+**Not yet done**: actual performance measurement (hashrate / `perf stat` cycles). Correctness was
+prioritized first per this project's own standing rule (KATs green before any benchmark) and because
+the failure mode here is silent wrong output, not a crash. See `PLAN.md` Phase 6 item 12.
+
 ## 2026-07-25 — Dual External Audit Reviewed, Verified, Acted On
 
 User supplied two independent full-codebase audits (`docs/audits/PROJECT_AUDIT_REPORT_Gemini_25072026.md`,

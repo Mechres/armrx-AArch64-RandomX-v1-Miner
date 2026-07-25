@@ -83,6 +83,23 @@ namespace armrx {
 		bool rwx_ = false;
 		void emitPrologueMix(Program& program, uint32_t& codePos);
 		void emitSpMix2(ProgramConfiguration& config, uint32_t& codePos);
+
+		// PLAN.md Phase 6 item 12/L1 (2026-07-25): conservative emitter
+		// lookahead scheduler -- reorders VM-instruction *emission* order
+		// (never their semantics) to fill the stall after a long-latency
+		// multiply with independent work, targeting IMUL_R/IMUL_RCP/
+		// IMULH_R/ISMULH_R specifically (item 14's own `perf`-measured
+		// dominant cost, not a guess). Full hazard/correctness design
+		// (including the CBRANCH loop-body "anchor" argument -- CBRANCH
+		// jumps back to the code position of the last writer of its
+		// target register, and that instruction's *position* must never
+		// move relative to what follows it, or the JIT's generated loop
+		// would re-execute a different instruction set than the
+		// interpreter's index-based loop) is in jit_compiler_a64.cpp
+		// above scheduleProgram()'s definition.
+		InstructionType resolveInstructionType(uint8_t opcode) const;
+		std::vector<uint32_t> scheduleProgram(Program& program, uint32_t size) const;
+
 		static InstructionGeneratorA64 engine[256];
 		uint32_t reg_changed_offset[8];
 		uint8_t* code;

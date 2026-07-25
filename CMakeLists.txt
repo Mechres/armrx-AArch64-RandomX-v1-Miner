@@ -251,6 +251,19 @@ if(ARMRX_BUILD_TESTS)
     # so a future CBRANCH regression fails fast instead of hanging forever.
     set_tests_properties(test_jit_equivalence PROPERTIES TIMEOUT 600)
 
+    # Large-N differential stress test for the emitter lookahead scheduler
+    # (PLAN.md Phase 6 item 12/L1) — see the test file's own header comment
+    # for why 16 fixed seeds aren't enough coverage for this specific change.
+    add_executable(test_jit_scheduler_stress tests/test_jit_scheduler_stress.cpp)
+    target_link_libraries(test_jit_scheduler_stress PRIVATE armrx_core)
+    add_test(NAME test_jit_scheduler_stress COMMAND test_jit_scheduler_stress)
+    # Measured on-device (2026-07-25): ~7.2s/cache-init x3 + ~2.6s/hash-pair
+    # (interpreter-dominated) x450 pairs =~ 1290s -- the original 1200s budget
+    # was too tight and caused a spurious ctest TIMEOUT with zero hash
+    # mismatches reported, not a real hang. 2400s gives headroom for the
+    # device's documented thermal variance between runs.
+    set_tests_properties(test_jit_scheduler_stress PROPERTIES TIMEOUT 2400)
+
     # NEON vector-permute AES parity tests (PLAN.md Phase 5 / NEXT_STEPS.md §5a) — AArch64/NEON-
     # only, always exercises both encrypt_transform/decrypt_transform (scalar) and
     # encrypt_transform_neon/decrypt_transform_neon directly by name, independent of whether
@@ -314,6 +327,7 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
             set_property(TARGET test_jit_encodings PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_determinism PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_jit_equivalence PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+            set_property(TARGET test_jit_scheduler_stress PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
             set_property(TARGET test_aes_neon PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         endif()
     endif()
