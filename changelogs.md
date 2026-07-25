@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026-07-25 — PGO Re-Check After Scheduler Landing: Confirmed Null (and a Core-Pinning Near-Miss)
+
+Re-ran `devbox_pgo_build` (PLAN.md item 15) now that both scheduler commits changed the JIT's
+instruction mix meaningfully. First attempt (unpinned `bench_armrx --full-hash-only`, PGO vs.
+non-PGO) showed a misleading ~2x gap (4.47 vs. 2.24 H/s) that looked like a real PGO win — the
+user caught the likely cause before it was accepted: this device's two 4-core clusters run at
+different clock speeds (per the earlier "two L2 clusters" finding), and unpinned processes can
+land on either. Confirmed directly: the identical non-PGO binary alone gives 4.48 H/s on core 0
+and 2.24 H/s on core 4 — a 2x swing with zero code difference. Re-measured properly with
+`taskset -c 0` pinning both binaries to the same core: PGO 223570.61 μs / 4.47 H/s vs. non-PGO
+223203.66 μs / 4.48 H/s — identical within noise. **PGO remains a genuine null on this code
+shape**, confirming the original 2026-07-24 finding still holds after the scheduler work. Build
+reverted to the normal (non-PGO) configuration.
+
+Also caught along the way: `devbox_build(reconfigure=true)` alone is not sufficient to get back to
+a clean non-PGO build if the build directory still has leftover `.gcda` profile data from a prior
+PGO run — CMakeLists.txt auto-detects the profile data and stays in PGO-USE mode regardless of the
+flags passed, silently just relinking cached objects (zero recompilation). `clean=true` is required
+to actually get a clean baseline. Worth remembering for any future PGO A/B comparison on this
+project.
+
+**Methodology note, worth internalizing**: any `bench_armrx` wall-clock comparison on this device —
+not just `perf stat -p <pid>` A/B trials — must pin to a specific core. This generalizes item 12's
+own `taskset` lesson (originally learned for `perf stat` comparisons) to plain wall-clock
+benchmarking too.
+
 ## 2026-07-25 — Emitter Lookahead Scheduler Extended to Superscalar Path, Measured, Adopted
 
 Follow-on to the same day's earlier scheduler entry (below). First measured the main-program-only
