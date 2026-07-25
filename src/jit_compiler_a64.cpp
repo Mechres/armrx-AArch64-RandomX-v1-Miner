@@ -278,27 +278,55 @@ void JitCompilerA64::emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_
 //    never swap either half of a candidate pair against that anchor
 //    index.
 //
-// 4. The src==dst shared-physical-scratch-register hazard -- found by the
-//    stress test below, not anticipated by design. Several opcode
-//    handlers (h_ISUB_R, h_IMUL_R, h_IXOR_R, h_IROL_R, and transitively
-//    anything routing through emitAddImmediate's large-immediate path or
-//    emitMovImmediate) special-case `src==dst` by materializing the
-//    instruction's compile-time immediate into a shared physical scratch
-//    register (x20) instead of using the VM register file. This is
-//    *invisible* to the register/memory hazard model above, which only
-//    tracks the 8 VM logical registers -- x20 is a physical ARM64
-//    register outside that space entirely. A concrete failure was
-//    isolated by bisection (binary-searching how many swaps could fire
-//    globally before a stress-test hash diverged, down to one exact
-//    swap) and confirmed by a targeted before/after test: whenever the
-//    instruction moved into the "R" (or "Q") position of a swap has
-//    src==dst, excluding it from the swap eliminates the divergence.
-//    The precise byte-level mechanism wasn't fully traced (the write and
-//    read of x20 are adjacent within one handler's own emission, so the
-//    hazard isn't the simple "two handlers race on x20" story it first
-//    looks like) -- given the failure mode is a silent wrong hash, the
-//    empirically-validated fix (never move an instruction with
-//    src==dst) was adopted over a theory that wasn't fully nailed down.
+// 4. The src==dst swap exclusion -- found by the stress test below, not
+//    anticipated by design. Excluding any instruction with src==dst from
+//    the Q/R (moving) positions of a swap eliminates the divergence a
+//    bisection isolated to one exact swap. This much is empirically
+//    solid and independently re-verified: three independent reviews
+//    (2026-07-25, docs/audits/{emitter-scheduler-review,
+//    jit_scheduler_code_review_gemini,scheduler-review-2026-07-25}.md)
+//    all confirm no failure scenario exists in the shipped code with this
+//    exclusion in place.
+//
+//    An earlier version of this comment claimed the mechanism was a
+//    "shared physical scratch register (x20) invisible to the hazard
+//    model" -- that explanation does NOT hold up and is WRONG, per two of
+//    the three reviews (independently, with line citations): every
+//    src==dst handler that touches x20 (h_ISUB_R, h_IMUL_R, h_IXOR_R, and
+//    transitively emitAddImmediate/emitMovImmediate) writes and reads it
+//    back-to-back within its OWN emission, with no other instruction's
+//    code between the write and the read -- a swap reorders whole
+//    handlers, never splits one, so there is no observable cross-handler
+//    race on x20 regardless of emission order. h_IROL_R is not even an
+//    instance of the pattern: it uses x20 when src != dst (SUB+ROR), and
+//    takes a *different*, x20-free path (ROR_IMM, rotate by compile-time
+//    immediate) specifically when src == dst -- the exact opposite of
+//    what this comment used to claim. One of the three reviews (Gemini)
+//    restated the original (wrong) claim without checking it against
+//    h_IROL_R's actual code; the other two (independently) caught the
+//    discrepancy.
+//
+//    A further argument (from the review flagging this) is worth
+//    recording: computeFootprint() already gives src==dst instructions
+//    read=write=(1<<dst), identical to src!=dst -- so the ordinary hazard
+//    check already blocks any swap where a neighbor shares register dst.
+//    The src==dst exclusion can only ever change anything in the
+//    remaining case, where the src==dst instruction shares NO register
+//    with its neighbor -- and in that case the x20 story gives no
+//    hazard either, since x20 never survives past its own handler. So
+//    the MECHANISM behind the exclusion remains unresolved -- but its
+//    NECESSITY does not: the original bisection that led to this
+//    exclusion (see the git history for this file, 2026-07-25) isolated
+//    a real, concrete divergence to one exact swap whose R was
+//    ISUB_R(dst==src==7) -- a genuine src==dst instance, confirmed by
+//    reproducing the divergence with the exclusion disabled and the
+//    match with it enabled. That rules out "masks nothing real" for at
+//    least this case. What's still open is narrower than it first
+//    looks: whether every src==dst instance needs excluding, or only
+//    ones sharing this specific (still unidentified) trait with the
+//    original failing case -- a question for a future, carefully-built
+//    differential harness if this area is revisited, not resolved here.
+//
 //    Applies to Q and R (the two instructions whose relative order
 //    actually changes); P never moves, so P having src==dst is left
 //    unrestricted and is covered by the stress test below regardless.
@@ -567,7 +595,20 @@ InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
 	if (h == &JitCompilerA64::h_CBRANCH) return InstructionType::CBRANCH;
 	if (h == &JitCompilerA64::h_CFROUND) return InstructionType::CFROUND;
 	if (h == &JitCompilerA64::h_ISTORE) return InstructionType::ISTORE;
-	return InstructionType::NOP;
+	if (h == &JitCompilerA64::h_NOP) return InstructionType::NOP;
+
+	// Maintenance hazard flagged by independent review (2026-07-25,
+	// docs/audits/scheduler-review-2026-07-25.md #4): this if-chain and
+	// engine[256] (built from instruction_weights.hpp's INST_HANDLE macro)
+	// are not mechanically linked. A future opcode wired into engine[] but
+	// not added above would previously fall through to `return NOP`,
+	// giving computeFootprint() an all-zero (no-hazard) footprint for a
+	// REAL instruction -- silently permitting the scheduler to swap
+	// something unsafely across it. Fail loud (debug) and fail SAFE
+	// (release): CFROUND's footprint sets is_barrier=true, which blocks
+	// all scheduling across this position rather than permitting it.
+	ARMRX_ASSERT(false, "resolveInstructionType: unrecognized JIT handler -- add it above");
+	return InstructionType::CFROUND;
 }
 
 std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t size) const {
@@ -966,6 +1007,17 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	memcpy(code + codePos, p1, p2 - p1);
 	codePos += p2 - p1;
 
+	// Pinned at the cap (not 0, like emitPrologueMix's reset) so
+	// emitMovImmediate's `num32bitLiterals < 64` branch (the shared NEON
+	// literal-pool path) is never taken here -- IXOR_C7..9/IADD_C7..9's
+	// large-immediate loads always fall through to the self-contained
+	// MOVZ/MOVK path instead, which is what makes scheduleSuperscalarProgram()
+	// safe under reordering without needing to reason about pool-slot
+	// ordering for this opcode class (flagged by independent review,
+	// 2026-07-25, docs/audits/scheduler-review-2026-07-25.md #4). If this
+	// ever regresses to 0, superscalar immediate loads would silently
+	// start using the shared pool and become order-sensitive under
+	// scheduling, the same class of bug as the main-path IMUL_RCP hazard.
 	num32bitLiterals = 64;
 	constexpr uint32_t tmp_reg = 12;
 
