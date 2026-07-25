@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-07-25 — Dual External Audit Reviewed, Verified, Acted On
+
+User supplied two independent full-codebase audits (`docs/audits/PROJECT_AUDIT_REPORT_Gemini_25072026.md`,
+`docs/audits/PROJECT_AUDIT_REPORT_Hermes_25072026.md`). Per this project's standing discipline (verify
+external claims before trusting them — see the LTO/fortify-headers misattribution and the
+31%-branch-miss myth from earlier sessions), every concrete claim was checked against the
+actual source before any fix landed, rather than implemented on either report's say-so.
+
+**Fixed, all confirmed real by direct code inspection:**
+- `vm.cpp` `dataset_read()`: `ARMRX_ASSERT`'s documented release-build semantics (log-and-
+  continue) meant its OOB bounds check was a no-op in the exact build mode that ships, with
+  the unchecked read executing immediately after. Verified the address math
+  (`dataset_offset_ + (ma_ & 0x7fffffc0)`) is spec-guaranteed in-bounds today — latent, not
+  currently exploitable — but added a targeted early-return at this one call site as
+  defense-in-depth, without changing `ARMRX_ASSERT`'s general (intentional) semantics
+  elsewhere.
+- `mining_engine.cpp` `AffinityMode::BigOnly`: hardcoded `thread_id % 4`, ignoring
+  `core_order_` (the already-detected, frequency-sorted topology) one branch away. New
+  `count_top_frequency_cores()` derives the real big-cluster size from the same
+  `cpuinfo_max_freq` data; `BigOnly` now pins to `core_order_[thread_id % big_core_count_]`.
+- `worker_hashes_`: confirmed densely-packed `std::atomic<uint64_t>[]`, up to 8 workers per
+  64-byte cache line. New `alignas(64)` `PaddedCounter` wrapper fixes it for the whole array,
+  not just the first element (alignas on a struct pads `sizeof` up to the alignment too).
+- `jit_compiler_a64.cpp` `h_IMUL_M`: stale `// sub` comment next to an `ARMV8A::MUL` emit
+  (copy-paste artifact, no functional bug, real maintenance trap). Comment corrected.
+
+**Checked and refuted, saved from being acted on blindly:**
+- Gemini's FPCR-leakage claim contradicted Hermes's own assessment of the identical code.
+  Read `randomx_calculate_hash()` directly — straight-line, no early-return/exception path
+  between `fegetenv`/`fesetenv` exists. Hermes was right.
+- Gemini's "missing `isb` after `__builtin___clear_cache`" — GCC/Clang's AArch64
+  implementation of that builtin already emits the full `dc cvau`/`ic ivau`/`dsb ish`/`isb`
+  sequence; that's the entire point of using the builtin over hand-rolled asm. Very likely a
+  false positive.
+- Gemini's `munmap`-vs-`freePagedMemory` mismatch is real as an abstraction nit but
+  functionally identical on Linux (`freePagedMemory` is a literal null-checked `munmap`
+  there), and this project only targets Linux/AArch64. Correctly low priority, not fixed.
+
+**Deferred, needs measurement not blind adoption** (per this phase's own protocol):
+`-mtune=cortex-a53` default, interpreted-path prefetch, SIGSEGV/SIGBUS JIT-fault handler,
+RWX-JIT reconsideration (already a known Phase-4 tradeoff, not a miss), windowed hash-rate
+reporting, oversubscription warnings, BOLT.
+
+Verified: local x86 full suite 7/7, on-device targeted JIT/correctness suite 5/5, both 100%.
+Build warning count unchanged from baseline (56). See `PLAN.md` Phase 6 item 17.
+
 ## 2026-07-25 — Item 14 Follow-up: `IMUL_RCP` Literal-Load Elimination Tried, Measured, Reverted
 
 Direct follow-on from the correlation script's finding (below): `IMUL_R`/`IMUL_RCP` are the

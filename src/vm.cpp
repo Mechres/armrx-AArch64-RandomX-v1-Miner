@@ -712,6 +712,16 @@ void VirtualMachine::execute_bytecode() {
 void VirtualMachine::dataset_read(std::uint64_t address, std::uint64_t (&r)[8]) {
     if (is_fast_mode()) {
         ARMRX_ASSERT(address + 64 <= dataset_.size(), "dataset_read OOB");
+        // ARMRX_ASSERT only logs in release builds (NDEBUG) and does not
+        // stop execution -- an explicit check is needed here too, since
+        // falling through would read past the mapped dataset. `address` is
+        // spec-guaranteed in-bounds today by its exact mask/modulo
+        // construction in run() (readPtr = dataset_offset_ + (ma_ &
+        // 0x7fffffc0), both bounded so address+64 <= dataset_.size()
+        // always holds), so this is defense-in-depth against a future
+        // regression in that guarantee, not a currently-live bug
+        // (audit finding, 2026-07-25).
+        if (address + 64 > dataset_.size()) return;
         const std::byte* datasetLine = dataset_.data() + address;
         for (int i = 0; i < 8; ++i) {
             r[i] ^= load64(datasetLine + 8 * i);

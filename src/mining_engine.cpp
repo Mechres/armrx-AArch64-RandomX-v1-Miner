@@ -110,11 +110,46 @@ std::vector<unsigned int> detect_core_order() {
 
 #endif // ARMRX_HAVE_HWLOC
 
+// Counts how many cores at the front of `order` (already sorted by
+// cpuinfo_max_freq descending) share the maximum frequency -- the size of
+// the "big" cluster on a big.LITTLE-shaped topology. AffinityMode::BigOnly
+// previously hardcoded "cores 0-3 are big" instead of using this already-
+// detected ordering (audit finding, 2026-07-25) -- wrong on any topology
+// where the big cluster isn't cores 0-3.
+unsigned int count_top_frequency_cores(const std::vector<unsigned int>& order) {
+    if (order.empty()) return 1;
+
+    std::vector<unsigned long> freqs;
+    freqs.reserve(order.size());
+    unsigned long max_freq = 0;
+    for (unsigned int cpu : order) {
+        std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/cpufreq/cpuinfo_max_freq";
+        std::ifstream file(path);
+        unsigned long freq = 0;
+        file >> freq;
+        freqs.push_back(freq);
+        max_freq = std::max(max_freq, freq);
+    }
+
+    if (max_freq == 0) {
+        // No frequency info available -- can't distinguish clusters, treat
+        // everything as one cluster rather than guessing a fixed count.
+        return static_cast<unsigned int>(order.size());
+    }
+
+    unsigned int count = 0;
+    for (unsigned long freq : freqs) {
+        if (freq == max_freq) ++count;
+    }
+    return count > 0 ? count : static_cast<unsigned int>(order.size());
+}
+
 } // namespace
 
 MiningEngine::MiningEngine(RandomXMode mode, unsigned int num_threads)
     : mode_(mode), num_threads_(num_threads) {
     core_order_ = detect_core_order();
+    big_core_count_ = count_top_frequency_cores(core_order_);
 }
 
 MiningEngine::~MiningEngine() {
@@ -128,7 +163,7 @@ void MiningEngine::start(ShareCallback callback) {
     share_callback_ = std::move(callback);
     running_.store(true);
     total_hashes_.store(0);
-    worker_hashes_ = std::make_unique<std::atomic<std::uint64_t>[]>(num_threads_);
+    worker_hashes_ = std::make_unique<PaddedCounter[]>(num_threads_);
     num_workers_ = num_threads_;
     start_time_ = std::chrono::steady_clock::now();
 
@@ -246,7 +281,7 @@ double MiningEngine::worker_hash_rate(unsigned int thread_id) const {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration<double>(now - start_time_).count();
     if (elapsed <= 0.001) return 0.0;
-    return static_cast<double>(worker_hashes_[thread_id].load(std::memory_order_relaxed)) / elapsed;
+    return static_cast<double>(worker_hashes_[thread_id].value.load(std::memory_order_relaxed)) / elapsed;
 }
 
 double MiningEngine::hash_rate() const {
@@ -271,7 +306,7 @@ MiningEngine::HashSnapshot MiningEngine::snapshot() const {
     s.per_worker.resize(num_workers_);
     std::uint64_t sum = 0;
     for (unsigned i = 0; i < num_workers_; ++i) {
-        s.per_worker[i] = worker_hashes_[i].load(std::memory_order_relaxed);
+        s.per_worker[i] = worker_hashes_[i].value.load(std::memory_order_relaxed);
         sum += s.per_worker[i];
     }
     s.total = sum;
@@ -280,11 +315,14 @@ MiningEngine::HashSnapshot MiningEngine::snapshot() const {
 
 
 void MiningEngine::worker_loop(unsigned int thread_id) {
-    if (affinity_mode_ == AffinityMode::BigOnly) {
-        // Pin strictly to the big cores (0-3) on this topology
+    if (affinity_mode_ == AffinityMode::BigOnly && !core_order_.empty()) {
+        // Pin strictly to the detected big cluster (the highest
+        // cpuinfo_max_freq cores in core_order_), not a hardcoded "cores
+        // 0-3" assumption -- wrong on any topology where the big cluster
+        // isn't cores 0-3 (audit finding, 2026-07-25).
         cpu_set_t cpus{};
         CPU_ZERO(&cpus);
-        unsigned int cpu_id = thread_id % 4;
+        unsigned int cpu_id = core_order_[thread_id % big_core_count_];
         CPU_SET(static_cast<int>(cpu_id), &cpus);
         pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
     } else if (affinity_mode_ == AffinityMode::All) {
@@ -443,7 +481,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         constexpr std::uint64_t flush_interval = 64U;
         if (local_hashes >= flush_interval) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
-            worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
+            worker_hashes_[thread_id].value.fetch_add(local_hashes, std::memory_order_relaxed);
             local_hashes = 0;
 
 #ifdef ARMRX_JIT_PROFILE
@@ -458,7 +496,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     // Flush remaining
     if (local_hashes > 0) {
         total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
-        worker_hashes_[thread_id].fetch_add(local_hashes, std::memory_order_relaxed);
+        worker_hashes_[thread_id].value.fetch_add(local_hashes, std::memory_order_relaxed);
     }
 #ifdef ARMRX_JIT_PROFILE
     total_jit_compile_time_ns_.fetch_add(vm.get_jit_compile_time_ns(), std::memory_order_relaxed);

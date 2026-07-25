@@ -133,8 +133,17 @@ private:
 
     std::atomic<bool> running_{false};
     std::atomic<std::uint64_t> total_hashes_{0};
+
+    // Cache-line-padded so adjacent workers' counters never share a line --
+    // a densely-packed std::atomic<uint64_t>[] would put up to 8 workers'
+    // counters on one 64-byte line, causing RFO/false-sharing traffic on
+    // every fetch_add (audit finding, 2026-07-25). alignas(64) on the
+    // struct pads sizeof() up to 64 too, so this also holds for arrays.
+    struct alignas(64) PaddedCounter {
+        std::atomic<std::uint64_t> value{0};
+    };
     // Per-worker hash counters (C-style array to avoid std::atomic move issues)
-    std::unique_ptr<std::atomic<std::uint64_t>[]> worker_hashes_;
+    std::unique_ptr<PaddedCounter[]> worker_hashes_;
     unsigned int num_workers_{0};
     std::chrono::steady_clock::time_point start_time_;
 
@@ -181,6 +190,9 @@ private:
 
     // CPU core ordering: fastest cores first (big.LITTLE-aware)
     std::vector<unsigned int> core_order_;
+    // How many entries at the front of core_order_ share the max frequency
+    // (the "big" cluster size) -- used by AffinityMode::BigOnly.
+    unsigned int big_core_count_ = 1;
 
     std::vector<std::thread> workers_;
 };
