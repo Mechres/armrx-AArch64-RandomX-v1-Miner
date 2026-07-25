@@ -4,19 +4,23 @@
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-Phases 1–5, 6, and 7 (everything below except the "Phase 8" item) are **fully resolved** — see
-`docs/archived/plan_completed_phases_1-5.md`, `docs/archived/plan_phase6_completed.md`, and
-`docs/archived/plan_phase7_completed.md` for the full narrative, or the "Resolved" sections in
-this file for the short form. Genuinely open work now lives in `PLAN.md`'s **Phase 8**:
+Phases 1–8 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
+`docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`, and
+`docs/experiments/isolcpus-rt-priority-win.md` for the full narratives.
 
-*   [ ] `--rt-priority` + `isolcpus=`/`nohz_full=` — blocked on manual device access (see below).
-    **This is the only genuinely open item as of 2026-07-25 — performance work is closed out
-    for this session** (see `docs/plans/performance-plan-20260725.md` /
-    `docs/plans/experimental-performance-ideas-20260725.md` if resuming).
+*   [x] ~~`--rt-priority` + `isolcpus=`/`nohz_full=`~~ — **done 2026-07-25, a real ~14% win, the
+    biggest measured win in this project's history.** The user installed `setcap` and granted
+    device access (cmdline edit + reboot). `isolcpus=1-7 rcu_nocbs=1-7` gives a reproducible
+    ~28.4 H/s aggregate 8-worker hashrate vs. ~24.9 H/s without it. Mechanism: cores 4-7 stop
+    losing throughput to background OS work/interrupts once isolated; cores 0-3 unaffected
+    either way. `nohz_full=1-7` silently no-ops on this kernel (`CONFIG_NO_HZ_FULL` not set).
+    `--rt-priority`'s independent contribution is unconfirmed. This is an operational/deployment
+    recommendation (boot cmdline), not a code change. Full account, including two corrected false
+    starts, in `docs/experiments/isolcpus-rt-priority-win.md`.
 
-Phase 7's resolved items (Peephole JIT coalescing closed on evidence, the memory-op scheduler
-extension tried and reverted, `-frounding-math` added, the CBRANCH assert added-then-removed)
-are now in `docs/archived/plan_phase7_completed.md` — summary only, not repeated here.
+No genuinely open items remain as of 2026-07-25. If performance work resumes, see
+`docs/plans/performance-plan-20260725.md` (gated steps) or
+`docs/plans/experimental-performance-ideas-20260725.md` (speculative backlog).
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.

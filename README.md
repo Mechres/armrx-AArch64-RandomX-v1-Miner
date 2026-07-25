@@ -57,6 +57,9 @@ measure identically on current code).
 > [!TIP]
 > Pinned execution (`--workers=8` on physical cores) avoids OS scheduling overhead, yielding higher throughput and lower variance than unpinned runs. There is no lower-worker-count "free lunch" on this device — going from 8 down to fewer workers trades real throughput for lower heat/power, it does not recover the same hashrate at a lower core count.
 
+> [!TIP]
+> **Deployment tuning, not shown in the table above**: on asymmetric multi-cluster ARM SoCs like this one, adding `isolcpus=<N>-<N> rcu_nocbs=<N>-<N>` (covering every core except core 0) to the kernel boot cmdline measured a reproducible **~28.4 H/s (+14%)** on this device — the biggest win this project has found, bigger than any code change. It's a root-only, reboot-required OS setting, so it can't be baked into `armrx` itself; see [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) for the full measurement and mechanism (background OS work was stealing cycles from pinned workers on the weaker cluster; isolation stops it).
+
 ---
 
 ## 🚀 Quick Start

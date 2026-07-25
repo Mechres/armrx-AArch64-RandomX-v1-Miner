@@ -135,21 +135,39 @@ Summary:
 - **Same-day doc consolidation**: three overlapping future-performance planning docs were
   reconciled into two — see the pointer below.
 
-## Phase 8 — current (2026-07-25): open items
+## Completed — Phase 8 (2026-07-25): `isolcpus`/`rcu_nocbs` — a real ~14% win
 
-*Forward-looking performance work, if resumed, is planned in
-[`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) (gated,
-evidence-first steps against the one open quantified lead above) with a speculative backlog in
-[`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md)
-(ideas targeting other regions). Neither is scheduled/gated work in the sense the items below
-are — they're what to read first if "make armrx faster" becomes the priority again.*
+Full detail in **[`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md)**.
+The user installed `setcap` and granted device access (cmdline edit + reboot). Result: **the
+biggest measured win in this project's history** — every prior adopted change has been sub-1%.
 
-1. **`--rt-priority` + `isolcpus=`/`nohz_full=`** — **blocked on manual device access.**
-   `--rt-priority` currently falls back silently to the default scheduler (needs `setcap`,
-   which isn't installed and there's no passwordless `sudo`); `isolcpus=`/`nohz_full=` need a
-   kernel-cmdline edit + reboot, which needs explicit user sign-off regardless of privilege
-   availability. Per Phase 6 item 3's interconnect-arbitration finding, tempered expectations
-   either way: this is a hardware/interconnect effect, not scheduler-visible, so CPU isolation
-   was never going to touch the 6→8-worker degradation directly — it might help the
-   front-loaded memory-contention component marginally at best. Deferred until the user grants
-   device access directly.
+- **`isolcpus=1-7 rcu_nocbs=1-7`** (core 0 deliberately left for kernel housekeeping) gives a
+  reproducible **~28.4 H/s aggregate 8-worker steady-state hashrate vs. ~24.9 H/s without it**
+  (matches `README.md`'s independently-documented 24.95 H/s baseline closely) — **+14%**, measured
+  across 2 no-isolation rounds and 4 isolated rounds (3 of 4 tightly reproducible, 1 anomaly).
+- **Mechanism, not just a number**: the fast cluster (cores 0-3) is identical either way (4.26
+  H/s/worker). The entire effect is on the slow cluster (cores 4-7) — without isolation, 2-3 of
+  those 4 workers randomly get knocked to half rate (1.42 vs 2.84 H/s) each run, a different
+  subset each time — the signature of background OS work/interrupts stealing cycles from pinned
+  workers. With isolation, all four hit the full rate with zero variability. This is a
+  *different*, software-fixable mechanism than the hardware interconnect-arbitration effect
+  documented in Phase 6 (which still exists and still caps cluster 1's ceiling under contention).
+- **`nohz_full=1-7` silently no-ops** on this kernel — confirmed `CONFIG_NO_HZ_FULL` is not set.
+  Real, permanent finding for anyone deploying on this device/kernel combination.
+- **`--rt-priority`'s independent contribution is unconfirmed** — functionally engaged (`setcap
+  cap_sys_nice+ep`, no fallback warning), but every isolated round landed in the same ~28.4 H/s
+  range regardless of the flag. A `perf stat` attempt to get a low-noise reading hit a real,
+  unresolved tooling gotcha (near-zero cycle counts attaching to the full multi-threaded `armrx`
+  binary — correctly measured a sanity-check busy loop, so the issue is specific to this binary's
+  worker-thread attribution).
+- **Three false starts caught and corrected during this investigation** (see the experiment doc's
+  "false starts" section) — two stale historical baseline figures initially mis-compared against,
+  and an overconfident thermal-throttling attribution walked back after the user pushed back with
+  direct hardware knowledge. All three corrected before writing this up.
+- **Not yet explored, not blocking**: IRQ affinity tuning (`/proc/irq/*/smp_affinity`) as a
+  possible explanation for the one anomalous round; fixing the `perf stat` thread-attribution
+  gotcha for a real low-noise `--rt-priority` measurement.
+
+This is an **operational/deployment recommendation** (kernel boot cmdline), not a code change —
+it can't be shipped in `armrx` itself, but should be recommended to anyone deploying on similar
+asymmetric multi-cluster ARM hardware.

@@ -68,6 +68,12 @@
   8-worker pinned **24.95 H/s** (73.0% scaling efficiency vs. ideal linear — a smooth, monotonic
   decline across 4→8 workers with no plateau, so 8 remains the highest-throughput choice). The
   historical 5.18 H/s / 25.28 H/s "linear scaling" figures were stale and did not reproduce.
+- **`isolcpus`/`rcu_nocbs` deployment tuning (2026-07-25, `PLAN.md` Phase 8):** with
+  `isolcpus=1-7 rcu_nocbs=1-7` on the boot cmdline (an operational change, not shippable in
+  `armrx` itself), 8-worker aggregate rises to a reproducible **~28.4 H/s (+14%)** — the biggest
+  measured win in this project's history. Mechanism: cores 4-7 stop losing throughput to
+  background OS work/interrupts when isolated; cores 0-3 unaffected either way. See
+  `docs/experiments/isolcpus-rt-priority-win.md`.
 - **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 - **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
@@ -297,9 +303,10 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/audits/emitter-scheduler-review.md`](docs/audits/emitter-scheduler-review.md), [`jit_scheduler_code_review_gemini.md`](docs/audits/jit_scheduler_code_review_gemini.md), [`scheduler-review-2026-07-25.md`](docs/audits/scheduler-review-2026-07-25.md) | Three independent code reviews of the emitter scheduler (Deepseek, Gemini, Hermes), 2026-07-25 |
 | [`docs/audits/PROJECT_AUDIT_REPORT_20260725_Deepseek.md`](docs/audits/PROJECT_AUDIT_REPORT_20260725_Deepseek.md) | Third full-codebase audit (Deepseek), 2026-07-25 — see `PLAN.md` Phase 6 item 19 for the verification pass |
 | [`docs/experiments/memory-op-scheduler-attempt.md`](docs/experiments/memory-op-scheduler-attempt.md) | Emitter scheduler extended to `*_M` opcodes, caused a real JIT/interpreter divergence, reverted (mechanism not identified), 2026-07-25 |
+| [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) | `isolcpus`/`rcu_nocbs` deployment tuning — real ~14% hashrate win, biggest in project history, 2026-07-25 |
+| [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) | Full narrative for every completed Phase 7 item, split out of `PLAN.md` 2026-07-25 |
 | [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the one open quantified lead (main VM program 2.2× IPC penalty), if performance work resumes |
 | [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative, unscheduled backlog covering other regions (superscalar, C++ overhead, cross-cutting) |
-| [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) | Full narrative for every completed Phase 7 item, split out of `PLAN.md` 2026-07-25 |
 | [`docs/archived/future-performance-ideas-20260725.md`](docs/archived/future-performance-ideas-20260725.md) | Superseded first-pass future-ideas doc — content merged into the two docs above |
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |

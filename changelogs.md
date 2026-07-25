@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-07-25 — `isolcpus`/`rcu_nocbs` — Real ~14% Hashrate Win, Biggest in Project History
+
+The user installed `setcap` and granted explicit permission to edit the boot cmdline and reboot
+the device, unblocking `PLAN.md`'s one remaining open item. Result:
+
+- `isolcpus=1-7 rcu_nocbs=1-7` (core 0 left for kernel housekeeping) gives a reproducible **~28.4
+  H/s aggregate 8-worker steady-state hashrate vs. ~24.9 H/s without it (+14%)** — measured across
+  2 no-isolation and 4 isolated rounds (3 of 4 tightly reproducible, 1 anomaly). Every prior
+  adopted change in this project has been sub-1%.
+- Per-worker breakdown gives a clean mechanism, not just an aggregate number: the fast cluster
+  (cores 0-3) is identical either way; the entire effect is 2-3 of the 4 slow-cluster (cores 4-7)
+  workers randomly losing half their throughput to background OS work/interrupts without
+  isolation, recovered with it.
+- `nohz_full=1-7` silently no-ops on this kernel (`CONFIG_NO_HZ_FULL` not set) — real finding for
+  future deployment.
+- `--rt-priority`'s independent contribution is unconfirmed (functionally engaged, but no
+  isolated round showed an effect beyond `isolcpus` alone); a `perf stat` attempt to verify hit a
+  real, unresolved thread-attribution tooling gotcha against the full multi-threaded binary.
+- Two stale historical baseline figures and an overconfident thermal-throttling attribution were
+  caught and corrected mid-investigation — the user pushed back with direct knowledge of the
+  hardware and the source documents each time, preventing this from being written up as a false
+  "no effect" conclusion. Full account, including the false starts, in
+  `docs/experiments/isolcpus-rt-priority-win.md`. `PLAN.md`'s Phase 8 closed with this result.
+
 ## 2026-07-25 — Performance-Planning Docs Reconciled; Phase 7 Archived
 
 A second agent independently wrote `docs/plans/performance-plan-20260725.md` (gated, prioritized
