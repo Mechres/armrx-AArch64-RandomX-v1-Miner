@@ -144,20 +144,26 @@ if(ARMRX_ENABLE_NEON_AES)
 endif()
 
 if(ARMRX_ENABLE_ASAN)
-    target_compile_options(armrx_core PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-    target_link_options(armrx_core PRIVATE -fsanitize=address)
+    # PUBLIC, not PRIVATE: armrx_core is a static library, and executables
+    # linking against it (armrx, all tests/benchmarks) need the sanitizer
+    # runtime pulled into *their* link step too, or the link fails with
+    # undefined references to __asan_* symbols coming from armrx_core's
+    # instrumented object files. PRIVATE here silently only worked for
+    # nothing, since armrx_core itself isn't a final linked binary.
+    target_compile_options(armrx_core PUBLIC -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(armrx_core PUBLIC -fsanitize=address)
     message(STATUS "AddressSanitizer enabled")
 endif()
 
 if(ARMRX_ENABLE_UBSAN)
-    target_compile_options(armrx_core PRIVATE -fsanitize=undefined)
-    target_link_options(armrx_core PRIVATE -fsanitize=undefined)
+    target_compile_options(armrx_core PUBLIC -fsanitize=undefined)
+    target_link_options(armrx_core PUBLIC -fsanitize=undefined)
     message(STATUS "UndefinedBehaviorSanitizer enabled")
 endif()
 
 if(ARMRX_ENABLE_TSAN)
-    target_compile_options(armrx_core PRIVATE -fsanitize=thread)
-    target_link_options(armrx_core PRIVATE -fsanitize=thread)
+    target_compile_options(armrx_core PUBLIC -fsanitize=thread)
+    target_link_options(armrx_core PUBLIC -fsanitize=thread)
     message(STATUS "ThreadSanitizer enabled")
 endif()
 

@@ -671,6 +671,43 @@ than running them in parallel.
     per-opcode by this method since it's regenerated every hash). New tool committed at
     `tools/jit_correlate.py`, fully self-contained (armrx's own `--jit-dump`/`perf`/`/proc`
     only, no external miner involved, per the clean-room boundary above).
+
+    **`IMUL_RCP` literal-load elimination — implemented, measured, reverted (2026-07-25),
+    small but real regression.** Given the correlation script's finding, tried the obvious
+    next step: `IMUL_RCP`'s reciprocal is known at JIT-compile time, so replaced its
+    literal-pool `LDR` + `MUL` (2 instructions, 16 bytes incl. the 8-byte literal) with a
+    direct 64-bit immediate materialization (`MOVZ`/`MOVN` + up to 3× `MOVK`, new
+    `emitMovImmediate64()`) + `MUL` — eliminating the load-to-use stall entirely, at the cost
+    of up to 5 instructions instead of 2. Removed the now-dead literal-pool mechanism for
+    this opcode (nothing else populated or read it). Correctness: no fixed per-instruction
+    "slots" exist in this buffer — `codePos` is a plain sequential bump allocator across the
+    whole `CalcDatasetItemSize` region, so the only real constraint is aggregate buffer size,
+    not a per-occurrence boundary; verified via the full KAT/`test_jit_determinism`/
+    `test_jit_equivalence`/`test_jit_encodings` suite (5/5 green) rather than ASan, which
+    turned out to be unavailable on this device's toolchain entirely (`cannot find -lasan` —
+    Alpine/musl doesn't ship a libasan; confirmed via `find / -name libasan*` after fixing an
+    unrelated, real `CMakeLists.txt` bug found along the way — `ARMRX_ENABLE_ASAN`'s
+    compile/link options were `PRIVATE` on the `armrx_core` static library, which never
+    propagates to the executables that actually need to link the sanitizer runtime; fixed to
+    `PUBLIC`, kept independent of this item's outcome).
+
+    **Measured via three properly-controlled `perf stat` trials** (old vs. new binaries
+    preserved side-by-side, `timeout`-wrapped to a truly fixed wall-clock window — the first
+    attempt without an external `timeout` wrapper produced mismatched elapsed times between
+    runs and had to be discarded), including one with reversed run order to rule out thermal
+    drift: **IPC improved consistently and substantially as hypothesized (~0.729→~0.789,
+    +8.2%)**, confirming the literal-pool load really was costing stall cycles — but
+    **instruction count rose ~8.5-8.6%**, and for the identical amount of completed work
+    (matched hash counts across trials), **total cycles needed rose ~0.25-0.34%** — a small,
+    consistent net regression, the stall-elimination benefit almost exactly cancelled by the
+    extra instructions' own cost. Same "cost relocated, not eliminated" pattern as item 9's
+    superscalar literal-pool relayout and the Argon2 `memcpy` attempt. Reverted
+    (`git checkout -- src/jit_compiler_a64.cpp include/armrx/jit_compiler_a64.hpp`), KATs
+    re-confirmed 5/5 on the reverted build. The `CMakeLists.txt` ASan-propagation fix was
+    kept (real, independent bug). **Diagnostic value, not wasted**: `IMUL_R`/`IMUL_RCP`'s
+    cost is now understood to be genuinely latency-bound, not merely a memory-access
+    artifact — any future attempt here needs to hide the latency (scheduling/reordering, item
+    L1) rather than trade it for more instructions on this specific in-order core.
 15. Re-run `devbox_pgo_build` (tool already exists, kept from Phase 5) after any medium/long-term item lands meaningfully — PGO nulled out on today's code shape, but a reshaped binary may reopen it. Free to re-check, never rebuild the tooling.
 16. ~~Re-baseline `README.md`'s stale 5.2 H/s single-thread / ~28 H/s 8-worker figures honestly~~ — **✅ done (2026-07-24)**, using item 2's sweep data: `README.md`'s performance table now shows 4.27 H/s (1 worker), and 16.82/21.13/24.95 H/s (4/6/8 workers) with per-point efficiency, replacing the stale "linear scaling" claim.
 

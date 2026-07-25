@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026-07-25 — Item 14 Follow-up: `IMUL_RCP` Literal-Load Elimination Tried, Measured, Reverted
+
+Direct follow-on from the correlation script's finding (below): `IMUL_R`/`IMUL_RCP` are the
+two most expensive superscalar opcodes by cycles. `IMUL_RCP`'s reciprocal is known at
+JIT-compile time, so tried replacing its literal-pool `LDR` + `MUL` (2 instructions, 8-byte
+literal + 4-byte load) with direct 64-bit immediate materialization: new
+`emitMovImmediate64()` (`MOVZ`/`MOVN` for the first non-skippable 16-bit chunk, `MOVK` for up
+to 3 more) + `MUL`, and removed the now-dead literal-pool mechanism for this opcode (nothing
+else populated or read it).
+
+**Correctness verification took a detour.** Wanted ASan as the strongest safety net given
+the up-to-5-instruction worst case (vs. the previous 2) inside a fixed-size buffer. First
+build attempt found `CalcDatasetItemSize`'s buffer isn't actually organized into fixed
+per-instruction "slots" as initially assumed — `codePos` is a plain sequential bump allocator
+across the whole region, so the real constraint is aggregate size, not a per-occurrence
+boundary, which is more permissive than first feared. Then hit two infrastructure problems
+getting ASan to actually build: (1) a real, pre-existing `CMakeLists.txt` bug — `ARMRX_ENABLE_ASAN`'s
+`target_compile_options`/`target_link_options` were `PRIVATE` on the `armrx_core` static
+library, which never propagates to the executables that link against it and need the
+sanitizer runtime too; fixed to `PUBLIC` (kept, independent of this item's outcome, plus the
+same fix applied to UBSAN/TSAN for consistency); (2) after that fix, discovered this device's
+Alpine/musl toolchain doesn't ship `libasan` at all (`cannot find -lasan`, confirmed via
+`find / -name libasan*` turning up nothing) — a hard toolchain limitation, not fixable here.
+Fell back to this project's other proven-sufficient method: the full KAT/`test_jit_determinism`/
+`test_jit_equivalence`/`test_jit_encodings` suite, 5/5 green on the new code.
+
+**Measured via three properly-controlled `perf stat` trials**, old and new binaries preserved
+side-by-side and rebuilt fresh, `timeout`-wrapped to a genuinely fixed wall-clock window (a
+first attempt without the external `timeout` wrapper produced mismatched elapsed times
+between runs — 67.8s vs 74.2s — and had to be discarded as not properly controlled), including
+one trial with reversed run order to rule out thermal drift. Result, consistent across all
+three: **IPC improved substantially as hypothesized (~0.729→~0.789, +8.2%)** — the literal-pool
+load really was costing stall cycles — but **instruction count rose ~8.5-8.6%**, and for
+matched completed work (identical hash counts across paired trials), **total cycles needed
+rose ~0.25-0.34%**. A small, consistent, real regression — the stall-elimination benefit
+almost exactly cancelled by the extra instructions' own cost, the same "cost relocated, not
+eliminated" pattern as item 9's superscalar literal-pool relayout.
+
+**Reverted** (`git checkout -- src/jit_compiler_a64.cpp include/armrx/jit_compiler_a64.hpp`),
+KATs/JIT-determinism/equivalence/encodings re-confirmed 5/5 on the reverted build. The
+`CMakeLists.txt` ASan-propagation fix was kept. Diagnostic value survives the revert:
+`IMUL_R`/`IMUL_RCP`'s cost is confirmed genuinely latency-bound on this in-order core, not a
+memory-access artifact — a future attempt would need to *hide* the latency via scheduling
+(item L1, the emitter lookahead scheduler) rather than trade it for more instructions. See
+`PLAN.md` Phase 6 item 14 for the full account.
+
 ## 2026-07-25 — Item 14: `tools/jit_correlate.py` — Real Opcode-Level Cycle Attribution Inside the JIT Buffer
 
 Continuation of the `perf record` work below: built the actual correlation script the
