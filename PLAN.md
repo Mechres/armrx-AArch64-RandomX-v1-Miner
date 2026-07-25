@@ -109,6 +109,10 @@ Summary:
 
 ## Phase 7 — current (2026-07-25): open items
 
+*Speculative future performance ideas beyond this section's items — not scheduled/gated work —
+are tracked separately in
+[`docs/plans/future-performance-ideas-20260725.md`](docs/plans/future-performance-ideas-20260725.md).*
+
 1. **`--rt-priority` + `isolcpus=`/`nohz_full=`** — **blocked on manual device access.**
    `--rt-priority` currently falls back silently to the default scheduler (needs `setcap`,
    which isn't installed and there's no passwordless `sudo`); `isolcpus=`/`nohz_full=` need a

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-25 — Doc Organization: Experiment Writeup, Audit Moved, Future-Ideas Backlog
+
+Follow-up housekeeping after the memory-op scheduler attempt and Deepseek audit (both below):
+
+- Wrote up the full memory-op scheduler attempt as a proper experiment doc,
+  `docs/experiments/memory-op-scheduler-attempt.md`, matching the format of
+  `argon2-compress-copy-elimination.md`/`neon-vector-permute-aes.md` — problem, what was tried,
+  result, investigation (including the two hypotheses ruled out), the CBRANCH-assert side
+  finding, and where this leaves future work.
+- Moved `PROJECT_AUDIT_REPORT_20260725_Deepseek.md` from the repo root into `docs/audits/`,
+  alongside the Gemini/Hermes reports and the three scheduler-review reports. Updated the two
+  stale "kept at repo root" notes in `changelogs.md` and `docs/archived/plan_phase6_completed.md`
+  to reflect the new location.
+- Wrote `docs/plans/future-performance-ideas-20260725.md` — a speculative, explicitly-unscheduled
+  backlog of what to try if performance work resumes: bisecting the memory-op scheduler hazard
+  properly, an explicit-`PRFM` alternative to scheduling for the main VM program's memory-op
+  stalls, bounding the achievable win before committing to either, and an honest recommendation
+  that further microarchitecture work needs a new specific hypothesis, not just more looking.
+  Linked from `PLAN.md`'s Phase 7 header and `ROADMAP.md`'s Reference Docs table.
+
 ## 2026-07-25 — Memory-Op Scheduler Extension Tried, Reverted; a Real Assert Bug Found Along the Way
 
 Follow-up to the entry below (peephole JIT closed, memory-op scheduler extension started).
@@ -119,9 +139,10 @@ top). Committed `405755f` for the `PLAN.md`/archive split; this pass covers the 
 
 ## 2026-07-25 — Full Codebase Audit (Deepseek) Reviewed and Verified
 
-User supplied `PROJECT_AUDIT_REPORT_20260725_Deepseek.md` (kept at repo root, not moved into
-`docs/audits/` — not explicitly requested). Per this project's standing discipline, verified
-every concrete, checkable claim against actual code/live device state before accepting any of it:
+User supplied `PROJECT_AUDIT_REPORT_20260725_Deepseek.md` (initially kept at repo root; moved
+into `docs/audits/` later the same day alongside the other audit reports). Per this project's
+standing discipline, verified every concrete, checkable claim against actual code/live device
+state before accepting any of it:
 
 - **§1.1, scratchpad huge-page residency "unverified"** — refuted. Verified live on-device:
   `/proc/<pid>/smaps` merges adjacent same-protection anonymous VMAs into one entry, so the
