@@ -46,7 +46,13 @@ safety-critical path — not worth continuing right now, but **not proven imposs
 
 ### 2. Widen the main-VM-program scheduler's swap window for the already-adopted long-latency-op class
 
-**Status: not started.**
+**Status: ADOPTED (2026-07-26).** Full account in
+`docs/experiments/main-scheduler-window-widening-20260726.md`. Added a 4-instruction fallback
+candidate (tried only when the existing 3-window swap doesn't qualify) to `scheduleProgram()`.
+Passed the full 450-pair `test_jit_scheduler_stress` (the differential test built specifically for
+this scheduler) plus `test_jit_equivalence`/`determinism`/`encodings`/KATs/`test_mining`. Measured
++0.156% IPC average across two on-device `perf stat` samples (cycles −0.148%), consistent
+direction both times, similar magnitude to the original scheduler's own adopted win.
 
 The existing scheduler only reorders within a fixed 3-instruction lookahead
 (`scheduleProgram()`/`scheduleSuperscalarProgram()` in `src/jit_compiler_a64.cpp`). Step 1

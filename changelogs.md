@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-07-26 (truly final) — Main VM program scheduler window widened; IMUL_RCP preassignment root-caused
+
+Continuing the mid/high-risk performance work opened after the low-risk backlog's closure
+(`docs/plans/mid-high-risk-performance-ideas-20260726.md`):
+
+- **Adopted**: widened `scheduleProgram()`'s (main VM program scheduler) swap window with a
+  4-instruction fallback candidate, tried only when the existing 3-window swap doesn't qualify.
+  Stays entirely within the existing register-hazard model (no new hazard class). Passed the full
+  450-pair `test_jit_scheduler_stress` (the differential test built specifically for this
+  scheduler) plus equivalence/determinism/encodings/KATs/mining-engine tests. Measured **+0.156%
+  IPC average** across two independent on-device `perf stat` samples (cycles −0.148%, both
+  consistent in direction), similar magnitude to the original scheduler's own adopted win. Full
+  account: `docs/experiments/main-scheduler-window-widening-20260726.md`.
+- **Root-caused, not shipped**: revisited the earlier reverted superscalar `IMUL_RCP` register
+  pre-assignment attempt (idea #1) via bisection with a temporary env-var cap. Found the real
+  mechanism: `randomx_calc_dataset_item_aarch64` is invoked via `bl` from inside the main
+  program's own light-mode JIT body, and that call site doesn't protect x14/x15 (the main
+  program's own live r6/r7 VM registers) or x21-x28 (the main program's own pre-loaded `IMUL_RCP`
+  literals) — the original code was only ever correct because it never wrote to those registers.
+  Empirically, only x19 works as a sole preassigned register (x20, also nominally "temporary,"
+  fails too, for a reason not fully traced). Real safe budget is at most 1 register, not the 12
+  originally planned — too small to justify shipping right now. Left open with a concrete revisit
+  path rather than closed permanently, per explicit direction. `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`
+  updated with the full root cause.
+
+`PLAN.md` Phase 11, `NEXT_STEPS.md`, and `ROADMAP.md` all updated to match.
+
 ## 2026-07-26 (final) — Experimental performance backlog: last two items closed, full closure reached
 
 Continuing directly from the same-day backlog work below, resolved the two remaining items:

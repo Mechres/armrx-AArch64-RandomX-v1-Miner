@@ -645,6 +645,20 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 	// emit P, R, Q instead of P, Q, R -- R fills the slot that would have
 	// stalled, Q (which needed to wait regardless) moves one slot later
 	// where it no longer costs anything extra.
+	//
+	// EXPERIMENTAL WIDENING (2026-07-26, docs/plans/mid-high-risk-performance-ideas-20260726.md
+	// Tier 1 item 2): if the i+2 candidate above doesn't qualify (hazards
+	// with P, or with the instruction at i+1), also try i+3 as a fallback
+	// before giving up on this P. Moving R2 (at i+3) to fill P's stall slot
+	// changes the relative order of THREE pairs, not one: R2 must not
+	// hazard with P (the reason for moving it at all), must not hazard with
+	// Q (i+1, which now comes after it), and must not hazard with R1 (i+2,
+	// which also now comes after it) -- R2 ends up first among the three,
+	// so it must be independent of both. Q and R1 keep their original
+	// relative order (Q before R1), so no new hazard check is needed
+	// between them. Same anchor/barrier/src==dst exclusions apply to R2 as
+	// already apply to Q and R1 above -- not loosening constraint 4, only
+	// widening how far the search looks before applying it.
 	std::vector<uint32_t> order;
 	order.reserve(size);
 	uint32_t i = 0;
@@ -667,10 +681,28 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 			order.push_back(i + 2);
 			order.push_back(i + 1);
 			i += 3;
-		} else {
-			order.push_back(i);
-			++i;
+			continue;
 		}
+
+		const bool r2_src_eq_dst = i + 3 < size && program(i + 3).src == program(i + 3).dst;
+		if (fp[i].is_long_latency && i + 3 < size &&
+		    !fp[i + 1].is_barrier && !fp[i + 2].is_barrier && !fp[i + 3].is_barrier &&
+		    !is_anchor[i + 1] && !is_anchor[i + 2] && !is_anchor[i + 3] &&
+		    !q_src_eq_dst && !r_src_eq_dst && !r2_src_eq_dst &&
+		    hasHazard(fp[i], fp[i + 1]) &&
+		    !hasHazard(fp[i], fp[i + 3]) &&
+		    !hasHazard(fp[i + 1], fp[i + 3]) &&
+		    !hasHazard(fp[i + 2], fp[i + 3])) {
+			order.push_back(i);
+			order.push_back(i + 3);
+			order.push_back(i + 1);
+			order.push_back(i + 2);
+			i += 4;
+			continue;
+		}
+
+		order.push_back(i);
+		++i;
 	}
 	return order;
 }

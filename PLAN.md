@@ -265,3 +265,33 @@ and worked through every remaining item in this speculative backlog directly:
 **Nothing remains unaddressed in either performance backlog document.** The two genuinely open
 items project-wide are both the isolcpus deployment bugs documented in Phase 8 (worker-count
 default, worker-to-core placement) — not performance-tuning work.
+
+## Completed — Phase 11 (2026-07-26): mid/high-risk performance work — one adopted, one root-caused and closed for now
+
+After Phase 10's low-risk backlog reached full closure, opened
+**[`docs/plans/mid-high-risk-performance-ideas-20260726.md`](docs/plans/mid-high-risk-performance-ideas-20260726.md)**
+to track genuinely correctness-risky performance work — extending or bisecting the JIT scheduler
+itself. Two items worked:
+
+- **Adopted: widened the main VM program scheduler's swap window**
+  (`docs/experiments/main-scheduler-window-widening-20260726.md`). Added a 4-instruction fallback
+  candidate to `scheduleProgram()`, tried only when the existing 3-window swap doesn't qualify —
+  stays entirely within the scheduler's existing register-hazard model, no new hazard *class*.
+  Passed the full 450-pair `test_jit_scheduler_stress` (the differential test built specifically
+  for this scheduler), plus equivalence/determinism/encodings/KATs/mining-engine tests. Measured
+  **+0.156% IPC average** across two on-device `perf stat` samples (cycles −0.148%, both
+  consistent in direction), similar magnitude to the original scheduler's own adopted win.
+- **Root-caused and closed for now, not proven impossible: superscalar `IMUL_RCP` register
+  pre-assignment** (revisiting the idea #1 attempt reverted in Phase 10;
+  `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`). Bisected with a temporary
+  env-var cap and found the real mechanism: `randomx_calc_dataset_item_aarch64` is called via `bl`
+  from inside the main program's own light-mode JIT body, and that call site doesn't protect
+  x14/x15 (the main program's own live r6/r7) or x21-x28 (the main program's own pre-loaded
+  `IMUL_RCP` literals) — the original code was only ever safe because it never wrote to those
+  registers. Empirically, only x19 works as a sole preassigned register; the realistic safe budget
+  (at most 1, not the 12 originally planned) makes the win too small to justify right now. Left
+  open with a concrete revisit path (root-cause why x20 also fails; consider explicit save/restore
+  at the call site) rather than closed permanently.
+
+Two further Tier 2/3 ideas remain in the tracking doc (BOLT; a full dependency-graph list
+scheduler) — not started, lower priority given the evidence gathered so far.

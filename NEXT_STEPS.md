@@ -4,11 +4,22 @@
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-Phases 1–10 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
+Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
 `docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`,
 `docs/experiments/isolcpus-rt-priority-win.md`,
-`docs/experiments/scratchpad-locality-bound-20260726.md`, and
-`docs/plans/experimental-performance-ideas-20260725.md` for the full narratives.
+`docs/experiments/scratchpad-locality-bound-20260726.md`,
+`docs/plans/experimental-performance-ideas-20260725.md`, and
+`docs/plans/mid-high-risk-performance-ideas-20260726.md` for the full narratives.
+
+*   [x] ~~Mid/high-risk performance work (`docs/plans/mid-high-risk-performance-ideas-20260726.md`)~~
+    — **one adopted, one root-caused and closed for now, 2026-07-26.** Widened the main VM
+    program scheduler's swap window (4-instruction fallback candidate) — passed the full 450-pair
+    `test_jit_scheduler_stress`, measured +0.156% IPC avg across two `perf stat` samples. Adopted.
+    See `docs/experiments/main-scheduler-window-widening-20260726.md`. Separately, root-caused why
+    the earlier reverted superscalar `IMUL_RCP` register pre-assignment failed (a light-mode call
+    boundary doesn't protect the main program's own live r6/r7 or its own `IMUL_RCP` literals) —
+    real safe budget is at most 1 register, not worth pursuing right now, but left open with a
+    concrete revisit path rather than closed permanently. `PLAN.md` Phase 11.
 
 *   [x] ~~Experimental performance backlog (`docs/plans/experimental-performance-ideas-20260725.md`)~~
     — **worked to full closure 2026-07-26.** 4 adopted (compiler flags #6+#12 +0.298% IPC avg,

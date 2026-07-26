@@ -92,6 +92,15 @@
   the biggest named-C++ cost at ~12.3%), 1 tried-and-reverted (superscalar `IMUL_RCP` register
   pre-assignment — real `test_jit_equivalence` failure). See
   `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
+- **Mid/high-risk performance work, one adopted (2026-07-26, `PLAN.md` Phase 11):** widened the
+  main VM program scheduler's swap window (a 4-instruction fallback candidate, tried only when the
+  existing 3-window swap doesn't qualify) — passed the full 450-pair `test_jit_scheduler_stress`,
+  measured **+0.156% IPC average** across two on-device `perf stat` samples. See
+  `docs/experiments/main-scheduler-window-widening-20260726.md`. Separately, root-caused (but did
+  not ship) why the reverted superscalar `IMUL_RCP` register pre-assignment attempt failed — a
+  light-mode JIT call boundary doesn't protect two of the main program's own live registers; the
+  real safe budget is at most 1, too small to be worth shipping right now (left open, not closed
+  permanently). See `docs/plans/mid-high-risk-performance-ideas-20260726.md`.
 - **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 - **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
@@ -326,7 +335,9 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the main VM program's 2.2× IPC penalty — **closed 2026-07-26**, Step 1 result was small, closing Steps 2-3 unattempted |
 | [`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md) | Step 1's result: forcing the scratchpad L1-resident only recovers +6.07% IPC — the penalty is mostly architectural, not memory-latency |
 | [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative backlog covering other regions (superscalar, C++ overhead, cross-cutting) — **worked to full closure 2026-07-26**, nothing unaddressed remains |
-| [`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`](docs/experiments/superscalar-imul-rcp-preassignment-attempt.md) | Superscalar `IMUL_RCP` register pre-assignment — tried, real JIT/interpreter divergence, reverted, 2026-07-26 |
+| [`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`](docs/experiments/superscalar-imul-rcp-preassignment-attempt.md) | Superscalar `IMUL_RCP` register pre-assignment — root-caused, closed for now (not permanently), 2026-07-26 |
+| [`docs/plans/mid-high-risk-performance-ideas-20260726.md`](docs/plans/mid-high-risk-performance-ideas-20260726.md) | Tracking doc for correctness-risky performance work, opened after the low-risk backlog closed; ranked Tier 1-3 by evidence alignment |
+| [`docs/experiments/main-scheduler-window-widening-20260726.md`](docs/experiments/main-scheduler-window-widening-20260726.md) | Main VM program scheduler 4-instruction fallback window — adopted, +0.156% IPC avg, 2026-07-26 |
 | [`docs/archived/future-performance-ideas-20260725.md`](docs/archived/future-performance-ideas-20260725.md) | Superseded first-pass future-ideas doc — content merged into the two docs above |
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |
