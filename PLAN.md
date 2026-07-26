@@ -299,3 +299,46 @@ itself. Two items worked:
 
 Two further Tier 2/3 ideas remain in the tracking doc (BOLT; a full dependency-graph list
 scheduler) — not started, lower priority given the evidence gathered so far.
+
+## Completed — Phase 12 (2026-07-27): resolved the 24.76-vs-28.4 H/s aggregate mystery — burst vs. sustained clocking, not a bug
+
+Investigated the Phase 8 "Second footgun" gap further after the user rejected a thermal hand-wave
+and asked for `perf`/thermal-level evidence. Along the way, a real "regression" symptom appeared —
+worker[4-7] measured 2.13 H/s in a local `--mine --workers=8 --warmup=60 --seconds=180` benchmark,
+not the documented 2.84 H/s — and was fully bisected against every code change since the isolcpus
+baseline (`9010199`): the main-scheduler-window-widening revert, a `vm.cpp` hot-path cleanup
+(`last_mem_regs_` member field → local `MemoryRegisters`, kept as a minor hygiene improvement even
+though it wasn't the cause), and a batch revert of `-fomit-frame-pointer`/`-fvisibility=hidden`/
+Argon2 `MADV_POPULATE_WRITE`/`.p2align 6`. **None of these changed the number at all.**
+
+The actual variable was measurement window duration/position, not code. Three `--mine --workers=8`
+runs, same binary, same `isolcpus` config, varying only `--warmup`/`--seconds`:
+
+| Window | Cores 0-3 | Cores 4-7 |
+|---|---|---|
+| t=15-60s (original baseline command) | 4.26 | 2.84 |
+| t=15-180s | 4.26 | 2.32 |
+| t=60-180s | 4.26 | 2.13 |
+
+A clean, monotonic decay purely as a function of how much of the run's later portion the window
+captures — confirmed as a real instantaneous-throughput change, not a cumulative-average artifact
+(`miner_app.cpp`'s steady-state number is a genuine `snap_end - snap_warmup` delta). Cores 0-3 show
+**zero** decay across any window. Thermal logging during the 120s-window run shows the slow
+cluster's shared sensor (`cpu4567-thermal`) plateauing at ~49-50°C by t≈100s — nowhere near the
+75°C passive mitigation trip — while the fast cluster's zones reach a similar or higher 49-56°C
+with no throughput effect at all, arguing against a shared thermal governor and pointing instead to
+a cluster-specific burst-then-settle DVFS behavior (plausible, not proven — no `cpufreq` sysfs
+exists on this kernel to read clocks directly).
+
+Recomputing the sustained aggregate with the settled rate (3.19 contended-worker-0 + 3×4.26 fast +
+4×2.13 settled-slow = 24.49 H/s) matches the real 13.5-hour overnight pool run's 24.76 H/s far
+better than the original 28.4 H/s burst figure. **The honest, deployable expectation for this
+device is ~24.4-24.8 H/s sustained — the 28.4 H/s figure only holds for a fresh process's first
+~30-45 seconds.** `isolcpus`/`rcu_nocbs` is still worth keeping (per-worker consistency, no more
+randomly-halved workers — the original Phase 8 "Mechanism" finding), just not for the magnitude
+originally headlined. Full account in `docs/experiments/isolcpus-rt-priority-win.md`'s "Third
+finding" section.
+
+This closes the aggregate-hashrate mystery. The two remaining open items project-wide are still
+the Phase 8 deployment bugs (worker-count default, worker-to-core placement) — neither is
+performance-tuning work.

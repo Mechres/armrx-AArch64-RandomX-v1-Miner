@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-07-27 — Resolved the 24.76-vs-28.4 H/s aggregate mystery; vm.cpp hot-path cleanup
+
+Chased down the Phase 8 "aggregate lower than predicted" gap on the user's request for
+`perf`/thermal-level evidence rather than a surface explanation. A "regression" symptom (worker
+[4-7] reading 2.13 H/s instead of the documented 2.84 in a local benchmark) survived reverting
+every code change since the isolcpus baseline (scheduler-widening revert, `vm.cpp` cleanup, batch
+revert of compiler flags/Argon2 prefault/`.p2align`) — the actual variable was measurement-window
+duration/position, not code. Cores 4-7's isolated rate is a **burst that settles from ~2.84 H/s to
+~2.13 H/s over the first ~60-100s of sustained load**, confirmed via three benchmark windows
+showing a clean monotonic decay and live thermal-zone logging (settles ~49-50°C, well under the
+75°C mitigation trip — rules out the documented hard throttle, points to cluster-specific
+boost-then-settle DVFS instead). Cores 0-3 show zero decay in any window. The settled-rate math
+(3.19 + 3×4.26 + 4×2.13 = 24.49 H/s) matches the real overnight pool run's 24.76 H/s far better
+than the 28.4 H/s burst figure ever did — **honest sustained expectation is ~24.4-24.8 H/s, not
+28.4 H/s**. `isolcpus` is still worth keeping for its per-worker consistency win, just not for the
+originally headlined magnitude. Full writeup: `docs/experiments/isolcpus-rt-priority-win.md`
+"Third finding" section; `PLAN.md` Phase 12; `NEXT_STEPS.md` updated to match.
+
+Also kept a `src/vm.cpp` hot-path cleanup found while bisecting: `run_jit()`'s `MemoryRegisters`
+had been changed from a stack-local to a persistent `VirtualMachine` member (`last_mem_regs_`) in
+the 2026-07-26 Phase 9 work, to support a new bench-only `run_execute_only()`. Reverted the
+production path back to a stack-local (didn't affect the hashrate finding above, but removes an
+unnecessary member-field indirection from the per-hash hot path); `last_mem_regs_` is now only
+populated as a post-call copy for `run_execute_only()`'s benefit.
+
+Also fixed an unrelated devbox tooling bug found mid-session: this device's BusyBox `ps` doesn't
+support `-o psr`, so the auto-repin watcher script used to unblock builds under `isolcpus` (see
+Phase 9's note on `devbox_build`/`devbox_test`) was silently failing every iteration and pinning
+nothing, letting parallel compile/link jobs pile up on core 0 alone. Fixed by reading
+`/proc/<pid>/stat` field 39 directly instead of relying on `ps -o psr`.
+
 ## 2026-07-26 (truly final) — Main VM program scheduler window widened; IMUL_RCP preassignment root-caused
 
 Continuing the mid/high-risk performance work opened after the low-risk backlog's closure

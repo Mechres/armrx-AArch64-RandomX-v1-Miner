@@ -1,8 +1,8 @@
 # Scratchpad locality bound — main VM program IPC penalty is mostly not recoverable (2026-07-26)
 
 **Status: closed.** This is `docs/plans/performance-plan-20260725.md` Step 1, run to completion.
-Result: small recoverable gap (+6.07% IPC), which per that plan's own gate closes Steps 2 and 3
-without needing to attempt either.
+Result: small recoverable gap (+6.07% IPC / +5.44% on replication), which per that plan's own gate
+closes Steps 2 and 3 without needing to attempt either.
 
 ## Background
 
@@ -58,6 +58,24 @@ Forcing near-zero scratchpad latency bought **+6.07% IPC** (cycles fell 5.73% fo
 completed work). Per the plan's own gate ("if the difference is small... there is very little
 room to improve — the penalty is architectural, not fixable by code changes"), **6% is small**
 against the region's overall ~2.2× IPC penalty.
+
+### Replication (2026-07-26, isolcpus removed, independent verification)
+
+The experiment was re-run later the same day after `isolcpus=1-7 rcu_nocbs=1-7` was removed from
+the kernel boot cmdline and the device rebooted. Same binary, same `taskset -c 0` pinning, same
+2000-iteration protocol:
+
+| Condition | Cycles | Instructions | IPC |
+|---|---|---|---|
+| Real 2 MiB scratchpad | 44,274,135,385 | 29,373,688,412 | 0.6635 |
+| L1-aliased (16 KiB) | 41,983,677,277 | 29,370,537,475 | 0.6996 |
+
+Instruction counts match to 0.011% — a slightly looser match than the first run (normal run-to-run
+CBRANCH path variance from scratchpad state divergence), still confirming both conditions execute
+the same compiled program. Without `isolcpus`, core 0 carries less kernel overhead, so both
+conditions run slightly faster (real IPC 0.6635 vs 0.6572; L1 IPC 0.6996 vs 0.6971). The
+recoverable IPC gap is **+5.44%** (cycle reduction 5.17%) — nearly identical to the first run's
++6.07%. The conclusion is robust to the system's isolation configuration.
 
 ## Conclusion
 

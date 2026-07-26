@@ -75,11 +75,31 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
     `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section for the full
     analysis.
 
-No genuinely open performance items remain as of 2026-07-26 (the gated plan's Step 1 result
-above closed Steps 2-3). The two isolcpus-related deployment bugs above (worker-count default,
-worker-to-core placement) are the only real open items project-wide. If performance work resumes
-anyway, `docs/plans/experimental-performance-ideas-20260725.md` is the speculative, unmeasured
-backlog to start from — `docs/plans/performance-plan-20260725.md`'s gated steps are all closed.
+*   [x] ~~Third finding (2026-07-27): fully reconciles the 24.76-vs-28.4 H/s gap~~ — **resolved,
+    it isn't a bug at all.** A "regression" bisect (worker[4-7] reading 2.13 H/s instead of the
+    documented 2.84) that survived reverting *every* code change made since the isolcpus baseline
+    (scheduler widening, a `vm.cpp` cleanup, compiler flags, Argon2 prefault, `.p2align`) turned
+    out to be a measurement-window artifact, not code: `--warmup=15 --seconds=60` (the original
+    baseline command) reads 2.84, but longer/later windows (`--warmup=15 --seconds=180` reads
+    2.32, `--warmup=60 --seconds=180` reads 2.13) show a clean, monotonic decay — cores 4-7's
+    isolated rate is a **short burst that settles to ~2.13 H/s under sustained load**, not a fixed
+    2.84. Cores 0-3 show zero decay in any window. Thermal logging shows cores 4-7's shared sensor
+    plateauing around 49-50°C, well under the 75°C mitigation trip, arguing against the documented
+    thermal governor and pointing to a cluster-specific boost-then-settle DVFS behavior instead
+    (unconfirmed directly — no `cpufreq` sysfs exists on this kernel to read clocks). Recomputing
+    the sustained aggregate with the *settled* rate (3.19 + 3×4.26 + 4×2.13 = 24.49 H/s) matches
+    the real 13.5-hour overnight run's 24.76 H/s far better than the 28.4 H/s burst figure ever
+    did. **Honest deployable expectation: ~24.4-24.8 H/s sustained, not 28.4 H/s** — `isolcpus`
+    is still worth keeping for its consistency win (no more randomly-halved workers), just not for
+    the originally headlined magnitude. Full writeup: `docs/experiments/isolcpus-rt-priority-win.md`
+    "Third finding" section.
+
+No genuinely open performance items remain as of 2026-07-27 (the gated plan's Step 1 result
+above closed Steps 2-3, and the third finding above closes the sustained-vs-burst hashrate
+question). The worker-count-default and worker-to-core-placement deployment bugs above are the
+only real open items project-wide. If performance work resumes anyway,
+`docs/plans/experimental-performance-ideas-20260725.md` is the speculative, unmeasured backlog to
+start from — `docs/plans/performance-plan-20260725.md`'s gated steps are all closed.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.

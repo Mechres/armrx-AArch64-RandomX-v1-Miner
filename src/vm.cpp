@@ -800,22 +800,22 @@ void VirtualMachine::run_jit() {
     auto t1 = std::chrono::high_resolution_clock::now();
 #endif
 
-    last_mem_regs_ = MemoryRegisters{};
-    last_mem_regs_.mx = mx_;
-    last_mem_regs_.ma = ma_;
+    MemoryRegisters mem_regs{};
+    mem_regs.mx = mx_;
+    mem_regs.ma = ma_;
     if (!is_fast_mode()) {
         // Light mode: JIT needs cache pointer to derive dataset items on the fly
-        last_mem_regs_.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
+        mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
     } else {
         // Fast mode: JIT reads from pre-computed dataset
-        last_mem_regs_.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
+        mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;
     }
 
     // Copy eMask into reg_.f[0] as the JIT assembly expects (offset 64 = [x0, 64])
     std::memcpy(&reg_.f[0], config.eMask, sizeof(config.eMask));
 
     jit_->getProgramFunc()(
-        &reg_, &last_mem_regs_,
+        &reg_, &mem_regs,
         reinterpret_cast<void*>(scratchpad_data_),
         2048ULL);
 #ifdef ARMRX_JIT_PROFILE
@@ -827,8 +827,12 @@ void VirtualMachine::run_jit() {
 #endif
 
     // Extract updated mx/ma back from mem_regs after JIT execution
-    mx_ = last_mem_regs_.mx;
-    ma_ = last_mem_regs_.ma;
+    mx_ = mem_regs.mx;
+    ma_ = mem_regs.ma;
+    // Bench-only: preserve state for a possible follow-up run_execute_only() call.
+    // This copy happens once per hash, outside the JIT's own hot loop, so it
+    // doesn't reintroduce the member-field access run_jit() itself now avoids.
+    last_mem_regs_ = mem_regs;
 }
 
 void VirtualMachine::run_execute_only() {

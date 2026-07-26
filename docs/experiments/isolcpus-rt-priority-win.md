@@ -1,9 +1,13 @@
 # isolcpus/rcu_nocbs — a real ~14% hashrate win (2026-07-25)
 
-**Status: adopted.** This is the largest measured win in this project's history — every prior
-adopted change has been sub-1%. Unlike everything else on `PLAN.md`, this is not a code change:
-it's a kernel-boot-cmdline tuning step, on a specific device, that anyone deploying `armrx` on
-similar asymmetric multi-cluster ARM hardware should consider.
+**Status: adopted, magnitude corrected 2026-07-27.** This is the largest measured win in this
+project's history — every prior adopted change has been sub-1%. Unlike everything else on
+`PLAN.md`, this is not a code change: it's a kernel-boot-cmdline tuning step, on a specific
+device, that anyone deploying `armrx` on similar asymmetric multi-cluster ARM hardware should
+consider. **The original 28.4 H/s headline figure is a short-burst number, not a sustained one —
+see "Third finding" below for the corrected ~24.4-24.8 H/s sustained expectation.** The underlying
+win (consistent per-worker rates instead of 2-3 workers randomly halved each run) is still real
+and still worth keeping.
 
 ## Background
 
@@ -199,6 +203,60 @@ core from the pool. How much of the ~3.64 H/s gap between worker 0's current 0.6
 4.26 H/s potential is actually recoverable this way — versus inherent to sharing a core with any
 main-thread work at all — has not been measured. `--workers=7` still maps worker 0 to core 0 under
 the same modulo scheme either way, so it isn't a workaround.
+
+## Third finding (2026-07-27): the fast/slow split itself is burst-vs-sustained, not two fixed rates
+
+The "second footgun" section above explained the 28.4-vs-24.76 H/s gap entirely via worker 0
+sharing core 0 with the main/stratum thread. That's real, but incomplete — a deeper investigation
+(prompted by the user rejecting a thermal-throttling hand-wave and asking for `perf`/thermal-level
+evidence) found a second, independent mechanism: **cores 4-7's own isolated rate isn't a fixed
+2.84 H/s — it's a burst rate that decays to ~2.13 H/s under sustained multi-minute load**, even
+with zero core-0 contention involved.
+
+This was found while bisecting an apparent "regression" (worker[4-7] measured 2.13 H/s instead of
+the documented 2.84 across several code-revert attempts — scheduler-widening revert, a `vm.cpp`
+hot-path cleanup, and a batch revert of the `-fomit-frame-pointer`/`-fvisibility=hidden`/Argon2-
+prefault/`.p2align 6` changes — none of which changed the number at all). The actual variable
+turned out to be **measurement window duration and position**, not code:
+
+| Command | Window | Cores 0-3 | Cores 4-7 |
+|---|---|---|---|
+| `--warmup=15 --seconds=60` (original baseline command) | t=15-60s (45s) | 4.26 | **2.84** |
+| `--warmup=15 --seconds=180` | t=15-180s (165s) | 4.26 | **2.32** |
+| `--warmup=60 --seconds=180` | t=60-180s (120s) | 4.26 | **2.13** |
+
+All three use the same binary, same `isolcpus`/`rcu_nocbs` config, same `--mine` local benchmark
+(no pool/network variable). The result is a clean, monotonic decay purely as a function of how
+much of the run's *later* portion each window captures — the earlier/shorter the window, the
+higher the reading. **Cores 0-3 show zero decay in any of these — 4.26 H/s in every single
+row.** `MiningEngine`'s steady-state number is a genuine snapshot-delta over the window (confirmed
+by reading `miner_app.cpp`'s `snap_end - snap_warmup` computation), not a cumulative-average
+artifact — this is a real change in *instantaneous* throughput over time, not a measurement bug.
+
+Thermal logging during the `warmup=60/seconds=180` run (`cpu4567-thermal`, the one shared sensor
+covering all four slow-cluster cores) shows temps climbing from 34°C at start to a ~49-50°C
+plateau by roughly t=100s, then flat for the rest of the run — nowhere near the 75°C passive
+mitigation trip point exposed via `/sys/class/thermal/thermal_zone8/trip_point_0_temp`. The fast
+cluster's zones climb to a similar or higher 49-56°C over the same period with **no** throughput
+effect, which argues against a shared/global thermal governor (that would hit both clusters) and
+points instead to a **cluster-specific short boost-then-settle DVFS behavior**: the slow cluster
+gets a brief elevated clock at the start of sustained load (common "little cluster" behavior on
+mobile SoCs — short-burst responsiveness boost, lower long-term sustained clock), while the fast
+cluster's advertised rate already *is* its sustained rate, with no boost headroom to lose. This is
+plausible but not proven — no `cpufreq` sysfs exists on this kernel (see the "second footgun"
+section above), so there's no direct per-cluster clock reading to confirm it; the thermal/decay
+correlation is the strongest evidence available.
+
+**This reconciles the real-world numbers cleanly.** Recomputing the sustained aggregate using the
+*settled* per-cluster rates (not the burst ones): worker 0 (contended, ~3.19 measured) + 3×4.26
+(uncontended fast cluster) + 4×2.13 (settled slow cluster) = **24.49 H/s** — matching the actual
+13.5-hour overnight pool run's ~24.76 H/s far better than the original 28.4 H/s burst figure ever
+did. **The honest, deployable expectation for this device under `isolcpus` is ~24.4-24.8 H/s
+sustained, not 28.4 H/s** — the latter is real but only holds for the first ~30-45 seconds of a
+fresh process, not for actual mining. `isolcpus`/`rcu_nocbs` is still worth keeping (it's still
+better than the pre-isolcpus ~24.9 H/s baseline's *variance*, giving consistent per-worker rates
+instead of 2-3 workers randomly halved each run — see the original "Mechanism" section above),
+just not for the magnitude originally headlined.
 
 ## This does not close the gap to XMRig
 
