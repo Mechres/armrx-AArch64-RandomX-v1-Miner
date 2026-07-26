@@ -1,7 +1,11 @@
-# Superscalar IMUL_RCP register pre-assignment — tried, caused a real JIT/interpreter divergence, reverted (2026-07-26)
+# Superscalar IMUL_RCP register pre-assignment — tried, root-caused, closed for good (2026-07-26)
 
-**Status: reverted.** This is `docs/plans/experimental-performance-ideas-20260725.md` idea #1.
-Implemented, failed the very first differential test case, reverted in full.
+**Status: closed, root cause understood.** This is `docs/plans/experimental-performance-ideas-20260725.md`
+idea #1, and `docs/plans/mid-high-risk-performance-ideas-20260726.md` Tier 1 item 1. First attempt
+implemented, failed the very first differential test case, reverted with the mechanism unidentified.
+Revisited via bisection the same day: root cause found and confirmed, but the safe register budget
+turned out to be at most 1 (not 12), making the achievable win too small to be worth the ongoing
+correctness burden. Closed for good, not left open for a future attempt.
 
 ## The idea
 
@@ -52,24 +56,83 @@ extension: wrong on the very first, most basic seed/input pair, not an edge case
 and `test_jit_determinism` both passed, so this isn't a gross encoding error — the divergence is
 specific to actual dataset-item content in at least one of the exercised programs.
 
-**Mechanism not identified.** Register selection was independently re-verified against the actual
-`.S` wrapper (not just the doc's claim) and appears correct; the literal-pool consumption ordering
-relies on the same scheduler guarantee the existing indirect-load path already depends on. Given
-the failure mode is silent wrong hashes and no specific root cause was isolated in the time spent,
-the change was fully reverted (`git checkout -- src/jit_compiler_a64.cpp`) rather than shipped
-with an undemonstrated fix, matching this project's standing rule for this risk class. Re-verified
-clean (`test_jit_equivalence` passing) on the reverted code before moving on.
+**Mechanism not identified at the time.** Register selection was re-verified against the actual
+`.S` wrapper (not just the doc's claim) and appeared correct within that scope. Given the failure
+mode is silent wrong hashes and no specific root cause was isolated in the time spent, the change
+was fully reverted (`git checkout -- src/jit_compiler_a64.cpp`) rather than shipped with an
+undemonstrated fix, matching this project's standing rule for this risk class. Re-verified clean
+(`test_jit_equivalence` passing) on the reverted code before moving on.
 
-## If revisited
+## Root cause found on revisit (2026-07-26, same day)
 
-Candidate next steps, not attempted here:
-- Bisect with a smaller reproduction (single seed, single program) and dump both JIT and
-  interpreter intermediate register state after the superscalar phase specifically, rather than
-  only the final hash, to localize which register/value first diverges.
-- Double check whether `emit_order`'s IMUL_RCP-relative-order guarantee, which
-  `scheduleSuperscalarProgram()`'s own doc comment states as *"no two IMUL_RCP instructions ever
-  have their relative emission order changed,"* actually holds when the *first* instruction in a
-  swapped triple (`fp[i].is_long_latency`) is itself scheduled early via the `i+2`/`i+1` swap
-  pattern in a way that could put a later program's independent instruction between two IMUL_RCPs
-  that this pre-pass assumed were contiguous in traversal order — not confirmed as the actual bug,
-  but the most specific lead for a future attempt.
+The register-availability analysis above was scoped only to the superscalar wrapper
+(`randomx_calc_dataset_item_aarch64`) — it never checked what the *caller* of that function has
+live in those same physical registers. That's the actual gap.
+
+`randomx_calc_dataset_item_aarch64` is invoked via a plain `bl` from *inside* the main VM
+program's own JIT-compiled body, in light mode, once per main-loop iteration (2048×/hash) — not
+as a standalone call. Reading the main program's own register table at the top of
+`jit_compiler_a64_static.S`:
+
+```
+# x14 -> "r6"
+# x15 -> "r7"
+...
+# x19 -> temporary
+# x20 -> temporary
+# x21 -> literal for IMUL_RCP
+...
+# x28 -> literal for IMUL_RCP
+```
+
+**x14 and x15 hold two of the main program's own live VM registers (r6, r7)** throughout its
+entire execution, and **x21-x28 hold the main program's own pre-loaded `IMUL_RCP` literals**
+(the exact same optimization already applied to the main path, `h_IMUL_RCP`) — loaded once at
+program start and expected to survive for the program's full 2048-iteration lifetime. Neither the
+light-mode call site (`randomx_program_aarch64_vm_instructions_end_light`, saves only x0/x1/x2/x30
+around the `bl`) nor the superscalar wrapper's own entry/exit (saves x0-x13) protects x14, x15, or
+x21-x28 across this call. **The only reason the original, unmodified code has always been correct
+is that it never writes to any of those registers** — safety by non-interference, not by an
+explicit contract. The moment new code writes into x14 (the first register in the original
+12-register plan), it silently corrupts the main program's live r6 for the rest of that hash.
+
+**Confirmed empirically via bisection**, using a temporary `ARMRX_IMUL_RCP_MAX_PREASSIGN` env var
+(0-12, capping how many registers the fast path used) to test hypotheses without rebuilding:
+
+| Registers used (in order) | Result |
+|---|---|
+| (none, cap=0) | Pass — sanity check, matches baseline |
+| x19 alone (cap=1) | **Pass** — 16/16 pairs |
+| x19, x20 (cap=2) | **Fail** — same seed_0/input_0 divergence |
+| x19, x20, x14 (cap=3) | Fail |
+
+x19 and x20 are the *only* two registers the main program's own table marks "temporary" (implying
+genuinely free) rather than holding persistent state — and x19 alone does work. But **x20 also
+fails**, for a reason not fully traced to a single instruction (the main-loop body reuses x19/x20
+for "next iteration's scratchpad address" bookkeeping earlier in the same iteration that the `bl`
+call happens in, computed *after* the call and consumed at the very end of the loop body — the
+exact liveness window across the call wasn't fully pinned down for x20 specifically). No other
+untested candidate registers remain: everything else in the original 12 has an independently
+understood reason to be unsafe (x14/x15 = live VM registers, x21-x28 = the main program's own
+`IMUL_RCP` literals, x0-x13 = used by the superscalar wrapper itself, x16-x18/x29-x30 = procedure-
+call-reserved / frame pointer / return address).
+
+## Why this closes the idea for good, not just this attempt
+
+The realistic safe register budget is **at most 1** (x19, lightly validated — only against the
+16-pair `test_jit_equivalence` sweep, not the full 100-seed stress test), not the 12 originally
+planned. At that scale the achievable win shrinks to "maybe eliminate one `LDR_LITERAL` for
+whichever `IMUL_RCP` instruction happens to be scheduled first, in whichever of the 8 chained
+per-hash superscalar programs has one early enough" — a payoff far below what would justify adding
+a special-cased, register-allocation-fragile optimization to the JIT's most safety-critical code
+path, one that would need to be re-verified any time the surrounding `.S` template or scheduler
+changes what it keeps live across this call. **Closed permanently** — not carried forward as an
+open item in `docs/plans/mid-high-risk-performance-ideas-20260726.md`.
+
+## Lesson for any future work touching this call boundary
+
+Any future JIT change that emits code inside `generateSuperscalarHash()` (or anything else reached
+via `bl rx_calc_dataset_item`) must treat **x14, x15, and x21-x28 as live and must not clobber
+them** in light mode, even though nothing in the superscalar wrapper's own local save/restore
+suggests they're in use. The safety of the existing code is contingent on this register set never
+being touched — that contract isn't enforced anywhere, only true by inspection today.
