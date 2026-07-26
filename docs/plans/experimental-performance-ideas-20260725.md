@@ -272,6 +272,41 @@ external audits (Hermes, Gemini) as "not yet acted on, needs measurement." None 
 specific evidence-backed reason to prioritize over the ideas above; pick one only if it maps
 to an actual pain point someone hits.
 
+**`-mtune=cortex-a53` — CLOSED, non-issue (2026-07-26).** Checked on-device: `-mcpu=native`
+(already used for `ARMRX_ENABLE_NATIVE` builds) resolves to `cortex-a53+crc+crypto` — GCC already
+auto-detects and tunes for the exact CPU. An explicit `-mtune=cortex-a53` would be redundant. No
+code change needed.
+
+**Found in passing, real but inert: `CRC32` compile-time feature silently dropped.** The build's
+actual flag combination (`-march=armv8-a+crypto -mcpu=native`, exactly what `CMakeLists.txt`
+produces) silently drops `__ARM_FEATURE_CRC32` — confirmed via `-dM -E` macro dump — even though
+`-mcpu=native` alone enables it on this exact chip. No warning is printed. Traced where CRC32 is
+actually used (`src/cpu_features.cpp`/`src/miner_app.cpp`): only a runtime `AT_HWCAP` capability
+check for the startup "CRC32: available" printout — never used for any actual computation. The
+silently-dropped compile-time feature therefore has **zero performance impact**; not worth fixing
+for performance reasons (would only matter for correctness/consistency if this project ever
+starts calling CRC32 ACLE intrinsics directly, which it doesn't).
+
+**New attempt: main-loop dataset prefetch removal — tried, real regression, reverted
+(2026-07-26).** `src/jit_compiler_a64_static.S`'s main loop still had one active prefetch
+(`prfm pldl1keep, [x20]`, targeting the 256 MiB dataset/cache line about to be XORed in) —
+different from the three *scratchpad* prefetches already found to be a net regression and removed
+(`PLAN.md` Phase 6 item 10). Given that precedent, tested removing this one the same way.
+**Result: the opposite finding** — two independent on-device `perf stat` samples both showed
+cycles *increasing* (+1.71% contended, +0.80% in a cleaner re-measurement after re-pinning a
+concurrently-running stress test off the measurement core), i.e., removing it made things worse.
+Makes sense in hindsight: the scratchpad (2 MiB) mostly fits in cache and a hint there can be
+counterproductive; the dataset/cache (256 MiB) is genuinely DRAM-latency-bound and benefits from
+prefetching. Reverted (`git checkout -- src/jit_compiler_a64_static.S`); zero correctness risk
+either way (pure hint), `test_jit_encodings`/`test_jit_determinism`/`test_jit_equivalence` all
+passed on the (ultimately reverted) experimental build too.
+
+**Also checked, no new leads found:** a quick empirical check of whether `IADD_C7`/`C8`/`C9`
+(superscalar) would benefit from a `SUB`-immediate fast path for negative sign-extended
+immediates, mirroring idea #2's investigation — adding it would only raise fast-path coverage
+from ~0.38% to ~0.78% of instructions (random 32-bit data rarely has the needed structure either
+way). Not worth the same JIT-emission risk for a sub-1%-of-instructions payoff; not implemented.
+
 ---
 
 ## Grouping by expected payoff and risk
