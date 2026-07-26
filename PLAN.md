@@ -194,10 +194,14 @@ local `--seconds=N` benchmark used to measure the 28.4 H/s figure), core 0 also 
 reader thread, JSON/job handling, and the per-second console print, so worker 0 now eats the same
 "pinned worker loses cycles to unrelated OS work" penalty `isolcpus` was adopted to fix on cores
 4-7 — just relocated to core 0, invisible to the no-network benchmark. No existing flag works
-around it (`--workers=7` still maps worker 0 to core 0 under the same modulo scheme). Real fix
-would have `MiningEngine` read `/sys/devices/system/cpu/isolated` and exclude non-isolated cores
-from the worker pool; not implemented. See `docs/experiments/isolcpus-rt-priority-win.md`'s
-"Second footgun" section for the full evidence chain.
+around it (`--workers=7` still maps worker 0 to core 0 under the same modulo scheme).
+**Correction (2026-07-26): the "real fix" originally proposed here (exclude non-isolated cores
+from the worker pool, e.g. 7 workers instead of 8) was wrong and would make it worse, not
+better** — core 0 is physically one of the fast cluster's cores (4.26 H/s isolated); excluding it
+gives 3 fast + 4 slow = 24.14 H/s, *below* the measured real 24.76 H/s, meaning the contended
+worker 0 is still contributing ~0.62 H/s that dropping it would lose for nothing. Caught by the
+user before this was implemented. No corrected fix has been identified yet — see
+`docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section for the full analysis.
 
 ## Completed — Phase 9 (2026-07-26): performance plan Step 1 run — gate closed, Steps 2-3 not needed
 

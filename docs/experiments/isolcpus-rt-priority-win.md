@@ -182,11 +182,23 @@ this overhead, which is exactly why it saw the full win and pool mining doesn't:
 worker-to-core mapping reintroduces, on core 0, the same "pinned worker loses cycles to
 unrelated OS work" mechanism that `isolcpus` was adopted to fix on cores 4-7.**
 
-Not yet fixed. The straightforward fix (have `MiningEngine` read
-`/sys/devices/system/cpu/isolated` and, when present, exclude non-isolated cores from the worker
-pool — e.g. 7 workers on cores 1-7 instead of 8 on 0-7) was scoped but not implemented; flagged
-for a future session. There is currently no workaround via existing flags: `--workers=7` still
-maps worker 0 to core 0 under the same modulo scheme, so it doesn't avoid the contention.
+Not yet fixed. **Correction (2026-07-26): the "straightforward fix" proposed here originally —
+have `MiningEngine` read `/sys/devices/system/cpu/isolated` and exclude non-isolated cores from
+the worker pool, e.g. 7 workers on cores 1-7 instead of 8 on 0-7 — is wrong and would make things
+*worse*, not better.** Core 0 is physically one of the *fast* cluster's four cores (per the table
+above, 4.26 H/s isolated). Excluding it entirely gives 3 fast + 4 slow = 3×4.26 + 4×2.84 =
+**24.14 H/s** — *below* the measured real-world 24.76 H/s, meaning worker 0 on the contended core
+0 is still contributing roughly `24.76 − 24.14 ≈ 0.62 H/s` (severely degraded from its 4.26 H/s
+potential, but not zero) — dropping it loses that partial contribution for nothing in return.
+Caught by the user before this was ever implemented.
+
+The actual lever, if one exists, is reducing what the main/stratum thread costs worker 0 on that
+shared core (lighter per-second console printing, less frequent JSON/stat work, or explicitly
+deprioritizing the main thread's scheduling priority relative to the worker), not removing the
+core from the pool. How much of the ~3.64 H/s gap between worker 0's current 0.62 H/s and its full
+4.26 H/s potential is actually recoverable this way — versus inherent to sharing a core with any
+main-thread work at all — has not been measured. `--workers=7` still maps worker 0 to core 0 under
+the same modulo scheme either way, so it isn't a workaround.
 
 ## This does not close the gap to XMRig
 

@@ -55,8 +55,8 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
     online-CPU-count method (e.g. parse `/sys/devices/system/cpu/online`) instead. Workaround
     until fixed: always pass `--workers=<N>` explicitly on an `isolcpus`-configured host.
 
-*   [ ] **Second, deeper bug found the next night — not yet fixed, no workaround exists**: even
-    with `--workers=8` passed correctly, a full overnight real-pool run with `isolcpus` active
+*   [ ] **Second, deeper bug found the next night — not yet fixed, no known good fix identified**:
+    even with `--workers=8` passed correctly, a full overnight real-pool run with `isolcpus` active
     sustained only ~24.76 H/s, matching the *pre-isolcpus* baseline (24.9 H/s), not the 28.4 H/s
     benchmarked win. Root cause: this device has no `cpufreq` sysfs, so
     `detect_core_order()` (`src/mining_engine.cpp:82-109`) falls back to sequential order
@@ -65,9 +65,15 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
     measured the 28.4 H/s figure), core 0 also hosts the stratum reader thread, JSON/job
     handling, and the per-second console print, so worker 0 eats that contention for the whole
     run. `--workers=7` does **not** work around it (same modulo scheme still maps worker 0 to
-    core 0). Real fix: have `MiningEngine` read `/sys/devices/system/cpu/isolated` and exclude
-    non-isolated cores from the worker pool. See
-    `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section.
+    core 0). **Correction (2026-07-26): excluding core 0 from the worker pool (the previously
+    proposed "real fix") is wrong and would make it worse** — core 0 is physically one of the
+    fast cluster's cores (4.26 H/s isolated); dropping it gives 3 fast + 4 slow = 24.14 H/s,
+    *below* the measured real 24.76 H/s, since the contended worker 0 is still contributing
+    ~0.62 H/s that would be lost for nothing. Caught by the user before this was implemented. The
+    real lever, unmeasured so far, would be reducing the main/stratum thread's own CPU cost on
+    the shared core rather than removing a worker from it. See
+    `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section for the full
+    analysis.
 
 No genuinely open performance items remain as of 2026-07-26 (the gated plan's Step 1 result
 above closed Steps 2-3). The two isolcpus-related deployment bugs above (worker-count default,
