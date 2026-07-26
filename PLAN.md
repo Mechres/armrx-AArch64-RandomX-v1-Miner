@@ -175,14 +175,21 @@ an armrx-specific one — it would very likely help XMRig by a similar margin to
 It does not close the ~10-12% cluster-normalized code-level gap to XMRig (Phase 6 item 9), which
 remains open.
 
-**Real bug found the same night, not yet fixed**: with `isolcpus` set, running `armrx` without
-an explicit `--workers=N` silently picks **1 worker instead of 8** — confirmed live during a real
-overnight pool-mining run. `src/cli_parser.cpp:35`'s default (`std::thread::hardware_concurrency()`)
+**Real bug found the same night — fixed 2026-07-27**: with `isolcpus` set, running `armrx` without
+an explicit `--workers=N` used to silently pick **1 worker instead of 8** — confirmed live during a
+real overnight pool-mining run. `src/cli_parser.cpp:35`'s default (`std::thread::hardware_concurrency()`)
 is affinity-based on this device's musl toolchain (via `sched_getaffinity()`), and `isolcpus`
-restricts new processes' default affinity to core 0 only. This makes the `isolcpus` win actively
-dangerous without a companion warning or fix — naive deployment loses far more (7/8 of
-throughput) than the 14% gained. **Not yet fixed**; always pass `--workers=<N>` explicitly on any
-`isolcpus`-configured host in the meantime. See `docs/experiments/isolcpus-rt-priority-win.md`.
+restricts new processes' default affinity to core 0 only. This made the `isolcpus` win actively
+dangerous without a companion fix — naive deployment lost far more (7/8 of throughput) than the
+14% gained. **Fix**: added `armrx::online_cpu_count()` (`include/armrx/cpu_features.hpp`/
+`src/cpu_features.cpp`), parsing `/sys/devices/system/cpu/online` (e.g. `0-7`) instead of relying
+on the affinity-sensitive `hardware_concurrency()`, with a fallback to the old behavior if that
+sysfs file is unavailable. Replaced at all four call sites that previously used
+`hardware_concurrency()` for a worker/thread count (`cli_parser.cpp`'s default,
+`mining_engine.cpp`'s two `detect_core_order()` variants — hwloc and sysfs-fallback — and its
+dataset-init temporary-thread-count fallback). Verified on-device: `--pool=...` with no
+`--workers` flag now logs `Selected mode (8 workers)` with `isolcpus=1-7` active. See
+`docs/experiments/isolcpus-rt-priority-win.md`.
 
 **Second, deeper bug found the next night, not yet fixed**: even with `--workers=8` passed
 correctly, a full overnight real-pool run sustained only ~24.76 H/s — the *pre-isolcpus* baseline,
@@ -266,9 +273,9 @@ and worked through every remaining item in this speculative backlog directly:
   identified; fully reverted rather than ship an undemonstrated fix. See
   `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
 
-**Nothing remains unaddressed in either performance backlog document.** The two genuinely open
-items project-wide are both the isolcpus deployment bugs documented in Phase 8 (worker-count
-default, worker-to-core placement) — not performance-tuning work.
+**Nothing remains unaddressed in either performance backlog document.** The worker-count-default
+bug documented in Phase 8 is now fixed (see below); worker-to-core placement remains the only
+genuinely open item project-wide, and it isn't performance-tuning work.
 
 ## Completed — Phase 11 (2026-07-26): mid/high-risk performance work — one adopted, one root-caused and closed for now
 
@@ -339,6 +346,30 @@ randomly-halved workers — the original Phase 8 "Mechanism" finding), just not 
 originally headlined. Full account in `docs/experiments/isolcpus-rt-priority-win.md`'s "Third
 finding" section.
 
-This closes the aggregate-hashrate mystery. The two remaining open items project-wide are still
-the Phase 8 deployment bugs (worker-count default, worker-to-core placement) — neither is
+This closes the aggregate-hashrate mystery. Worker-to-core placement is the only remaining open
+item project-wide (worker-count default is now fixed — see Phase 13 below), and it isn't
 performance-tuning work.
+
+## Completed — Phase 13 (2026-07-27): worker-count-default bug fixed; CPU temperature reporting added
+
+**Worker-count default fix.** `armrx::online_cpu_count()` (`include/armrx/cpu_features.hpp`/
+`src/cpu_features.cpp`) parses `/sys/devices/system/cpu/online` (e.g. `0-7`, or comma-separated
+ranges) for a true online-CPU count, falling back to `std::thread::hardware_concurrency()` only if
+that sysfs file is unavailable or unparsable. Replaced all four call sites that used the
+affinity-sensitive `hardware_concurrency()` for a worker/thread count: `cli_parser.cpp`'s
+`--workers` default, `mining_engine.cpp`'s two `detect_core_order()` variants (hwloc path and
+sysfs-fallback path), and its temporary-thread dataset-init fallback. Verified on-device:
+`--pool=...` with no `--workers` flag now logs `Selected mode (8 workers)` with `isolcpus=1-7`
+active (previously `(1 workers)`).
+
+**CPU temperature reporting.** New `armrx::read_cpu_temperatures()`/`max_cpu_temperature()`
+(`include/armrx/cpu_thermal.hpp`/`src/cpu_thermal.cpp`) scan `/sys/class/thermal/thermal_zone*`,
+matching zones whose `type` mentions "cpu" (case-insensitive — picks up this device's
+`cpu0-thermal`...`cpu4567-thermal` naming), returning empty gracefully on hosts without exposed
+thermal zones. Surfaced in three places: the console status line (both local-benchmark and
+pool-mining modes, ` | CPU: NN.NC` appended when available), the TUI dashboard's summary line
+(`TuiSnapshot::max_cpu_temp_c`), and the Prometheus metrics endpoint as a per-zone
+`armrx_cpu_temp_celsius{zone="..."}` gauge (both the benchmark-mode and pool-mode metrics
+providers). Verified on-device end to end: console line showed real readings (`CPU: 47.0C`), and
+the metrics endpoint returned all 5 zones with distinct real values (43-48°C range) matching the
+thermal logging already gathered for Phase 12's investigation above.

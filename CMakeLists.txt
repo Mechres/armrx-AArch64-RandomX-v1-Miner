@@ -37,6 +37,7 @@ add_library(armrx_core
     src/blake2_generator.cpp
     src/blake2b.cpp
     src/cpu_features.cpp
+    src/cpu_thermal.cpp
     src/dataset.cpp
     src/memory.cpp
     src/superscalar.cpp

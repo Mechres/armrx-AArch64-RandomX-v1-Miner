@@ -2,6 +2,7 @@
 
 #include "armrx/argon2.hpp"
 #include "armrx/cpu_features.hpp"
+#include "armrx/cpu_thermal.hpp"
 #include "armrx/memory.hpp"
 #include "armrx/mining_engine.hpp"
 #include "armrx/stratum_client.hpp"
@@ -163,6 +164,14 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
                        "# TYPE armrx_shares_found counter\n"
                        "armrx_shares_found " +
                        std::to_string(shares_found.load()) + "\n";
+                if (const auto zones = armrx::read_cpu_temperatures(); !zones.empty()) {
+                    out += "# HELP armrx_cpu_temp_celsius CPU thermal zone temperature\n"
+                           "# TYPE armrx_cpu_temp_celsius gauge\n";
+                    for (const auto& z : zones) {
+                        out += "armrx_cpu_temp_celsius{zone=\"" + z.name + "\"} " +
+                               std::to_string(z.temp_c) + "\n";
+                    }
+                }
                 out += "# EOF\n";
                 return out;
             });
@@ -196,7 +205,11 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
         std::cout << "[Mining] Speed: " << std::fixed << std::setprecision(2) << speed << " H/s"
                   << " | Shares: " << shares
                   << " | Total Hashes: " << total
-                  << " | Time: " << elapsed_sec << "s\r" << std::flush;
+                  << " | Time: " << elapsed_sec << "s";
+        if (const double temp_c = armrx::max_cpu_temperature(); temp_c >= 0.0) {
+            std::cout << " | CPU: " << std::fixed << std::setprecision(1) << temp_c << "C";
+        }
+        std::cout << "\r" << std::flush;
     }
     std::cout << std::endl;
 
@@ -314,6 +327,14 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
                        "armrx_jit_execute_seconds_total " +
                        std::to_string(static_cast<double>(te) / 1e9) + "\n";
 #endif
+                if (const auto zones = armrx::read_cpu_temperatures(); !zones.empty()) {
+                    out += "# HELP armrx_cpu_temp_celsius CPU thermal zone temperature\n"
+                           "# TYPE armrx_cpu_temp_celsius gauge\n";
+                    for (const auto& z : zones) {
+                        out += "armrx_cpu_temp_celsius{zone=\"" + z.name + "\"} " +
+                               std::to_string(z.temp_c) + "\n";
+                    }
+                }
                 out += "# EOF\n";
                 return out;
             });
@@ -391,6 +412,7 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
             snap.shares_rejected = pool_mgr->shares_rejected();
             snap.jit_compile_pct = compile_pct;
             snap.jit_execute_pct = execute_pct;
+            snap.max_cpu_temp_c = armrx::max_cpu_temperature();
             // Collect per-worker rates
             std::vector<double> worker_rates;
             for (unsigned w = 0; w < opts_.workers; ++w)
@@ -406,6 +428,9 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
             if (compile_pct >= 0.0 && execute_pct >= 0.0) {
                 std::cout << " | JIT Compile: " << std::fixed << std::setprecision(1) << compile_pct << "%"
                           << " Exec: " << execute_pct << "%";
+            }
+            if (const double temp_c = armrx::max_cpu_temperature(); temp_c >= 0.0) {
+                std::cout << " | CPU: " << std::fixed << std::setprecision(1) << temp_c << "C";
             }
             if (!online) {
                 std::cout << " | ";

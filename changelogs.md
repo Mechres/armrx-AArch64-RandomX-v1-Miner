@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-07-27 (2) — Fixed worker-count-default bug; added CPU temperature reporting
+
+- **Fix**: `--workers=N` used to silently default to 1 instead of 8 under `isolcpus` (musl's
+  `std::thread::hardware_concurrency()` reads the calling process's own affinity mask, which
+  `isolcpus` restricts new processes to). Added `armrx::online_cpu_count()`
+  (`include/armrx/cpu_features.hpp`, `src/cpu_features.cpp`), parsing
+  `/sys/devices/system/cpu/online` with a fallback to the old behavior if unavailable. Replaced
+  the four call sites that used `hardware_concurrency()` for a worker/thread count
+  (`cli_parser.cpp`'s default, `mining_engine.cpp`'s two `detect_core_order()` variants, and its
+  dataset-init fallback thread count). Verified on-device: `--pool=...` with no `--workers` now
+  correctly logs `Selected mode (8 workers)` under `isolcpus=1-7`.
+- **New feature**: CPU temperature reporting. New `src/cpu_thermal.cpp`/
+  `include/armrx/cpu_thermal.hpp` scan `/sys/class/thermal/thermal_zone*` for zones whose `type`
+  mentions "cpu", exposed in the console status line (` | CPU: NN.NC`), the TUI dashboard, and the
+  Prometheus metrics endpoint (`armrx_cpu_temp_celsius{zone="..."}` per zone). Gracefully reports
+  nothing on hosts without exposed thermal zones. Verified on-device end to end (console line and
+  `/metrics` both showed real per-zone readings).
+
+`PLAN.md` Phase 13, `NEXT_STEPS.md` updated to match.
+
 ## 2026-07-27 — Resolved the 24.76-vs-28.4 H/s aggregate mystery; vm.cpp hot-path cleanup
 
 Chased down the Phase 8 "aggregate lower than predicted" gap on the user's request for

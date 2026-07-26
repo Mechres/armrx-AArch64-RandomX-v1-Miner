@@ -40,6 +40,10 @@ struct TuiSnapshot {
     // Optional (only populated when ARMRX_JIT_PROFILE)
     double jit_compile_pct = -1.0;
     double jit_execute_pct = -1.0;
+
+    // Optional: highest reading across matched CPU thermal zones, in
+    // Celsius; -1.0 if no thermal zone is exposed by the host.
+    double max_cpu_temp_c = -1.0;
 };
 
 /**

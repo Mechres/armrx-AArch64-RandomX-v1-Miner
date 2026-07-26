@@ -140,7 +140,11 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
           << "  Shares: " << s.shares_submitted
           << " (acc: " << s.shares_accepted
           << " rej: " << s.shares_rejected << ")"
-          << "  Hashes: " << s.total_hashes << "\n";
+          << "  Hashes: " << s.total_hashes;
+    if (s.max_cpu_temp_c >= 0.0) {
+        frame << "  CPU: " << std::fixed << std::setprecision(1) << s.max_cpu_temp_c << "C";
+    }
+    frame << "\n";
 
     int new_lines = 1 + 8 + 1; // header + 8 worker bars + summary
 

@@ -47,13 +47,19 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
     recommendation (boot cmdline), not a code change. Full account, including two corrected false
     starts, in `docs/experiments/isolcpus-rt-priority-win.md`.
 
-*   [ ] **New, real bug found the same night — not yet fixed**: with `isolcpus` set, running
-    `armrx` without an explicit `--workers=N` silently picks 1 worker instead of 8 (confirmed
-    live during a real overnight pool-mining run). `src/cli_parser.cpp:35`'s default
-    (`std::thread::hardware_concurrency()`) reads the calling process's own affinity mask on this
-    musl toolchain, which `isolcpus` restricts new processes to (core 0 only). Fix: use a true
-    online-CPU-count method (e.g. parse `/sys/devices/system/cpu/online`) instead. Workaround
-    until fixed: always pass `--workers=<N>` explicitly on an `isolcpus`-configured host.
+*   [x] ~~Worker-count default bug~~ — **fixed 2026-07-27.** With `isolcpus` set, running `armrx`
+    without an explicit `--workers=N` used to silently pick 1 worker instead of 8 (confirmed live
+    during a real overnight pool-mining run). `src/cli_parser.cpp:35`'s default
+    (`std::thread::hardware_concurrency()`) read the calling process's own affinity mask on this
+    musl toolchain, which `isolcpus` restricts new processes to (core 0 only). Added
+    `armrx::online_cpu_count()` (`include/armrx/cpu_features.hpp`, `src/cpu_features.cpp`), which
+    parses `/sys/devices/system/cpu/online` (e.g. `0-7`) and falls back to
+    `hardware_concurrency()` only if that file is unavailable/unparsable. Replaced all four
+    affinity-sensitive `hardware_concurrency()` call sites (`cli_parser.cpp:35`,
+    `mining_engine.cpp`'s two `detect_core_order()` variants, and its dataset-init fallback
+    thread count) with the new helper. Verified on-device: `--pool=...` with no `--workers` flag
+    now correctly logs `Selected mode (8 workers)` with `isolcpus=1-7` active, instead of the
+    previous `(1 workers)`.
 
 *   [ ] **Second, deeper bug found the next night — not yet fixed, no known good fix identified**:
     even with `--workers=8` passed correctly, a full overnight real-pool run with `isolcpus` active
@@ -96,10 +102,11 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
 
 No genuinely open performance items remain as of 2026-07-27 (the gated plan's Step 1 result
 above closed Steps 2-3, and the third finding above closes the sustained-vs-burst hashrate
-question). The worker-count-default and worker-to-core-placement deployment bugs above are the
-only real open items project-wide. If performance work resumes anyway,
-`docs/plans/experimental-performance-ideas-20260725.md` is the speculative, unmeasured backlog to
-start from — `docs/plans/performance-plan-20260725.md`'s gated steps are all closed.
+question). The worker-count-default bug is now fixed; **worker-to-core placement (worker 0
+sharing core 0 with the main/stratum thread) is the only real open item project-wide.** If
+performance work resumes anyway, `docs/plans/experimental-performance-ideas-20260725.md` is the
+speculative, unmeasured backlog to start from — `docs/plans/performance-plan-20260725.md`'s gated
+steps are all closed.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.

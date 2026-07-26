@@ -1,4 +1,5 @@
 #include "armrx/mining_engine.hpp"
+#include "armrx/cpu_features.hpp"
 #include "armrx/dataset.hpp"
 #include "armrx/randomx_config.hpp"
 #include <iostream>
@@ -32,7 +33,7 @@ std::vector<unsigned int> detect_core_order() {
     if (depth < 0) {
         hwloc_topology_destroy(topology);
         // Fallback
-        unsigned int n = std::thread::hardware_concurrency();
+        unsigned int n = online_cpu_count();
         std::vector<unsigned int> fallback(n);
         for (unsigned int i = 0; i < n; ++i) fallback[i] = i;
         return fallback;
@@ -80,7 +81,7 @@ std::vector<unsigned int> detect_core_order() {
 // sysfs-based core ordering (fallback when hwloc is not available).
 // Reads cpuinfo_max_freq from sysfs and sorts by frequency descending.
 std::vector<unsigned int> detect_core_order() {
-    unsigned int num_cpus = std::thread::hardware_concurrency();
+    unsigned int num_cpus = online_cpu_count();
     if (num_cpus == 0) return {0};
 
     std::vector<std::pair<unsigned long, unsigned int>> freq_cores;
@@ -233,7 +234,7 @@ void MiningEngine::set_job(const Job& job) {
                 // set before start()) — fall back to temporary threads across
                 // all hardware cores, same as before. This is a one-time
                 // startup cost with no live workers to reuse anyway.
-                unsigned int init_threads_count = std::max(1U, std::thread::hardware_concurrency());
+                unsigned int init_threads_count = online_cpu_count();
                 std::vector<std::thread> init_threads;
                 std::uint64_t items_per_thread = randomx_dataset_item_count() / init_threads_count;
                 for (unsigned int i = 0; i < init_threads_count; ++i) {

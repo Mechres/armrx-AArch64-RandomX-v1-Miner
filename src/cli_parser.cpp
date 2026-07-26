@@ -1,5 +1,6 @@
 #include "armrx/cli_parser.hpp"
 #include "armrx/config.hpp"
+#include "armrx/cpu_features.hpp"
 #include "armrx/log.hpp"
 
 #include <algorithm>
@@ -32,7 +33,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
     ParsedArgs result;
     MinerOptions& o = result.options;
 
-    o.workers = std::max(1U, std::thread::hardware_concurrency());
+    o.workers = online_cpu_count();
 
     // Load config from file (CLI overrides below)
     std::string config_path;
