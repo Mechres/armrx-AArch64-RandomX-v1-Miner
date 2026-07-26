@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 
 #if defined(__aarch64__) && defined(__ARM_NEON)
 #include <arm_neon.h>
@@ -277,6 +278,16 @@ Argon2dCache::Argon2dCache(std::size_t memory_blocks, std::size_t passes)
         ::madvise(ptr, allocated_size_, MADV_HUGEPAGE);
     }
     blocks_ = static_cast<Argon2Block*>(ptr);
+    // Prefault writable pages now rather than on first touch during
+    // initialize() -- doesn't help steady-state hashrate, but shortens the
+    // seed-rotation pause (new job/seed key) by moving the fault cost here.
+    // Mirrors vm.cpp's scratchpad prefault; this cache allocation didn't
+    // have it (docs/plans/experimental-performance-ideas-20260725.md #10).
+#if defined(MADV_POPULATE_WRITE)
+    ::madvise(blocks_, allocated_size_, MADV_POPULATE_WRITE);
+#else
+    std::memset(blocks_, 0, allocated_size_);
+#endif
 }
 
 Argon2dCache::~Argon2dCache() {

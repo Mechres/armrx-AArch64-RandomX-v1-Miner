@@ -1,5 +1,47 @@
 # Changelog
 
+## 2026-07-26 (later still) — Experimental performance backlog worked through directly
+
+Per explicit user direction ("if we continue like this we cant improve anything"), stopped
+gating low-risk ideas on a diagnostic before implementing and instead implemented-and-measured
+directly through `docs/plans/experimental-performance-ideas-20260725.md`:
+
+- **Adopted**: `-fvisibility=hidden`/`-fno-semantic-interposition` + `-fomit-frame-pointer`
+  (`CMakeLists.txt`, ideas #6+#12) — real small win, average +0.298% IPC across two on-device
+  `perf stat` samples, zero correctness risk (full test suite unaffected).
+- **Adopted**: Argon2 cache `MADV_POPULATE_WRITE` (`src/argon2.cpp`, idea #10) — mirrors the
+  scratchpad's existing prefault pattern; confirmed a fresh `Argon2dCache` is constructed on every
+  seed rotation, so this genuinely applies each rotation, not just at startup. Latency-only by
+  design, not independently quantified.
+- **Adopted**: `.p2align 6` for the main loop's I-cache alignment (`src/jit_compiler_a64_static.S`,
+  idea #11) — measured noise-level (−0.048% cycles) exactly as predicted, kept anyway for zero
+  cost/risk.
+- **Closed on evidence**: scratchpad alignment (#9, already 2 MiB-aligned), I-cache pressure (#8,
+  0.788% miss rate, below the ~1% threshold), BLAKE2b NEON (#5, doesn't register in the profile).
+- **Done**: profiled the C++ overhead slice (#4) — `hash_aes_1r_x4`+`fill_aes_1r_x4` is the single
+  biggest named-C++ cost at ~12.3% of all cycles, bigger than Argon2 or NEON permute combined; both
+  known optimization avenues for it already tried and failed, so not newly actionable but now
+  precisely quantified.
+- **Tried, reverted**: superscalar `IMUL_RCP` register pre-assignment (idea #1) — implemented after
+  correcting the backlog doc's wrong register-availability claim (x9 is live, not free), but caused
+  a real `test_jit_equivalence` failure on its first test case. Mechanism not identified; fully
+  reverted rather than ship an undemonstrated fix, matching this project's standing rule for
+  silent-wrong-hash-risk changes. Full account:
+  `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
+- Also found and fixed: this project's own devbox test tooling was run with `-j8` against a
+  memory-constrained device, causing several tests to be OOM-killed under contention rather than
+  a real correctness regression — re-confirmed all of them clean at safe parallelism (the
+  project's own `devbox_full` already defaults test parallelism to 2 for this reason).
+
+## 2026-07-26 (later) — Scratchpad-locality experiment replicated, isolcpus-agnostic
+
+Independent replication of the scratchpad-locality experiment (`+5.44% IPC` vs original `+6.07%`)
+after `isolcpus=1-7 rcu_nocbs=1-7` was removed from the kernel boot cmdline and the device
+rebooted. Same binary, same `taskset -c 0` pinning, same 2000-iteration protocol; both conditions
+ran slightly faster without isolcpus (less kernel overhead on core 0), but the recoverable IPC gap
+is nearly identical. Conclusion robust to system isolation configuration. Updated
+`docs/experiments/scratchpad-locality-bound-20260726.md` with a Replication subsection.
+
 ## 2026-07-26 — Performance Plan Step 1 Run: Gate Closed, No Open Performance Leads Remain
 
 `docs/plans/performance-plan-20260725.md`'s Step 1 — bound how much of the main VM program's

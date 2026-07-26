@@ -215,7 +215,10 @@ DECL(randomx_program_aarch64):
 	prfm	pldl1keep, [x17]
 	prfm	pldl1keep, [x17, #32]
 
-	.p2align 5
+	# 64-byte alignment matches the Cortex-A53's I-cache line size exactly
+	# (docs/plans/experimental-performance-ideas-20260725.md #11); was
+	# 32-byte, a weaker guarantee.
+	.p2align 6
 DECL(randomx_program_aarch64_main_loop):
 .Lmain_loop:
 

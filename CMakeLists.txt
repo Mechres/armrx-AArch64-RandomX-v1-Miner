@@ -107,6 +107,21 @@ target_link_libraries(armrx_core PUBLIC Threads::Threads)
 target_compile_features(armrx_core PUBLIC cxx_std_20)
 target_compile_options(armrx_core PRIVATE -Wall -Wextra -Wpedantic -Wconversion -Wshadow -ffp-contract=fast -funroll-loops -frounding-math)
 
+# -fvisibility=hidden + -fno-semantic-interposition: on PIE builds (default on
+# many Linux distros), these let the compiler inline across translation units
+# more aggressively and drop PLT indirection for intra-library calls.
+# Confirmed absent from this build (docs/plans/experimental-performance-ideas-20260725.md #6).
+target_compile_options(armrx_core PRIVATE -fvisibility=hidden -fno-semantic-interposition)
+
+if(NOT ARMRX_ENABLE_ASAN)
+    # ASAN needs frame pointers for its stack traces (forced back on via
+    # -fno-omit-frame-pointer below in that block); everywhere else, skip
+    # the x29/x30 save/restore pair per call. Confirmed genuinely untried:
+    # 219/523 functions in a release build carry a frame-pointer prologue
+    # (docs/plans/experimental-performance-ideas-20260725.md #12).
+    target_compile_options(armrx_core PRIVATE -fomit-frame-pointer)
+endif()
+
 if(ARMRX_ENABLE_NATIVE)
     target_compile_options(armrx_core PRIVATE -mcpu=native)
 endif()
