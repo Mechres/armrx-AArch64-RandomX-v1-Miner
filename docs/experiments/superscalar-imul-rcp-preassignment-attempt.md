@@ -1,11 +1,15 @@
-# Superscalar IMUL_RCP register pre-assignment — tried, root-caused, closed for good (2026-07-26)
+# Superscalar IMUL_RCP register pre-assignment — tried, root-caused, closed for now (2026-07-26)
 
-**Status: closed, root cause understood.** This is `docs/plans/experimental-performance-ideas-20260725.md`
-idea #1, and `docs/plans/mid-high-risk-performance-ideas-20260726.md` Tier 1 item 1. First attempt
-implemented, failed the very first differential test case, reverted with the mechanism unidentified.
-Revisited via bisection the same day: root cause found and confirmed, but the safe register budget
-turned out to be at most 1 (not 12), making the achievable win too small to be worth the ongoing
-correctness burden. Closed for good, not left open for a future attempt.
+**Status: closed for now, root cause understood, explicitly revisitable.** This is
+`docs/plans/experimental-performance-ideas-20260725.md` idea #1, and
+`docs/plans/mid-high-risk-performance-ideas-20260726.md` Tier 1 item 1. First attempt implemented,
+failed the very first differential test case, reverted with the mechanism unidentified. Revisited
+via bisection the same day: root cause found and confirmed, but the safe register budget turned
+out to be at most 1 (not 12), making the achievable win too small to be worth the ongoing
+correctness burden *right now*. Not left as an active open item, but not proven impossible either
+— see "Revisit path" in `docs/plans/mid-high-risk-performance-ideas-20260726.md` item 1 for what
+would need to change to make this worth another look (mainly: understanding why x20 specifically
+fails, which could double the safe budget if the current analysis turns out to be wrong).
 
 ## The idea
 
@@ -117,7 +121,7 @@ understood reason to be unsafe (x14/x15 = live VM registers, x21-x28 = the main 
 `IMUL_RCP` literals, x0-x13 = used by the superscalar wrapper itself, x16-x18/x29-x30 = procedure-
 call-reserved / frame pointer / return address).
 
-## Why this closes the idea for good, not just this attempt
+## Why this is closed for now, not carried forward as an active item
 
 The realistic safe register budget is **at most 1** (x19, lightly validated — only against the
 16-pair `test_jit_equivalence` sweep, not the full 100-seed stress test), not the 12 originally
@@ -126,8 +130,11 @@ whichever `IMUL_RCP` instruction happens to be scheduled first, in whichever of 
 per-hash superscalar programs has one early enough" — a payoff far below what would justify adding
 a special-cased, register-allocation-fragile optimization to the JIT's most safety-critical code
 path, one that would need to be re-verified any time the surrounding `.S` template or scheduler
-changes what it keeps live across this call. **Closed permanently** — not carried forward as an
-open item in `docs/plans/mid-high-risk-performance-ideas-20260726.md`.
+changes what it keeps live across this call. **Not worth continuing right now** — but genuinely
+revisitable, not proven impossible. See the "Revisit path" note in
+`docs/plans/mid-high-risk-performance-ideas-20260726.md` item 1 for the two concrete next steps
+(root-cause x20's failure; consider explicit save/restore at the call site) that would need to
+happen before this is worth another attempt.
 
 ## Lesson for any future work touching this call boundary
 

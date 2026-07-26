@@ -14,7 +14,8 @@ Ranked by how well each is actually supported by evidence gathered so far, not b
 
 ### 1. Bisect and fix the reverted superscalar `IMUL_RCP` register pre-assignment (idea #1)
 
-**Status: CLOSED for good (2026-07-26) — root cause found, payoff too small at the safe scale.**
+**Status: CLOSED for now, but explicitly revisitable with more time (2026-07-26) — root cause
+found, payoff too small at the currently-known safe scale.**
 
 Full account in `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`. Bisected using
 a temporary env-var cap (0-12 registers) on the original attempt: root cause is that
@@ -26,8 +27,22 @@ originally-planned 12 registers, only **x19** empirically works as a sole preass
 x20 (also nominally "temporary") fails too, for a reason not fully pinned down. With a real safe
 budget of at most 1 register (lightly validated), the achievable win is far too small to justify
 the ongoing correctness burden of a register-allocation-fragile optimization in the JIT's most
-safety-critical path. **Not carried forward — closed permanently, not left open for a future
-attempt.**
+safety-critical path — not worth continuing right now, but **not proven impossible either.**
+
+**Revisit path, if picked up again:**
+1. Understand *why* x20 fails — the liveness-window analysis said it should be safe (computed
+   after the `bl` call, consumed only at the very end of that same loop iteration), but it
+   empirically isn't. Either the analysis is wrong (and x20 could join x19, doubling the budget to
+   2) or there's a real hazard not yet modeled. Worth resolving before anything else here, since it
+   directly changes the achievable ceiling.
+2. A structurally different mitigation, not attempted: add explicit save/restore of a few more
+   registers around the `bl rx_calc_dataset_item` call site in `jit_compiler_a64_static.S` itself,
+   trading a small fixed cost (extra store/load pairs, paid 2048×/hash) for unlocking more
+   registers for the fast path. Whether that trade is net-positive was never measured.
+3. Even if (1) or (2) unlocks more registers, re-measure the actual achievable win before
+   committing further effort — the real payoff (how many `IMUL_RCP` instructions land in
+   pre-assigned slots per program, across the 8 chained per-hash programs) was never re-quantified
+   once the register-budget reality set in.
 
 ### 2. Widen the main-VM-program scheduler's swap window for the already-adopted long-latency-op class
 
