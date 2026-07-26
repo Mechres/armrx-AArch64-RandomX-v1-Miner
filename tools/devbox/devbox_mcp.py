@@ -477,13 +477,26 @@ def tool_sync(cfg: Config) -> dict[str, Any]:
     }
 
 
+
+# Any process launched without explicit CPU affinity inherits the *default*
+# affinity mask -- which isolcpus restricts to the non-isolated cores (core 0
+# only on this device). Confirmed to make on-device builds and parallel ctest
+# runs silently serialize onto that one core (all spawned gmake/cc1plus
+# children inherit the parent shell's affinity) -- see
+# docs/experiments/isolcpus-rt-priority-win.md's "Second footgun" section.
+# taskset overrides this explicitly and is a harmless no-op when isolcpus
+# isn't set (it just pins to the full online range, which is the default
+# anyway), so it's safe to always apply here.
+_TASKSET_ALL_CORES = 'taskset -c "$(cat /sys/devices/system/cpu/online 2>/dev/null || echo 0)"'
+
+
 def tool_build(cfg: Config, reconfigure: bool, clean: bool, extra_flags: list[str] | None = None, parallel: int | None = None) -> dict[str, Any]:
     """On-device cmake build. Incremental by default."""
     build_flags = list(cfg.build_flags)
     if extra_flags:
         build_flags.extend(extra_flags)
     flags = " ".join(shlex.quote(f) for f in build_flags)
-    
+
     steps = []
     if clean:
         steps.append(f"rm -rf {cfg.remote_dir}/build")
@@ -491,11 +504,11 @@ def tool_build(cfg: Config, reconfigure: bool, clean: bool, extra_flags: list[st
         steps.append(
             f"cmake -S {cfg.remote_dir} -B {cfg.remote_dir}/build {flags}"
         )
-        
+
     jobs = parallel if parallel is not None else getattr(cfg, "build_jobs", None)
     jobs_flag = f"-j{jobs}" if jobs is not None else "-j"
-    steps.append(f"cmake --build {cfg.remote_dir}/build {jobs_flag}")
-    
+    steps.append(f"{_TASKSET_ALL_CORES} cmake --build {cfg.remote_dir}/build {jobs_flag}")
+
     cmd = " && ".join(steps)
     res = _stash_and_run(cfg, cmd, "build", cfg.timeout("build"))
     parsed = parse_build(res["stdout"], res["exit_code"])
@@ -523,7 +536,8 @@ def tool_test(cfg: Config, tests: list[str] | None, parallel: int) -> dict[str, 
             "--output-on-failure", f"-j{parallel}"]
     if tests:
         args += ["-R", "^(" + "|".join(re.escape(t) for t in tests) + ")$"]
-    cmd = " ".join(a if a.startswith("--test-dir=") else shlex.quote(a) for a in args)
+    cmd = _TASKSET_ALL_CORES + " " + " ".join(
+        a if a.startswith("--test-dir=") else shlex.quote(a) for a in args)
     # NOTE: was cfg.timeout() (the 120s "default" bucket) -- the full,
     # unfiltered suite (bench_armrx alone ~300s, test_pool_protocol ~65s,
     # plus everything else) routinely takes 350-400s+, so this always timed

@@ -82,6 +82,26 @@ public:
     [[nodiscard]] const RegisterFile& get_register_file() const { return reg_; }
     [[nodiscard]] const std::byte* get_scratchpad() const { return scratchpad_data_; }
 
+#ifdef ARMRX_HAVE_JIT
+    // Bench-only: re-invoke the JIT program compiled by the most recent run()
+    // call against the current register/scratchpad state, without generating
+    // or compiling a new program. Isolates pure execute-against-scratchpad
+    // cycles from compile overhead -- used to measure the recoverable IPC gap
+    // from scratchpad memory latency (docs/plans/performance-plan-20260725.md
+    // Step 1). Not used by production mining; requires a prior run() call.
+    void run_execute_only();
+#endif
+
+    // Bench-only: replace the scratchpad pointer/size used by run()/
+    // run_execute_only() without freeing the previous allocation -- the
+    // caller owns and must manage the lifetime of both buffers. Exists to
+    // A/B the JIT program's execution against a small, cache-resident-
+    // aliased backing versus the real 2 MiB scratchpad. Not for production use.
+    void override_scratchpad_for_bench(std::byte* ptr, std::size_t size) {
+        scratchpad_data_ = ptr;
+        scratchpad_size_ = size;
+    }
+
 #ifdef ARMRX_JIT_PROFILE
     [[nodiscard]] std::uint64_t get_jit_compile_time_ns() const { return jit_compile_time_ns_; }
     [[nodiscard]] std::uint64_t get_jit_execute_time_ns() const { return jit_execute_time_ns_; }
@@ -196,6 +216,12 @@ private:
     // Scratchpad (2 MiB) — mmap-allocated with huge page hint
     std::byte* scratchpad_data_ = nullptr;
     std::size_t scratchpad_size_ = 0;
+
+#ifdef ARMRX_HAVE_JIT
+    // Saved from the most recent run_jit() compile, reused by run_execute_only()
+    // (bench-only) to re-invoke the same compiled program without recompiling.
+    MemoryRegisters last_mem_regs_{};
+#endif
 
     // Temporary storage for hashing pipeline
     AesState temp_hash_{};

@@ -62,6 +62,8 @@ measure identically on current code).
 
 > [!CAUTION]
 > **If you set `isolcpus`, always pass `--workers=<N>` explicitly.** The default worker-count auto-detection (`std::thread::hardware_concurrency()`) reads the *calling process's own CPU affinity mask*, which `isolcpus` restricts new processes to (core 0 only) — so an un-flagged run silently mines on 1 core instead of all of them, losing far more than the 14% gained above. Confirmed live on this device; not yet fixed in code.
+>
+> **Even with `--workers=N` set correctly, the measured +14% mostly doesn't show up in real pool mining.** The isolcpus win above was measured with the built-in local benchmark (`--seconds=N`, no `--pool`) — no stratum/network overhead. In real pool mining, one worker still lands on core 0 (the only core `isolcpus` leaves for the OS/main thread), where it now competes with the stratum reader thread, JSON handling, and the once-a-second console print — overhead the benchmark never has. A full overnight pool run with `isolcpus` active and `--workers=8` sustained only ~24.76 H/s, matching the *pre-isolcpus* baseline, not the benchmarked 28.4 H/s. Not yet fixed in code; see [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md).
 
 ---
 

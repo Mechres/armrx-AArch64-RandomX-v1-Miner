@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-07-26 — Performance Plan Step 1 Run: Gate Closed, No Open Performance Leads Remain
+
+`docs/plans/performance-plan-20260725.md`'s Step 1 — bound how much of the main VM program's
+~2.2× IPC penalty is recoverable memory-latency stall versus architectural floor, before
+attempting either of the two gated follow-on steps — was run to completion on-device.
+
+- New `bench_armrx --scratchpad-real`/`--scratchpad-l1` flags and `VirtualMachine::run_execute_only()`
+  isolate the JIT-compiled main-VM-program execute step and re-run it against either the real
+  2 MiB scratchpad or a 16 KiB `memfd` tiled 128× across the same virtual range (so every JIT-
+  computed address lands on the same L1-sized physical backing, with zero change to the JIT's own
+  address-masking logic).
+- `perf stat -e cycles,instructions`, 2000 iterations each, on-device: real scratchpad IPC 0.6572
+  vs. L1-aliased IPC 0.6971 — instruction counts matched to 5 decimal places, a clean comparison.
+  Forcing near-zero scratchpad latency bought only **+6.07% IPC**.
+- Per the plan's own gate, that's a small recoverable gap against the region's ~2.2× overall
+  penalty — **the stall is mostly not a memory-latency problem**. This closes Step 2 (`PRFM`
+  prefetch) and Step 3 (bisecting the reverted memory-op scheduler hazard) without attempting
+  either; both target latency, and Step 3 specifically would have accepted real correctness risk
+  (silent wrong hashes) for a ceiling that turned out to be low. The residual penalty reads as
+  architectural (in-order pipeline/dependency-chain-bound), not something further code-level work
+  can chase. Full account in `docs/experiments/scratchpad-locality-bound-20260726.md`; `PLAN.md`
+  Phase 9 and `NEXT_STEPS.md` updated to match.
+- Also found and fixed along the way: `tools/devbox/devbox_mcp.py`'s `devbox_build`/`devbox_test`
+  were silently serializing on-device builds and parallel `ctest` runs onto core 0 under
+  `isolcpus` (same root mechanism as the worker-count/worker-placement bugs, just hitting the
+  build tooling) — both now prefix their remote commands with `taskset -c
+  "$(cat /sys/devices/system/cpu/online)"`.
+
 ## 2026-07-25 — `isolcpus`/`rcu_nocbs` — Real ~14% Hashrate Win, Biggest in Project History
 
 The user installed `setcap` and granted explicit permission to edit the boot cmdline and reboot

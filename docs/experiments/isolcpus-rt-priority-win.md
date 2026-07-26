@@ -156,6 +156,38 @@ parsing `/sys/devices/system/cpu/online` or an equivalent unaffected by process 
 **always pass `--workers=<N>` explicitly on any host with `isolcpus` set.** Not yet fixed in
 code as of this writing — flagged for the next session.
 
+## Second footgun found the next night: the measured win mostly doesn't survive contact with real pool mining
+
+The 28.4 H/s figure above was measured with the built-in local benchmark
+(`--mine --workers=8 --warmup=15 --seconds=60`, no `--pool`) — no stratum client, no network I/O,
+no per-second console printing. A full overnight run against a real pool (`tr.monero.herominers.com`,
+`--workers=8` passed explicitly, `isolcpus`/`rcu_nocbs` active, confirmed via `/proc/cmdline` and
+`/sys/devices/system/cpu/isolated` showing `1-7`) sustained only **~24.76 H/s for the full 13.5-hour
+run** — statistically the *pre-isolcpus* baseline (24.9 H/s), not the benchmarked win.
+
+Root cause, confirmed on-device: this kernel/device exposes **no `cpufreq` sysfs at all**
+(`/sys/devices/system/cpu/cpu*/cpufreq/` doesn't exist — `ls` fails). `detect_core_order()`
+(`src/mining_engine.cpp:82-109`) needs `cpuinfo_max_freq` to build its frequency-sorted core
+list; with none present, it silently falls back to the plain sequential order `[0,1,...,7]`.
+With `AffinityMode::All` (the default) and `--workers=8`, `worker_loop()`
+(`src/mining_engine.cpp:328-334`) pins worker *i* to `core_order_[i % 8]` — so **worker 0 lands
+on core 0**, the one core `isolcpus=1-7` deliberately leaves *unisolated* for the OS/main thread.
+
+In real pool mining, core 0 isn't just "the OS's core" in the abstract — it's where the main
+thread's stratum reader, JSON job/share handling, `PoolManager::tick()`, and the once-a-second
+console print all land (unset thread affinity defaults to the non-isolated set under `isolcpus`,
+confirmed: a plain SSH shell's own affinity comes back as `pid N's current affinity list: 0`).
+Worker 0 shares its core with all of that for the entire run. The local benchmark has none of
+this overhead, which is exactly why it saw the full win and pool mining doesn't: **the
+worker-to-core mapping reintroduces, on core 0, the same "pinned worker loses cycles to
+unrelated OS work" mechanism that `isolcpus` was adopted to fix on cores 4-7.**
+
+Not yet fixed. The straightforward fix (have `MiningEngine` read
+`/sys/devices/system/cpu/isolated` and, when present, exclude non-isolated cores from the worker
+pool — e.g. 7 workers on cores 1-7 instead of 8 on 0-7) was scoped but not implemented; flagged
+for a future session. There is currently no workaround via existing flags: `--workers=7` still
+maps worker 0 to core 0 under the same modulo scheme, so it doesn't avoid the contention.
+
 ## This does not close the gap to XMRig
 
 Worth being explicit about scope: this is a general OS-scheduling fix, not something specific to

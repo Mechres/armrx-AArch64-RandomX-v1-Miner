@@ -183,3 +183,50 @@ restricts new processes' default affinity to core 0 only. This makes the `isolcp
 dangerous without a companion warning or fix — naive deployment loses far more (7/8 of
 throughput) than the 14% gained. **Not yet fixed**; always pass `--workers=<N>` explicitly on any
 `isolcpus`-configured host in the meantime. See `docs/experiments/isolcpus-rt-priority-win.md`.
+
+**Second, deeper bug found the next night, not yet fixed**: even with `--workers=8` passed
+correctly, a full overnight real-pool run sustained only ~24.76 H/s — the *pre-isolcpus* baseline,
+not the benchmarked 28.4 H/s win. Root cause: this device has no `cpufreq` sysfs at all, so
+`detect_core_order()` (`src/mining_engine.cpp:82-109`) falls back to sequential core order
+`[0..7]`, and `AffinityMode::All`'s `i % core_order_.size()` mapping puts worker 0 on core 0 — the
+one core `isolcpus=1-7` leaves unisolated for the OS/main thread. In real pool mining (unlike the
+local `--seconds=N` benchmark used to measure the 28.4 H/s figure), core 0 also hosts the stratum
+reader thread, JSON/job handling, and the per-second console print, so worker 0 now eats the same
+"pinned worker loses cycles to unrelated OS work" penalty `isolcpus` was adopted to fix on cores
+4-7 — just relocated to core 0, invisible to the no-network benchmark. No existing flag works
+around it (`--workers=7` still maps worker 0 to core 0 under the same modulo scheme). Real fix
+would have `MiningEngine` read `/sys/devices/system/cpu/isolated` and exclude non-isolated cores
+from the worker pool; not implemented. See `docs/experiments/isolcpus-rt-priority-win.md`'s
+"Second footgun" section for the full evidence chain.
+
+## Completed — Phase 9 (2026-07-26): performance plan Step 1 run — gate closed, Steps 2-3 not needed
+
+Full detail in **[`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md)**
+(Step 1's "Result" callout) and **[`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md)**.
+
+Phase 7's remaining lead — the main VM program region's ~2.2× IPC penalty
+(`docs/archived/plan_phase7_completed.md`) — had one gated, evidence-first step defined but not
+yet run: bound how much of that penalty is recoverable memory-latency stall (fixable) versus
+architectural floor (not fixable), before spending any more implementation effort chasing it.
+
+**Ran it.** New `bench_armrx --scratchpad-real`/`--scratchpad-l1` flags (`tests/bench_armrx.cpp`)
+and `VirtualMachine::run_execute_only()` (`src/vm.cpp`) isolate the JIT-compiled main-VM-program
+execute step from compile overhead, then re-run it against either the real 2 MiB scratchpad or a
+16 KiB `memfd` tiled 128× across the same 2 MiB virtual range (so every address the JIT computes
+lands on the same L1-sized physical backing, with zero change to the JIT's own address-masking
+logic). `perf stat -e cycles,instructions`, 2000 iterations each, on-device:
+
+| Condition | Cycles | Instructions | IPC |
+|---|---|---|---|
+| Real 2 MiB scratchpad | 44,694,130,884 | 29,373,692,608 | 0.6572 |
+| L1-aliased (16 KiB) | 42,135,298,579 | 29,373,699,356 | 0.6971 |
+
+Instruction counts match to 5 decimal places — a clean comparison. Forcing the scratchpad to be
+effectively latency-free bought only **+6.07% IPC**. Per the plan's own gate, that's small
+against the region's ~2.2× overall penalty: **the stall is mostly not a memory-latency problem**.
+This closes Step 2 (`PRFM` prefetch) and Step 3 (bisecting the reverted memory-op scheduler)
+without attempting either — both target latency, and there isn't enough latency-bound stall left
+to justify either's cost (Step 3 specifically carries real correctness risk, silent wrong
+hashes). The residual penalty reads as architectural (in-order pipeline / dependency-chain-bound
+on this Cortex-A53), not something a further code change can chase. **No genuinely open
+performance lead remains project-wide as of this writing.**

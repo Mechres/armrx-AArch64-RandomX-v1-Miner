@@ -43,6 +43,13 @@
 #include <cstdint>
 #include <cfenv>
 
+#ifdef ARMRX_HAVE_JIT
+#include <sys/mman.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstdlib>
+#endif
+
 namespace {
 
 using bench_clock = std::chrono::steady_clock;
@@ -268,6 +275,109 @@ void bench_argon2_cache_init() {
     }, "init", 1.0);
     print_result(r);
 }
+
+#ifdef ARMRX_HAVE_JIT
+// Maps a small physical backing (`alias_bytes`) repeatedly across a much
+// larger virtual address range (`virtual_bytes`), so every offset the JIT
+// program computes into the "scratchpad" lands on the same small physical
+// footprint -- without touching any of the JIT's own address-masking logic.
+// Used to bound how much of the main VM program's ~2.2x IPC penalty
+// (docs/plans/performance-plan-20260725.md Step 1) is recoverable: if
+// forcing the scratchpad to be effectively L1-resident closes most of the
+// gap, the penalty is a real, fixable memory-latency stall; if IPC barely
+// moves, the penalty is architectural (pipeline depth vs. any memory
+// latency), not something a code change can chase further.
+struct AliasedScratchpad {
+    std::byte*  base          = nullptr;
+    std::size_t virtual_bytes = 0;
+    int         fd            = -1;
+
+    static AliasedScratchpad create(std::size_t alias_bytes, std::size_t virtual_bytes) {
+        AliasedScratchpad result;
+        result.virtual_bytes = virtual_bytes;
+
+        int fd = static_cast<int>(::memfd_create("armrx_l1_bench", 0));
+        if (fd < 0) { std::perror("memfd_create"); std::exit(1); }
+        if (::ftruncate(fd, static_cast<off_t>(alias_bytes)) != 0) { std::perror("ftruncate"); std::exit(1); }
+
+        void* reservation = ::mmap(nullptr, virtual_bytes, PROT_NONE,
+                                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+        if (reservation == MAP_FAILED) { std::perror("mmap (reserve)"); std::exit(1); }
+
+        for (std::size_t off = 0; off < virtual_bytes; off += alias_bytes) {
+            void* tile = ::mmap(static_cast<std::byte*>(reservation) + off, alias_bytes,
+                                 PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd, 0);
+            if (tile == MAP_FAILED) { std::perror("mmap (tile)"); std::exit(1); }
+        }
+
+        // Touch + warm the one physical alias so it's resident before timing starts.
+        std::memset(reservation, 0, alias_bytes);
+
+        result.base = static_cast<std::byte*>(reservation);
+        result.fd = fd;
+        return result;
+    }
+};
+
+void bench_scratchpad_locality(bool use_l1_alias) {
+    print_header(use_l1_alias
+        ? "6. Scratchpad locality experiment -- L1-aliased (16 KiB) backing"
+        : "6. Scratchpad locality experiment -- real 2 MiB scratchpad (baseline)");
+
+    std::vector<std::byte> seed_key = {std::byte{0x00}, std::byte{0x11}};
+    armrx::Argon2dCache cache;
+    cache.initialize(seed_key);
+
+    std::uint32_t jit_flags = armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit;
+    armrx::VirtualMachine vm(jit_flags);
+    vm.set_cache(&cache);
+
+    alignas(16) std::array<std::byte, 32> hash_out{};
+    std::array<std::byte, 76> block_template{};
+    for (size_t i = 0; i < block_template.size(); ++i)
+        block_template[i] = static_cast<std::byte>(i & 0xff);
+
+    // Prime state with one real hash before any scratchpad swap.
+    armrx::randomx_calculate_hash(&vm, block_template.data(), block_template.size(), hash_out.data());
+
+    AliasedScratchpad aliased;
+    if (use_l1_alias) {
+        constexpr std::size_t kAliasBytes = 16384; // 16 KiB -- Cortex-A53 L1 D-cache size
+        aliased = AliasedScratchpad::create(kAliasBytes, armrx::kRandomXScratchpadBytes);
+        vm.override_scratchpad_for_bench(aliased.base, armrx::kRandomXScratchpadBytes);
+    }
+
+    // One more full run() so the compiled program reflects current state
+    // immediately before the execute-only loop below takes over.
+    vm.run(block_template.data());
+
+    constexpr unsigned kWarmupIters = 100;
+    for (unsigned i = 0; i < kWarmupIters; ++i) vm.run_execute_only();
+
+    // Each iteration is a full 2048-instruction JIT program execution against
+    // the scratchpad (~26 ms/iteration measured on-device) -- this is not a
+    // cheap microbenchmark op. 2000 iterations is already a low-noise sample
+    // for a perf-stat cycles/instructions *ratio* (a deterministic repeated
+    // loop has very little run-to-run variance) while keeping each condition
+    // under a minute; the first version of this experiment used 20000 and
+    // took ~9 minutes per condition for no measurement benefit.
+    constexpr unsigned kIterations = 2000;
+    auto t0 = bench_clock::now();
+    for (unsigned i = 0; i < kIterations; ++i) vm.run_execute_only();
+    auto t1 = bench_clock::now();
+    double total_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+
+    std::cout << std::left << std::setw(44)
+              << (use_l1_alias ? "run_execute_only (L1-aliased)" : "run_execute_only (real scratchpad)")
+              << std::right << std::fixed << std::setprecision(2)
+              << std::setw(10) << (total_us / kIterations) << " μs/program  "
+              << std::setw(10) << (kIterations / (total_us / 1e6)) << " programs/s\n";
+    std::cout << "  (" << kIterations << " executions of the already-compiled program; "
+              << "wrap this process in `perf stat -e cycles,instructions` for the real\n"
+              << "  IPC comparison -- wall-clock alone is not sensitive enough, per this "
+              << "project's own track record.)\n";
+}
+#endif // ARMRX_HAVE_JIT
 
 void bench_region_attribution() {
     print_header("4. Region attribution — hash pipeline phases");
@@ -551,6 +661,8 @@ int main(int argc, char** argv) {
     bool full_hash_only   = false;
     bool micro_only       = false;
     bool argon2_only      = false;
+    bool scratchpad_real  = false;
+    bool scratchpad_l1    = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -558,6 +670,8 @@ int main(int argc, char** argv) {
         else if (arg == "--full-hash-only") { run_all = false; full_hash_only = true; }
         else if (arg == "--micro-only") { run_all = false; micro_only = true; }
         else if (arg == "--argon2-only") { run_all = false; argon2_only = true; }
+        else if (arg == "--scratchpad-real") { run_all = false; scratchpad_real = true; }
+        else if (arg == "--scratchpad-l1") { run_all = false; scratchpad_l1 = true; }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: bench_armrx [OPTIONS]\n"
                       << "Options:\n"
@@ -565,6 +679,11 @@ int main(int argc, char** argv) {
                       << "  --full-hash-only     Only run full-hash throughput benchmark\n"
                       << "  --micro-only         Only run micro-benchmarks (blake2b, AES, dataset)\n"
                       << "  --argon2-only        Only run isolated Argon2dCache::initialize() benchmark\n"
+                      << "  --scratchpad-real    Scratchpad locality experiment, real 2 MiB scratchpad\n"
+                      << "                       (AArch64/JIT builds only; run each of --scratchpad-real\n"
+                      << "                       and --scratchpad-l1 under `perf stat -e cycles,instructions`\n"
+                      << "                       and compare IPC -- see performance-plan-20260725.md Step 1)\n"
+                      << "  --scratchpad-l1      Same experiment, scratchpad aliased to 16 KiB (L1-resident)\n"
                       << "  --help               Show this message\n";
             return 0;
         }
@@ -657,6 +776,20 @@ int main(int argc, char** argv) {
                   << "  max:       " << report_percentile(100) << " μs\n"
                   << "  mean:      " << mean / 1000.0          << " μs\n";
     }
+
+#ifdef ARMRX_HAVE_JIT
+    if (scratchpad_real) {
+        bench_scratchpad_locality(/*use_l1_alias=*/false);
+    }
+    if (scratchpad_l1) {
+        bench_scratchpad_locality(/*use_l1_alias=*/true);
+    }
+#else
+    if (scratchpad_real || scratchpad_l1) {
+        std::cout << "\n--scratchpad-real/--scratchpad-l1 require an ARMRX_HAVE_JIT build "
+                     "(AArch64 target).\n";
+    }
+#endif
 
     if (run_all) {
         std::cout << "\n=== Done ===\n";

@@ -1,7 +1,13 @@
 # armrx — Performance Plan (2026-07-25)
 
-**Status:** honest, evidence-gated plan. No aspirational estimates — every item below states
-what's known, what's unknown, and what evidence would green-light or kill the next step.
+**Status: closed, 2026-07-26.** Step 1 ran and gave a small-effect result, which per this plan's
+own gate closes Steps 2 and 3 without needing to attempt either. See "Step 1 — result" below.
+The rest of this document is kept as-written (including the original, not-yet-run framing) so
+the reasoning that led to each step is legible after the fact; only the "result" callouts are new.
+
+**Status (as originally written):** honest, evidence-gated plan. No aspirational estimates —
+every item below states what's known, what's unknown, and what evidence would green-light or
+kill the next step.
 
 **Background:** after six phases of profiling, three independent code reviews, three external
 audits, a worker-count sweep, a two-cluster interconnect discovery, opcode-level cycle
@@ -68,9 +74,49 @@ benchmark only), one `perf stat` capture.
 **Decision:** if recoverable gap is small → close this lead, document as hardware floor. If
 large → proceed to Step 2.
 
+**Result (2026-07-26): small — gate closed here, Steps 2-3 not attempted.**
+
+Built the synthetic microbenchmark exactly as scoped: `bench_armrx --scratchpad-real` /
+`--scratchpad-l1` (new flags; see `tests/bench_armrx.cpp`'s `bench_scratchpad_locality()` and
+`AliasedScratchpad`). Rather than shrinking the scratchpad buffer itself (which would break the
+JIT's compile-time address masks, which range up to the full 2 MiB), a small 16 KiB `memfd` is
+tiled 128× across the same 2 MiB virtual range the JIT already computes offsets into — every
+address the compiled program can produce lands on the same 16 KiB of physical memory, small
+enough to be L1-resident, with zero change to the JIT compiler or its masking logic. A new
+`VirtualMachine::run_execute_only()` (`src/vm.cpp`) re-invokes the last-compiled program directly,
+isolating pure execute-against-scratchpad cycles from the JIT-compile step measured separately in
+`ARMRX_JIT_PROFILE` builds. `perf stat -e cycles,instructions`, 2000 iterations each, `taskset -c 0`
+(on-device, real hardware, not the interpreted x86 dev sandbox):
+
+| Condition | Cycles | Instructions | IPC |
+|---|---|---|---|
+| Real 2 MiB scratchpad | 44,694,130,884 | 29,373,692,608 | 0.6572 |
+| L1-aliased (16 KiB) | 42,135,298,579 | 29,373,699,356 | 0.6971 |
+
+Instruction counts match to 5 decimal places (same compiled program, same iteration count) — a
+clean, well-controlled comparison. Forcing the scratchpad to be effectively latency-free bought
+only **+6.07% IPC** (cycles −5.73%). Per this step's own gate ("if the difference is small...
+there is very little room to improve — the penalty is architectural, not fixable by code
+changes"), **6% is small** against the ~2.2× IPC penalty this region carries overall. **The main
+VM program's stall is therefore mostly not a memory-latency problem** — both Step 2 (`PRFM`,
+which only helps if latency is the bottleneck) and Step 3 (bisecting the reverted memory-op
+scheduler, which reorders emission to hide latency) target the wrong mechanism and are closed
+without being attempted. The residual penalty looks architectural — in-order pipeline /
+dependency-chain-bound on this Cortex-A53 — not something a code change can chase further.
+**Caveat worth recording**: per-instruction `*_M` addresses in the real condition are already
+masked to a 16 KiB (`kScratchpadL1Mask`) or 256 KiB (`kScratchpadL2Mask`) window depending on the
+opcode's mod-mem bit (only the once-per-program `mx`/`ma` accumulator address uses the full 2 MiB
+mask) — so the real baseline already has more locality than a naively "fully random 2 MiB" mental
+model would suggest, which is consistent with (and likely part of why) the recoverable gap turned
+out to be small rather than a methodology artifact.
+
 ---
 
-### Step 2 — Prefetch-based approach: `PRFM` insertion for `*_M` opcodes (medium effort, mechanistically distinct from the reverted scheduler extension)
+### Step 2 — Prefetch-based approach: `PRFM` insertion for `*_M` opcodes (medium effort, mechanistically distinct from the reverted scheduler extension) — closed, not attempted (2026-07-26)
+
+**Closed by Step 1's result**: `PRFM` only pays off if the stall is memory-latency-bound. Step 1
+showed forcing near-zero latency (full L1 residency) recovers just 6% of the region's IPC
+penalty — there isn't enough latency-bound stall left for a prefetch hint to hide. Not attempted.
 
 **Hypothesis (gated on Step 1 showing a real recoverable gap):** explicit software prefetch
 (`PRFM`) for scratchpad memory operands, inserted at the point an opcode's address register
@@ -105,7 +151,15 @@ re-measure `test_jit_equivalence` + `bench_armrx`. If not → proceed to Step 3.
 
 ---
 
-### Step 3 — Bisect the memory-op scheduler hazard (high effort, high correctness risk, only if Steps 1-2 both show real room)
+### Step 3 — Bisect the memory-op scheduler hazard (high effort, high correctness risk, only if Steps 1-2 both show real room) — closed, not attempted (2026-07-26)
+
+**Closed by Step 1's result**, same reasoning as Step 2: this step exists to let the emitter
+scheduler reorder emission to hide memory latency. Step 1 showed there's only ~6% of IPC penalty
+attributable to latency in the first place, which doesn't justify the high correctness risk
+(silent wrong hashes) this step accepted in exchange for recovering it. Not attempted — the
+already-small measured payoff from the existing (non-memory-op) scheduler (+0.233% IPC) was
+already the practical ceiling reference point; this would have needed to clear a much higher bar
+than 6% of a small region's penalty to be worth the risk.
 
 **Hypothesis (gated on Steps 1-2 confirming a real recoverable gap that `PRFM` can't reach):**
 the reverted scheduler extension's `test_jit_equivalence` failure has a specific, isolatable
@@ -159,8 +213,10 @@ interrupt-driven evictions of the micro-TLB or L1 cache lines could have disprop
 **Tempered expectations:** the device's 6→8-worker degradation is a hardware interconnect-
 arbitration effect (confirmed in Phase 6 item 3), not scheduler-visible. CPU isolation was
 never going to touch that mechanism. It *might* help the front-loaded 1→4-worker memory-
-contention component marginally. The 2.2× IPC penalty in the main VM region is almost
-certainly a data-latency problem, not an OS-jitter problem — `isolcpus=` doesn't make DRAM
+contention component marginally. **Correction (2026-07-26, per Step 1's result above): the 2.2×
+IPC penalty in the main VM region is mostly *not* a data-latency problem after all** — this
+paragraph's original assumption was wrong; forcing the scratchpad to be effectively latency-free
+only recovered 6% of IPC. `isolcpus=` doesn't make DRAM
 faster.
 
 **Effort:** ~1 hour once device access is available (one `setcap`, one `cmdline` edit, one
@@ -213,3 +269,11 @@ Performance work reaching a natural stopping point after this much investigation
 Step 1 — is a legitimate outcome, not a failure. The codebase has already had more profiling
 depth than most production mining software ever gets; closing a lead with "hardware floor" is
 useful knowledge for anyone reading the logs later.
+
+## Outcome (2026-07-26)
+
+This is exactly what happened. Step 1 ran, showed a small (6%) recoverable gap, and per its own
+gate that closed Steps 2 and 3 without needing to attempt either — the natural stopping point
+this section anticipated. No genuinely open performance lead remains as of this writing. See
+`PLAN.md`'s Phase 9 entry and `NEXT_STEPS.md` for the pointer into this result from the
+project-level trackers.

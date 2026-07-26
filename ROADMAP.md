@@ -73,7 +73,17 @@
   `armrx` itself), 8-worker aggregate rises to a reproducible **~28.4 H/s (+14%)** — the biggest
   measured win in this project's history. Mechanism: cores 4-7 stop losing throughput to
   background OS work/interrupts when isolated; cores 0-3 unaffected either way. See
-  `docs/experiments/isolcpus-rt-priority-win.md`.
+  `docs/experiments/isolcpus-rt-priority-win.md`. **Two real deployment bugs found since, not yet
+  fixed**: `--workers=N` must be passed explicitly on `isolcpus` hosts (default detection
+  silently picks 1 worker), and even then worker 0 lands on the one unisolated core and eats
+  stratum/main-thread contention that the local benchmark never sees, so real pool mining doesn't
+  see the full win. See `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section.
+- **Main VM program IPC penalty bounded (2026-07-26, `PLAN.md` Phase 9):** the region's ~2.2×
+  IPC penalty is mostly *not* recoverable memory-latency stall — forcing the scratchpad to be
+  effectively L1-resident only recovered **+6.07% IPC** in a controlled `perf stat` A/B. Closes
+  the performance plan's remaining gated steps (`PRFM` prefetch, memory-op scheduler bisection)
+  without attempting either. **No genuinely open performance lead remains project-wide.** See
+  `docs/experiments/scratchpad-locality-bound-20260726.md`.
 - **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 - **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
@@ -305,8 +315,9 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/experiments/memory-op-scheduler-attempt.md`](docs/experiments/memory-op-scheduler-attempt.md) | Emitter scheduler extended to `*_M` opcodes, caused a real JIT/interpreter divergence, reverted (mechanism not identified), 2026-07-25 |
 | [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) | `isolcpus`/`rcu_nocbs` deployment tuning — real ~14% hashrate win, biggest in project history, 2026-07-25 |
 | [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) | Full narrative for every completed Phase 7 item, split out of `PLAN.md` 2026-07-25 |
-| [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the one open quantified lead (main VM program 2.2× IPC penalty), if performance work resumes |
-| [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative, unscheduled backlog covering other regions (superscalar, C++ overhead, cross-cutting) |
+| [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the main VM program's 2.2× IPC penalty — **closed 2026-07-26**, Step 1 result was small, closing Steps 2-3 unattempted |
+| [`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md) | Step 1's result: forcing the scratchpad L1-resident only recovers +6.07% IPC — the penalty is mostly architectural, not memory-latency |
+| [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative, unscheduled backlog covering other regions (superscalar, C++ overhead, cross-cutting) — the only place left to start if performance work resumes |
 | [`docs/archived/future-performance-ideas-20260725.md`](docs/archived/future-performance-ideas-20260725.md) | Superseded first-pass future-ideas doc — content merged into the two docs above |
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |

@@ -1,12 +1,21 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-25
+**Updated:** 2026-07-26
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-Phases 1–8 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
-`docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`, and
-`docs/experiments/isolcpus-rt-priority-win.md` for the full narratives.
+Phases 1–9 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
+`docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`,
+`docs/experiments/isolcpus-rt-priority-win.md`, and
+`docs/experiments/scratchpad-locality-bound-20260726.md` for the full narratives.
+
+*   [x] ~~Performance plan Step 1 (bound the main-VM-program scratchpad-locality recoverable
+    gap)~~ — **done 2026-07-26, small result (+6.07% IPC), closes Steps 2-3 without attempting
+    either.** `bench_armrx --scratchpad-real`/`--scratchpad-l1` + `perf stat` on-device: forcing
+    the scratchpad to be effectively L1-resident only recovered 6% of IPC against the region's
+    ~2.2× overall penalty — the stall is mostly architectural, not memory-latency. **No genuinely
+    open performance lead remains project-wide.** See
+    `docs/experiments/scratchpad-locality-bound-20260726.md`.
 
 *   [x] ~~`--rt-priority` + `isolcpus=`/`nohz_full=`~~ — **done 2026-07-25, a real ~14% win, the
     biggest measured win in this project's history.** The user installed `setcap` and granted
@@ -26,9 +35,25 @@ Phases 1–8 are all **fully resolved** — see `docs/archived/plan_completed_ph
     online-CPU-count method (e.g. parse `/sys/devices/system/cpu/online`) instead. Workaround
     until fixed: always pass `--workers=<N>` explicitly on an `isolcpus`-configured host.
 
-No genuinely open items remain as of 2026-07-25. If performance work resumes, see
-`docs/plans/performance-plan-20260725.md` (gated steps) or
-`docs/plans/experimental-performance-ideas-20260725.md` (speculative backlog).
+*   [ ] **Second, deeper bug found the next night — not yet fixed, no workaround exists**: even
+    with `--workers=8` passed correctly, a full overnight real-pool run with `isolcpus` active
+    sustained only ~24.76 H/s, matching the *pre-isolcpus* baseline (24.9 H/s), not the 28.4 H/s
+    benchmarked win. Root cause: this device has no `cpufreq` sysfs, so
+    `detect_core_order()` (`src/mining_engine.cpp:82-109`) falls back to sequential order
+    `[0..7]`; with `AffinityMode::All`, worker 0 lands on core 0 — the one core `isolcpus=1-7`
+    leaves unisolated. Under real pool mining (unlike the local `--seconds=N` benchmark that
+    measured the 28.4 H/s figure), core 0 also hosts the stratum reader thread, JSON/job
+    handling, and the per-second console print, so worker 0 eats that contention for the whole
+    run. `--workers=7` does **not** work around it (same modulo scheme still maps worker 0 to
+    core 0). Real fix: have `MiningEngine` read `/sys/devices/system/cpu/isolated` and exclude
+    non-isolated cores from the worker pool. See
+    `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" section.
+
+No genuinely open performance items remain as of 2026-07-26 (the gated plan's Step 1 result
+above closed Steps 2-3). The two isolcpus-related deployment bugs above (worker-count default,
+worker-to-core placement) are the only real open items project-wide. If performance work resumes
+anyway, `docs/plans/experimental-performance-ideas-20260725.md` is the speculative, unmeasured
+backlog to start from — `docs/plans/performance-plan-20260725.md`'s gated steps are all closed.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.
