@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026-07-26 (final) — Experimental performance backlog: last two items closed, full closure reached
+
+Continuing directly from the same-day backlog work below, resolved the two remaining items:
+
+- **#2 (superscalar `IXOR_C*` immediate materialization) — closed on evidence, no JIT code
+  touched.** Given idea #1 had just failed in this exact code region, built and validated a
+  standalone AArch64 logical-immediate encoder first: decode-and-brute-force-search over the
+  ~8192 valid `(N,immr,imms)` combinations, cross-checked against the codebase's own existing
+  `andInstrL1`/`andInstrL2` AND-immediate scratchpad masks as ground truth, then round-trip
+  tested against 2000 constructed-valid patterns (0 failures). Confirmed `IXOR_C7`/`C8`/`C9`'s
+  constants come from `gen.get_uint32()` (`src/superscalar.cpp:392`), a genuinely uniform random
+  stream, then tested the encoder against 20,000 random sign-extended 32-bit values: **0 were
+  encodable** as a single logical immediate (they're an astronomically narrow subset of the
+  64-bit space — only ~5000-ish valid patterns exist in total out of 2^64). The optimization
+  would have been correct when it applies, but would essentially never apply to real
+  RandomX-generated programs. Closed without any JIT compiler changes or correctness risk.
+- **#7 (double-buffered JIT compile/execute overlap) — closed, flawed premise.** Read
+  `randomx_calculate_hash()` (`src/vm.cpp:943-965`) before implementing: each chain iteration's
+  `run()` (compile+execute) is followed by `blake2b(register_file)` to produce the *next* run's
+  seed — run N+1's program entropy depends on run N's post-execution output, so there is no point
+  where N+1's compile inputs exist while N is still executing. The idea's premise doesn't hold
+  for this codebase's actual dependency chain. Closed without implementation.
+
+**Every item in `docs/plans/experimental-performance-ideas-20260725.md` is now resolved** — 4
+adopted, 5 closed on evidence, 1 diagnostic done, 1 tried-and-reverted. `PLAN.md` Phase 10,
+`NEXT_STEPS.md`, and `ROADMAP.md` updated to match.
+
 ## 2026-07-26 (later still) — Experimental performance backlog worked through directly
 
 Per explicit user direction ("if we continue like this we cant improve anything"), stopped

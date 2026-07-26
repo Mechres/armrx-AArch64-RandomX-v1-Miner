@@ -4,18 +4,24 @@
 gated, planned, or promised. If someone wants to pick up performance work after
 `docs/plans/performance-plan-20260725.md`'s gated steps are exhausted, start here.
 
-**Update 2026-07-26: worked through this list directly** (implement-and-measure, not gate-on-
-diagnostic-alone — see `[[feedback_perf_work_pace]]` memory). Outcome per item, in the tables and
-sections below: **#6+#12 adopted** (compiler flags, real small win, +0.298% IPC avg over two
-on-device `perf stat` samples), **#9 closed** (scratchpad already 2 MiB-aligned, far beyond the
-64-byte requirement), **#8 closed** (I-cache miss rate 0.788%, below the doc's own ~1% threshold),
-**#4 done** (AES `hash_aes_1r_x4`+`fill_aes_1r_x4` is the single biggest named-C++ cost at ~12.3%
-of all cycles, bigger than Argon2 or NEON permute combined — both known optimization avenues
-already tried and failed, so not newly actionable, but now precisely quantified), **#5 closed**
-(BLAKE2b doesn't register in the profile at all), **#10 adopted** (correctness-verified, latency-
-only so not independently quantified — see reasoning in the item below), **#11 adopted** (measured
-noise-level as the doc itself predicted, kept anyway — zero risk), **#1 tried, reverted** (real
-JIT/interpreter divergence, see `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`).
+**Update 2026-07-26: worked through this list directly, to full closure** (implement-and-measure,
+not gate-on-diagnostic-alone — see `[[feedback_perf_work_pace]]` memory). Outcome per item, in the
+tables and sections below: **#6+#12 adopted** (compiler flags, real small win, +0.298% IPC avg
+over two on-device `perf stat` samples), **#9 closed** (scratchpad already 2 MiB-aligned, far
+beyond the 64-byte requirement), **#8 closed** (I-cache miss rate 0.788%, below the doc's own ~1%
+threshold), **#4 done** (AES `hash_aes_1r_x4`+`fill_aes_1r_x4` is the single biggest named-C++
+cost at ~12.3% of all cycles, bigger than Argon2 or NEON permute combined — both known
+optimization avenues already tried and failed, so not newly actionable, but now precisely
+quantified), **#5 closed** (BLAKE2b doesn't register in the profile at all), **#10 adopted**
+(correctness-verified, latency-only so not independently quantified — see reasoning in the item
+below), **#11 adopted** (measured noise-level as the doc itself predicted, kept anyway — zero
+risk), **#1 tried, reverted** (real JIT/interpreter divergence, see
+`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`), **#2 closed on evidence**
+(built and validated a standalone AArch64 logical-immediate encoder before touching any JIT code —
+0 of 20,000 real, randomly-distributed superscalar immediates turned out encodable), **#7 closed**
+(read `randomx_calculate_hash()` first — the premise this idea rested on doesn't hold for this
+codebase's actual sequential compile/execute/hash dependency chain). **Nothing in this file remains
+unaddressed.**
 
 **Sources:** brainstormed after the main-VM-program ~2.2× IPC lead was identified,
 superscalar region was characterized (72.71% of instructions, 1.145× IPC), and the C++
@@ -47,7 +53,21 @@ account: `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
 
 ---
 
-### 2. Superscalar IXOR_C* immediate materialization
+### 2. Superscalar IXOR_C* immediate materialization — CLOSED ON EVIDENCE (2026-07-26)
+
+Implemented and validated a standalone AArch64 logical-immediate encoder first (decode-and-
+brute-force-search over the ~8192 (N,immr,imms) combinations, cross-checked against the
+codebase's own existing `andInstrL1`/`andInstrL2` AND-immediate scratchpad masks as ground truth,
+then round-trip tested against 2000 constructed-valid patterns — 0 failures). Before touching
+`jit_compiler_a64.cpp`, tested the encoder against the actual immediate distribution: `IXOR_C7`/
+`C8`/`C9`'s constants come from `gen.get_uint32()` (`src/superscalar.cpp:392`), a genuinely
+uniform random stream. **0 of 20,000 random sign-extended 32-bit test values were encodable** as
+a single AArch64 logical immediate (they're an astronomically narrow subset of the 64-bit space —
+only ~5000-ish valid patterns exist in total out of 2^64). The optimization would be correct when
+it applies, but would essentially never apply to real RandomX-generated programs. Closed without
+touching the JIT compiler at all — the standalone validation step (chosen specifically because
+idea #1 had just failed in this exact code region) caught a "not worth it" result before any
+integration or correctness risk was taken.
 
 **The idea:** `IXOR_C7`/`C8`/`C9` handlers do `emitMovImmediate(x12, imm)` (MOVZ+MOVK, 2 instructions) + `EOR dst, dst, x12` (1 instruction) = 3 instructions total. If the immediate fits in AArch64's replicated-bit encoding, use single-instruction `EOR dst, dst, #imm` instead. If not, pre-load into registers during a pre-pass (same pattern as idea #1).
 
@@ -121,7 +141,17 @@ compiler flags, full test suite unaffected). Kept.
 
 ## Orthogonal / cross-cutting
 
-### 7. Double-buffered JIT compilation (overlap compile with execute)
+### 7. Double-buffered JIT compilation (overlap compile with execute) — CLOSED, FLAWED PREMISE (2026-07-26)
+
+Read `randomx_calculate_hash()` (`src/vm.cpp:943-965`) before implementing: each chain iteration
+does `machine->run(seed)` (compile + execute, fully sequential) then `blake2b(register_file)` to
+produce the *next* run's seed. Run N+1's program entropy depends on run N's post-execution
+register state — it is not available until run N's `run()` call has both executed and been
+hashed. There is no point at which N+1's compile inputs exist while N is still executing; the
+premise this idea's "maximum gain" estimate rests on ("run N+1's program entropy is known as soon
+as run N's hash completes... while run N executes") doesn't hold for this codebase's actual
+dependency chain. Closed without implementation — this is a premise question, not a measurement
+one.
 
 **The idea:** JIT compile time is measured at ~1.76% of hash time. Each `run()` call inside `randomx_calculate_hash` is: AES entropy → generate program → compile JIT → execute. These are sequential. But run N+1's program entropy is known as soon as run N's hash completes — start compiling run N+1's JIT code while run N executes, using a second code buffer.
 
@@ -249,17 +279,21 @@ to an actual pain point someone hits.
 | Idea | Region targeted | Expected payoff | Correctness risk | Effort to measure | Status (2026-07-26) |
 |---|---|---|---|---|---|
 | #1 IMUL_RCP register pre-assignment | Superscalar (72.7%) | Medium | Low | ~2 hours | **Reverted** — JIT/interpreter divergence |
-| #2 IXOR_C* immediate opt | Superscalar (72.7%) | Small | Low | ~1 hour | Not yet attempted |
+| #2 IXOR_C* immediate opt | Superscalar (72.7%) | Small | Low | ~1 hour | **Closed** — 0/20,000 real immediates encodable |
 | #4 Profile C++ slice | C++ overhead (15.6%) | (Diagnostic) | None | 15 min | **Done** — AES fill/hash dominant (12.3%) |
 | #5 BLAKE2b NEON | C++ overhead (15.6%) | Small-Medium | Low (KATs catch) | ~3 hours | **Closed** — negligible in profile |
 | #6 Visibility flags | All C++ | Small | None | 30 min | **Adopted** — +0.298% IPC avg |
-| #7 Double-buffered JIT | All | Small (~1.76% max) | Low | ~4 hours | Not yet attempted |
+| #7 Double-buffered JIT | All | Small (~1.76% max) | Low | ~4 hours | **Closed** — flawed premise |
 | #8 I-cache pressure measurement | Cross-cutting | (Diagnostic) | None | 15 min | **Closed** — 0.788% miss rate |
 | #9 Scratchpad alignment | Main VM (9.2%) | Tiny | None | 5 min | **Closed** — already 2 MiB-aligned |
 | #10 Argon2 MAP_POPULATE | Seed rotation | Small (latency) | None | 30 min | **Adopted** — verified, not quantified |
 | #11 `.p2align 6` | Template | Tiny | None | 10 min | **Adopted** — noise-level as predicted |
 | #12 Frame pointer check | C++ overhead | Tiny | None | 10 min | **Adopted** — +0.298% IPC avg (with #6) |
 | #3 Base+offset pool | Superscalar | Small | Low | ~2 hours | Moot — contingent on #1, which reverted |
+
+**Every item in this backlog has now been resolved** (2026-07-26) — 4 adopted, 5 closed on
+evidence, 1 tried-and-reverted, 1 diagnostic done, 1 moot. No unaddressed items remain in this
+file.
 
 ---
 

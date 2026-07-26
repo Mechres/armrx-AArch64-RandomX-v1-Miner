@@ -84,6 +84,14 @@
   the performance plan's remaining gated steps (`PRFM` prefetch, memory-op scheduler bisection)
   without attempting either. **No genuinely open performance lead remains project-wide.** See
   `docs/experiments/scratchpad-locality-bound-20260726.md`.
+- **Experimental performance backlog worked to full closure (2026-07-26, `PLAN.md` Phase 10):**
+  every item in `docs/plans/experimental-performance-ideas-20260725.md` resolved — 4 adopted
+  (compiler flags +0.298% IPC avg, Argon2 prefault, `.p2align 6`), 5 closed on evidence (including
+  `IXOR_C*` immediate materialization, closed via a standalone validated encoder showing 0/20,000
+  real immediates encodable, before any JIT code was touched), 1 diagnostic done (AES fill/hash is
+  the biggest named-C++ cost at ~12.3%), 1 tried-and-reverted (superscalar `IMUL_RCP` register
+  pre-assignment — real `test_jit_equivalence` failure). See
+  `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
 - **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
 - **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
@@ -317,7 +325,8 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) | Full narrative for every completed Phase 7 item, split out of `PLAN.md` 2026-07-25 |
 | [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the main VM program's 2.2× IPC penalty — **closed 2026-07-26**, Step 1 result was small, closing Steps 2-3 unattempted |
 | [`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md) | Step 1's result: forcing the scratchpad L1-resident only recovers +6.07% IPC — the penalty is mostly architectural, not memory-latency |
-| [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative, unscheduled backlog covering other regions (superscalar, C++ overhead, cross-cutting) — the only place left to start if performance work resumes |
+| [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative backlog covering other regions (superscalar, C++ overhead, cross-cutting) — **worked to full closure 2026-07-26**, nothing unaddressed remains |
+| [`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`](docs/experiments/superscalar-imul-rcp-preassignment-attempt.md) | Superscalar `IMUL_RCP` register pre-assignment — tried, real JIT/interpreter divergence, reverted, 2026-07-26 |
 | [`docs/archived/future-performance-ideas-20260725.md`](docs/archived/future-performance-ideas-20260725.md) | Superseded first-pass future-ideas doc — content merged into the two docs above |
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
 | [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed peephole-JIT plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto — re-scoped by Phase 6, gated on a fresh region-scoped gap measurement |

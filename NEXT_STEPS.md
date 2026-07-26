@@ -4,10 +4,19 @@
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-Phases 1–9 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
+Phases 1–10 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
 `docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`,
-`docs/experiments/isolcpus-rt-priority-win.md`, and
-`docs/experiments/scratchpad-locality-bound-20260726.md` for the full narratives.
+`docs/experiments/isolcpus-rt-priority-win.md`,
+`docs/experiments/scratchpad-locality-bound-20260726.md`, and
+`docs/plans/experimental-performance-ideas-20260725.md` for the full narratives.
+
+*   [x] ~~Experimental performance backlog (`docs/plans/experimental-performance-ideas-20260725.md`)~~
+    — **worked to full closure 2026-07-26.** 4 adopted (compiler flags #6+#12 +0.298% IPC avg,
+    Argon2 `MADV_POPULATE_WRITE` #10, `.p2align 6` #11), 5 closed on evidence (#2, #5, #7, #8, #9),
+    1 diagnostic done (#4 — AES fill/hash is the biggest named-C++ cost at ~12.3% of cycles), 1
+    tried-and-reverted (#1 — real `test_jit_equivalence` failure, see
+    `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`). Nothing remains
+    unaddressed in this file. `PLAN.md` Phase 10.
 
 *   [x] ~~Performance plan Step 1 (bound the main-VM-program scratchpad-locality recoverable
     gap)~~ — **done 2026-07-26, small result (+6.07% IPC), closes Steps 2-3 without attempting

@@ -230,3 +230,38 @@ to justify either's cost (Step 3 specifically carries real correctness risk, sil
 hashes). The residual penalty reads as architectural (in-order pipeline / dependency-chain-bound
 on this Cortex-A53), not something a further code change can chase. **No genuinely open
 performance lead remains project-wide as of this writing.**
+
+## Completed — Phase 10 (2026-07-26): experimental performance backlog worked to full closure
+
+Full detail in **[`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md)**.
+Per explicit user direction, stopped gating low-risk ideas on a diagnostic before implementing
+and worked through every remaining item in this speculative backlog directly:
+
+- **Adopted (4)**: `-fvisibility=hidden`/`-fno-semantic-interposition` + `-fomit-frame-pointer`
+  (ideas #6+#12, `CMakeLists.txt`) — average +0.298% IPC across two on-device `perf stat` samples.
+  Argon2 cache `MADV_POPULATE_WRITE` (idea #10, `src/argon2.cpp`) — mirrors the scratchpad's
+  existing prefault pattern, confirmed to apply on every seed rotation (a fresh `Argon2dCache` is
+  constructed each time), latency-only so not independently quantified. `.p2align 6` for the main
+  loop's I-cache alignment (idea #11, `src/jit_compiler_a64_static.S`) — measured noise-level as
+  predicted, kept for zero cost/risk.
+- **Closed on evidence (5)**: scratchpad alignment (#9, already 2 MiB-aligned by construction),
+  I-cache pressure (#8, 0.788% miss rate), BLAKE2b NEON (#5, doesn't register in the profile),
+  superscalar `IXOR_C*` immediate materialization (#2 — built and validated a standalone AArch64
+  logical-immediate encoder *before* touching any JIT code; 0 of 20,000 real, uniformly-random
+  superscalar immediates turned out encodable, so the fast path would essentially never trigger),
+  double-buffered JIT compile/execute overlap (#7 — read `randomx_calculate_hash()` first; its
+  premise doesn't hold, run N+1's entropy genuinely depends on run N's post-execution output, no
+  overlap window exists).
+- **Done (1)**: profiled the C++ overhead slice (#4) — `hash_aes_1r_x4`+`fill_aes_1r_x4` is the
+  single biggest named-C++ cost at ~12.3% of all cycles, bigger than Argon2 or NEON permute
+  combined; both known optimization avenues for it already tried and failed, so not newly
+  actionable but now precisely quantified.
+- **Tried, reverted (1)**: superscalar `IMUL_RCP` register pre-assignment (idea #1) — implemented
+  after correcting the backlog doc's wrong register-availability claim (x9 holds a live pointer,
+  not free), but caused a real `test_jit_equivalence` failure on its first test case. Mechanism not
+  identified; fully reverted rather than ship an undemonstrated fix. See
+  `docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`.
+
+**Nothing remains unaddressed in either performance backlog document.** The two genuinely open
+items project-wide are both the isolcpus deployment bugs documented in Phase 8 (worker-count
+default, worker-to-core placement) — not performance-tuning work.
