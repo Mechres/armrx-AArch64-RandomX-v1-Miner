@@ -121,14 +121,59 @@ Everything downstream should be scored against these, not against intuition.
    `kCompileHandlers` — that symbol is the *interpreter's* dispatch table (`vm.cpp:542`,
    `vm.hpp:156`), a different, non-JIT code path. Hermes's own breakthrough plan made the same
    mix-up; instrumenting the wrong table would silently audit interpreted-mode instruction counts
-   instead of the JIT's.** Also cross-check a standing discrepancy: item 13's documented **58.4M/hash
-   lower bound** for the superscalar path (`docs/archived/plan_phase6_completed.md:502`, already
-   reconciled there to ~74.5M via +~7.4M fixed wrappers +~4-5M main-program body) against the
-   ≈96.6M/hash figure obtained by applying Phase 7's `72.71%`-of-instructions region share
-   (`docs/archived/plan_phase7_completed.md:23`) to the 132.93M/hash total — **that 96.6M figure is
-   Opus's arithmetic extrapolation across two differently-measured reports, not itself a repo-verified
-   number; treat it as unverified and let this audit item measure it directly rather than assuming
-   the ~38M gap is real.** ~1 day. No correctness risk (read-only tooling).
+   instead of the JIT's.**
+
+   **DONE (2026-07-27), partial: real superscalar per-opcode data obtained, one number confirmed
+   exact, one reconciliation attempt failed honestly and the reason is now documented.**
+
+   `./armrx --jit-dump` on-device already builds exactly the per-opcode aggregate table this item
+   wants for the superscalar region (`dumpJitCode()`, `jit_compiler_a64.cpp:965-1006` — count,
+   bytes, avg instruction size, % of bytes per opcode; existing tooling, not something new to
+   build). Real output for one `generateSuperscalarHash()` compile:
+
+   | opcode | count | avg size (bytes) | instructions | notes |
+   |---|---|---|---|---|
+   | `ISUB_R`/`IXOR_R`/`IADD_RS`/`IMUL_R`/`IROR_C`/`IMULH_R`/`ISMULH_R` | — | 4.00 | 1 | already minimal — confirms the earlier source-reading finding with hard numbers |
+   | `IMUL_RCP` | 239 | 8.00 | 2 | `ldr` (literal) + `mul`, unconditional — confirms the earlier source-reading finding exactly |
+   | `IXOR_C7`/`C8`/`C9` | ~137/128/122 | 12.00 | 3 | `movz`+`movk`+`eor` — matches the already-closed 0/20,000-encodable finding (full 32-bit materialization is necessary, not waste) |
+   | `IADD_C7`/`C8`/`C9` | 135/92/100 | ~12.00 (11.97 for C7) | 3 (occasionally 2) | **checked**: `emitAddImmediate` (`jit_compiler_a64.cpp:1225`) has a fast path for `imm < 2^24` (1-2 `ADD_IMM` instructions) and falls back to `emitMovImmediate`+`ADD` (up to 3 total) for `imm >= 2^24` — AArch64's `ADD`-immediate field simply cannot encode a value that large, so the 3-instruction sequence is architecturally necessary for this opcode's constant range, not waste. Same "already minimal" verdict as everything else checked. |
+
+   **Total instructions: 3563, total bytes: 20916, for one compiled `rx_calc_dataset_item` body**
+   (the superscalar-only portion, excluding fixed wrapper/frame code). This makes the earlier
+   **58.4M/hash figure exact, not a lower bound**: `3563 × 16,384 calls/hash = 58,384,832 ≈ 58.4M`,
+   confirmed by a hard current-code measurement rather than inferred.
+
+   **Reconciliation attempt against the total 132.93M/hash figure — failed cleanly, and the
+   failure is itself the useful finding.** Tried to get a clean, current, first-principles total by
+   running `perf stat -e cycles,instructions -- bench_armrx --full-hash-only` (200-sample loop,
+   `randomx_calculate_hash()` per sample) directly, rather than trusting old figures. Naive
+   `total_instructions / 200` gave **368.7M instructions/hash — 2.77× the historical 132.93M**,
+   clearly wrong. Root cause, verified by arithmetic: the benchmark's own reported median
+   (223.47 ms/hash) implies only ~46.9s of wall-clock for the 210 hashes computed (10 warmup + 200
+   measured), but the `perf stat`-wrapped process ran 131.14s — an **84.2s gap** consistent with
+   the *one-time* `Argon2dCache::initialize()` setup call (separately measured at ~8-17.6s
+   single-threaded in the Track B Gate A work above) and possibly also `generateSuperscalarHash()`'s
+   one-time per-seed JIT compile, both landing inside the same `perf stat` capture window and
+   getting divided by only 200 samples instead of being amortized away. **The historical 132.93M
+   figure's own methodology ("derived from measured H/s" during sustained live multi-worker
+   mining) inherently avoids this — a long sustained run amortizes one-time setup cost across many
+   thousands of hashes, which a 200-sample bench loop does not.** This is not a contradiction of
+   the historical figure; it's a measurement-methodology pitfall in the *naive* re-measurement
+   attempt, now documented so nobody repeats it. **A clean re-measurement needs one of: (a) start
+   the `perf stat` capture only after warmup/cache-init completes (nothing currently exposes a
+   clean hook for this — a real, concrete tooling gap), or (b) run enough samples that one-time
+   setup is negligible by construction (thousands of hashes, itself a multi-minute run on this
+   hardware).** Neither was done here; the 132.93M figure should still be treated as the
+   trustworthy total until one of these is done properly.
+
+   **Net for this item**: the superscalar-side half is now on solid ground (58.4M/hash exact, and
+   every specific opcode Track F named is confirmed either minimal or necessary). The
+   "reconcile against 132.93M total" half is not resolved — it's now correctly scoped as needing
+   better isolation tooling rather than a bigger sample count, which is itself progress.
+   ~1 day estimate for the full item stands for whoever picks up the remainder (theoretical-minimum
+   table for the ~17 main-program opcodes not yet checked, plus the clean total-instructions
+   re-measurement once the isolation gap above is closed). No correctness risk incurred (read-only
+   tooling and existing `--jit-dump`/`perf stat` usage throughout).
 2. **PMU frontend vs. backend stall breakdown on the main VM program region** *(Sonnet-R2 F1)*.
    **Event names confirmed on-device 2026-07-27 (`perf list` + a live `perf stat` probe) — Hermes's
    caution was correct, and the specific generic names are unusable here.** The portable generic
