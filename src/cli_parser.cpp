@@ -46,7 +46,10 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
     }
     {
         auto cfg = armrx::load_config_with_fallback(config_path);
-        for (auto& p : cfg.pools) o.pool_list.push_back({p.host, p.port});
+        for (auto& p : cfg.pools) {
+            o.pool_list.push_back({p.host, p.port});
+            o.should_connect_pool = true;
+        }
         if (!cfg.wallet.empty()) o.pool_wallet = cfg.wallet;
         if (cfg.password != "x") o.pool_password = cfg.password;
         o.pool_tls = cfg.pool_tls;

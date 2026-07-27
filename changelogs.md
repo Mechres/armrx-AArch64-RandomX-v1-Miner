@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-07-28 — Part 1: Three audit fixes (config-file pool mining, PoolManager races, TLS verify)
+
+Audit-finding fixes from `docs/audits/PROJECT_AUDIT_REPORT_20260728_synthesis.md`:
+
+- **Config-file-only pool mining silent no-op** (`src/cli_parser.cpp`): The config-loading block populated `o.pool_list` but never set `o.should_connect_pool` — that flag was only set by the `--pool=` CLI handler. Fixed: `should_connect_pool = true` is now set inside the `cfg.pools` loop.
+- **PoolManager unsynchronized cross-thread reads** (`src/pool_manager.cpp`): `is_connected()`, `current_pool_name()`, and `reconnect_attempts()` read `stratum_`/`current_idx_` without taking `stratum_mutex_`, creating a UAF race when the MetricsExporter background thread calls them concurrently with `tick()`'s locked destroy+reassign during failover. Fixed: all three now lock `stratum_mutex_`.
+- **TlsClient::set_verify_peer() no-op** (`include/armrx/tls_client.hpp`, `src/tls_client.cpp`): The setter was a bare member write; `SSL_CTX_set_verify()` was only called in the constructor, so post-construction `--pool-tls-verify=false` had no effect. Fixed: moved implementation to `tls_client.cpp` and re-applies `SSL_CTX_set_verify` on `ctx_`.
+- **Missing test assertion** (`tests/test_cli_parser.cpp`): `test_config_file_cli_precedence` now asserts `should_connect_pool == true` when config supplies pools.
+
 ## 2026-07-27 (3) — Four performance planning docs synthesized into one master plan; PLAN.md/NEXT_STEPS.md/ROADMAP.md repointed
 
 Four independent 2026-07-27 planning documents (`docs/plans/20260727/performance-plan-20260727.md`

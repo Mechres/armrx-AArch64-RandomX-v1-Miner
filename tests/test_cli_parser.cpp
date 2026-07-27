@@ -322,6 +322,7 @@ void test_config_file_cli_precedence() {
     {
         const auto res = run({"--config=" + path});
         assert(!res.should_exit);
+        assert(res.options.should_connect_pool);
         assert(res.options.pool_list.size() == 1);
         assert(res.options.pool_list[0].first == "cfgpool.example");
         assert(res.options.pool_list[0].second == 5555);

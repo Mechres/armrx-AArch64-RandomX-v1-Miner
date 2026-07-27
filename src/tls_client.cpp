@@ -41,6 +41,13 @@ TlsClient::~TlsClient() {
     disconnect();
 }
 
+void TlsClient::set_verify_peer(bool v) {
+    verify_peer_ = v;
+    if (ctx_) {
+        SSL_CTX_set_verify(ctx_.get(), v ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, nullptr);
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // connect / disconnect
 // ─────────────────────────────────────────────────────────────────────────────

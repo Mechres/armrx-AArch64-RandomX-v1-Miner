@@ -32,13 +32,13 @@ void PoolManager::set_error_callback(StratumClient::ErrorCallback cb) {
 }
 
 std::string PoolManager::current_pool_name() const {
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     if (current_idx_ >= pools_.size()) return "(none)";
     return pools_[current_idx_].host + ":" + std::to_string(pools_[current_idx_].port);
 }
 
 unsigned PoolManager::reconnect_attempts() const {
-    // Caller should hold stratum_mutex_ if concurrent failover may occur.
-    // During normal display-loop usage, no concurrent writes happen.
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     return stratum_ ? stratum_->reconnect_attempts() : 0;
 }
 
@@ -53,7 +53,7 @@ std::uint64_t PoolManager::shares_rejected() const {
 }
 
 bool PoolManager::is_connected() const {
-    // Caller should hold stratum_mutex_ if concurrent failover may occur.
+    std::lock_guard<std::mutex> lock(stratum_mutex_);
     return stratum_ && stratum_->is_connected();
 }
 

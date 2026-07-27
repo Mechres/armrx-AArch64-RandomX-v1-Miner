@@ -32,7 +32,7 @@ public:
     bool connect(int fd, const std::string& host);
 
     /** Enable/disable peer certificate verification (default: enabled). */
-    void set_verify_peer(bool v) { verify_peer_ = v; }
+    void set_verify_peer(bool v);
 
     /** SSL_read wrapper. Returns bytes read, or <= 0 on error/closed. */
     int read(void* buf, std::size_t len);
