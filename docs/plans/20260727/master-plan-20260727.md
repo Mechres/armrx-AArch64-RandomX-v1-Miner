@@ -433,10 +433,38 @@ its own saved registers at **936-942**. The item is computed in x0-x7 and could 
 **directly** into the live VM registers.
 
 **Phased, each independently revertible:**
-- Phase A — remove duplicate register preservation.
-- Phase B — direct result mixing (skip the store/reload relay entirely).
+- Phase A — remove duplicate register preservation. **Attempted 2026-07-27, hung, reverted —
+  see `docs/experiments/light-mode-dataset-item-prologue-attempt.md` for the full account,
+  including the complete code changes for reference.** Designed and implemented a conservative
+  version (drop x0-x3 preservation only, keep x4-x13) as a new, separate light-mode-only static
+  entry point (not touching the shared/general-purpose function at all, which turned out to also
+  be used by dead fast-mode code — `getDatasetInitFunc()` has zero call sites). Verified
+  byte-correct via both static (`objdump`/`nm` on the compiled binary) and dynamic (disassembling
+  the actual live JIT buffer's runtime-constructed bytes via `/proc/<pid>/mem`) inspection —
+  every instruction matched the design exactly. Despite that, the full system hung on the very
+  first JIT-mode hash (confirmed via `/proc/<pid>/stat` as genuinely spinning, not deadlocked;
+  `perf record` sampling showed execution spread across both the main VM loop and the derivation
+  region, not concentrated at one instruction — more consistent with a data-corruption-driven
+  blowup, e.g. wrong values reaching a `CBRANCH` and causing far more re-execution than the
+  spec's ~0.4% branch-taken rate, than a tight infinite loop). Root cause not identified despite
+  the verification above; reverted per this project's established discipline for exactly this
+  failure class (same call made for the memory-op scheduler attempt). **Before attempting this
+  again: the experiment doc's "where this leaves future work" section has a concrete next
+  diagnostic step (diff the derivation's actual computed `rl[0..7]` values against
+  `generate_dataset_item()`'s reference output for fixed inputs, to test the "wrong data, not
+  wrong instructions" hypothesis directly) — don't just re-verify the instruction sequence again,
+  that was already done exhaustively and found nothing.**
+- Phase B — direct result mixing (skip the store/reload relay entirely). **Not attempted; also
+  turns out to be substantially harder than originally scoped** — found during Phase A's design
+  work that the superscalar computation's working registers (`rl[0..7]`) are hard-wired to the
+  same physical registers (x0-x7) as some of the caller's live VM state, so "leave the result in
+  registers for direct XOR" as originally described isn't mechanically possible without first
+  re-mapping the derivation's working-register set to genuinely free registers — a bigger,
+  separate design problem than Phase A turned out to be, not a natural follow-on once Phase A
+  works. Do not attempt this without a dedicated register-liveness analysis across the *exact*
+  call site first.
 - Phase C — only then consider inlining the `bl` away (this is what Track E's "monolithic JIT"
-  extends to).
+  extends to). **Contingent on Phase A actually landing — currently blocked by Phase A's revert.**
 
 **Why it's different from everything IPC-framing closed:** this attacks call/ABI overhead and
 redundant memory traffic, not instruction-level stalls — it reduces raw instruction count (the axis
@@ -805,13 +833,17 @@ Track E, F, H, J                       ── each gated as noted above; lowest 
    8-core-parallel — flips the implementation phasing to build incremental fill from day one, not
    defer it. Gate B (the 8-worker memory-contention decision) is next and requires actual JIT
    implementation work, not just measurement.
-3. **Track C, Phases A→B (inline dataset-item helper)** — **now the strongest concrete lead on the
-   instruction-count axis, reinforced by Track A item 1's finding**: since per-opcode emission is
-   already near-minimal everywhere checked, the 16,384×/hash store/reload relay this item targets
-   (overhead *outside* individual opcode emission, in the fixed call/frame wrapper) is a more
-   promising place to look than further opcode-level fusion. Can run in parallel with Track B
-   (different code path, different axis: call/ABI overhead vs. work elimination). High correctness
-   risk — phase separately, KAT-gate each phase.
+3. **Track C, Phase A — attempted 2026-07-27, hung, reverted; currently blocked.** Still
+   conceptually the strongest concrete lead on the instruction-count axis (reinforced by Track A
+   item 1's finding that per-opcode emission is already near-minimal everywhere checked, so
+   overhead *outside* individual opcode emission is the more promising remaining place to look) —
+   but the first implementation attempt failed for a reason not yet identified despite thorough
+   static and dynamic verification. See `docs/experiments/light-mode-dataset-item-prologue-
+   attempt.md` before trying again; it has a concrete next diagnostic step (compare actual
+   computed values against the reference implementation, not another instruction-sequence review).
+   Do not resume this track without following that lead first. Phase B is *also* harder than
+   originally scoped (needs a register remapping design, not just "skip the store") — see the
+   Track C section above.
 4. **Track D1** — cheap, well-understood, tests the interleaving hypothesis for a tenth of Track D3's
    cost. Doesn't depend on Track A item 4 (only D3 does, and D3's register-slack hope is now closed
    anyway — see item 1 above).
