@@ -788,7 +788,8 @@ void VirtualMachine::run_jit() {
     }
     if (!is_fast_mode()) {
         // Light mode: JIT compiler generates inline dataset item derivation
-        jit_->generateProgramLight(program_, config, dataset_offset_);
+        const bool useHybrid = (partial_dataset_data_ != nullptr && partial_dataset_items_ > 0);
+        jit_->generateProgramLight(program_, config, dataset_offset_, useHybrid);
     } else {
         // Fast mode: JIT compiler reads directly from pre-computed dataset
         jit_->generateProgram(program_, config);
@@ -806,6 +807,11 @@ void VirtualMachine::run_jit() {
     if (!is_fast_mode()) {
         // Light mode: JIT needs cache pointer to derive dataset items on the fly
         mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
+        // Hybrid: pass partial dataset information for bound check
+        if (partial_dataset_data_ != nullptr && partial_dataset_items_ > 0) {
+            mem_regs.partial_dataset_ = reinterpret_cast<const uint8_t*>(partial_dataset_data_);
+            mem_regs.partial_dataset_items_ = partial_dataset_items_;
+        }
     } else {
         // Fast mode: JIT reads from pre-computed dataset
         mem_regs.memory = reinterpret_cast<const uint8_t*>(dataset_.data()) + dataset_offset_;

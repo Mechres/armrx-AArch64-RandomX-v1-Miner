@@ -50,6 +50,7 @@ add_library(armrx_core
     src/json.cpp
     src/pool_manager.cpp
     src/tui.cpp
+    src/partial_dataset.cpp
 )
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|aarch64_be")
@@ -217,6 +218,10 @@ if(ARMRX_BUILD_TESTS)
     target_compile_options(test_config PRIVATE -UNDEBUG)
     add_test(NAME test_config COMMAND test_config)
 
+    add_executable(test_partial_dataset tests/test_partial_dataset.cpp)
+    target_link_libraries(test_partial_dataset PRIVATE armrx_core)
+    target_compile_options(test_partial_dataset PRIVATE -UNDEBUG)
+
     # cli_parser.cpp lives outside armrx_core (it's compiled directly into the
     # armrx executable, see the add_executable(armrx ...) line below), so this
     # test binary compiles it directly rather than linking a library that
@@ -230,6 +235,7 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_aes_hash PRIVATE armrx_core)
     target_compile_options(test_aes_hash PRIVATE -UNDEBUG)
     add_test(NAME test_aes_hash COMMAND test_aes_hash)
+    add_test(NAME test_partial_dataset COMMAND test_partial_dataset)
 
     # Mock Stratum protocol tests (PLAN.md §3.2) — loopback TCP, no hardware
     # dependency. test_pool_failover() dominates: ~31s real production

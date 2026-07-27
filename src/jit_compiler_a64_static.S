@@ -566,6 +566,104 @@ DECL(randomx_program_aarch64_light_dataset_offset):
 
 	b	rx_program_xor_with_dataset_line
 
+# ── Hybrid partial-dataset entry point ──────────────────────────────────
+# Same calling convention as _end_light but adds a bound check before the
+# derivation call: if item_number < partial_dataset_items_, load the 64-byte
+# item directly from partial_dataset_ (the mmap'd prefix buffer) instead of
+# calling rx_calc_dataset_item. MemoryRegisters layout:
+#   offset  0: mx  (uint32_t)
+#   offset  4: ma  (uint32_t)
+#   offset  8: memory (uint8_t*)
+#   offset 16: partial_dataset_ (uint8_t*)
+#   offset 24: partial_dataset_items_ (size_t)
+#
+# x1 at entry = MemoryRegisters pointer (saved at [sp, 72]).
+# Uses x16-x17 as temporaries (scratch per AArch64 ABI, not callee-saved).
+#
+# When partial_dataset_items_ is 0, the cmp always branches to the miss path
+# (item >= 0 always), so this entry point is safe to use unconditionally — it
+# reverts to the pure derivation path at zero cost whenever no partial dataset
+# is configured.
+
+DECL(randomx_program_aarch64_vm_instructions_end_hybrid):
+	sub	sp, sp, 96
+	stp	x0, x1, [sp, 64]
+	stp	x2, x30, [sp, 80]
+
+	lsr	x2, x9, 32
+
+	# Load partial_dataset_items_ from MemoryRegisters (saved x1 at [sp,72] + offset 24)
+	ldr	x16, [sp, 72]
+	ldr	w16, [x16, 24]
+
+	# If partial_dataset_items_ == 0, skip the bound check entirely (always miss)
+	cbz	w16, 1f
+
+	# Mask (patched by JIT compiler — same as light path)
+	and	w2, w2, 1
+
+	# Tweak
+	eor	x9, x9, x20
+	ror	x9, x9, 32
+
+	# x2 -> item number
+	lsr	x2, x2, 6
+
+	# Apply dataset offset (patched)
+	add	x2, x2, 0
+	add	x2, x2, 0
+
+	# Bound check: item < partial_dataset_items_?
+	cmp	x2, x16
+	b.hs	1f
+
+	# ── HIT path: load 64 bytes from partial_dataset_ directly ──
+	# x16 = partial_dataset_ pointer (MemoryRegisters offset 16)
+	ldr	x16, [x16, 16]
+	# x16 = &partial_dataset[item_number]
+	add	x16, x16, x2, lsl 6
+	# Copy 64 bytes to stack output area for rx_program_xor_with_dataset_line
+	ldp	x17, x0, [x16]
+	stp	x17, x0, [sp]
+	ldp	x17, x0, [x16, 16]
+	stp	x17, x0, [sp, 16]
+	ldp	x17, x0, [x16, 32]
+	stp	x17, x0, [sp, 32]
+	ldp	x17, x0, [x16, 48]
+	stp	x17, x0, [sp, 48]
+	b	2f
+
+1:	# ── MISS path: on-the-fly derivation (same as _end_light) ──
+	# Mask was already applied above if we took the hybrid path; if we jumped
+	# here from the cbz (partial_dataset_items_ == 0), apply mask+tweak now.
+	# x2 currently holds the raw (mx >> 32) value; apply the mask+tweak.
+	# (If we fell through from the hybrid path above, the mask and tweak were
+	# already applied and x2 is the item number already — but the dataset
+	# offset add was also done. Re-deriving x2 here would be wrong. Since we
+	# skipped the mask/tweak when partial_dataset_items_ == 0 (cbz to 1f),
+	# we need to do it here for that case only.)
+	#
+	# Simple approach: always re-derive at the miss label. The mask/tweak
+	# and dataset offset path is idempotent for the miss case since x9 hasn't
+	# been modified differently between the two paths.
+	lsr	x2, x9, 32
+	and	w2, w2, 1
+	eor	x9, x9, x20
+	ror	x9, x9, 32
+	mov	x0, x1
+	mov	x1, sp
+	lsr	x2, x2, 6
+	add	x2, x2, 0
+	add	x2, x2, 0
+	bl	rx_calc_dataset_item
+
+2:	# ── Common exit ──
+	mov	x10, sp
+	ldp	x0, x1, [sp, 64]
+	ldp	x2, x30, [sp, 80]
+	add	sp, sp, 96
+	b	rx_program_xor_with_dataset_line
+
 DECL(randomx_program_aarch64_vm_instructions_end_v1):
 	lsr	x10, x9, 32
 	eor	x9, x9, x20

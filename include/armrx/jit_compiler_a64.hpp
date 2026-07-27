@@ -57,7 +57,7 @@ namespace armrx {
 		~JitCompilerA64();
 
 		void generateProgram(Program&, ProgramConfiguration&);
-		void generateProgramLight(Program&, ProgramConfiguration&, uint32_t);
+		void generateProgramLight(Program&, ProgramConfiguration&, uint32_t, bool useHybrid = false);
 
 		void generateSuperscalarHash(const SuperscalarProgramList& programs, const std::vector<uint64_t>&);
 

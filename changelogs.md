@@ -9,6 +9,60 @@ Audit-finding fixes from `docs/audits/PROJECT_AUDIT_REPORT_20260728_synthesis.md
 - **TlsClient::set_verify_peer() no-op** (`include/armrx/tls_client.hpp`, `src/tls_client.cpp`): The setter was a bare member write; `SSL_CTX_set_verify()` was only called in the constructor, so post-construction `--pool-tls-verify=false` had no effect. Fixed: moved implementation to `tls_client.cpp` and re-applies `SSL_CTX_set_verify` on `ctx_`.
 - **Missing test assertion** (`tests/test_cli_parser.cpp`): `test_config_file_cli_precedence` now asserts `should_connect_pool == true` when config supplies pools.
 
+## 2026-07-28 — Part 2: Track B hybrid partial dataset, Steps 1-2
+
+Implements the hybrid partial dataset boundary check (`--dataset-mb=N`, Track B in
+`docs/plans/20260727/master-plan-20260727.md`), the JIT bound check, incremental
+fill with explicit CPU pinning, and the correctness differential test.
+
+### Added
+
+- **PartialDataset class** (`include/armrx/partial_dataset.hpp`, `src/partial_dataset.cpp`):
+  mmap/MADV_HUGEPAGE buffer of N dataset items. Fills via existing `initialize_dataset()`
+  with explicit `pthread_setaffinity_np` pinning on fill worker threads (mirrors
+  `worker_loop()`'s `AffinityMode::All` pattern). Mine starts immediately in pure light
+  mode; background fill raises the published item_count_ atomically as each chunk completes.
+- **JIT hybrid bound check** (`src/jit_compiler_a64_static.S`): New
+  `randomx_program_aarch64_vm_instructions_end_hybrid` entry point inserts a comparison of
+  item_number against `MemoryRegisters::partial_dataset_items_` before calling
+  `rx_calc_dataset_item`. Hit → load 64 bytes directly from `partial_dataset_`; miss →
+  existing on-the-fly derivation. Uses x16-x17 as temporaries (per AArch64 ABI). When
+  `partial_dataset_items_` is 0, the bound check always falls through to the miss path.
+- **MemoryRegisters fields** (`include/armrx/program.hpp`): Added `partial_dataset_` (const
+  uint8_t*) and `partial_dataset_items_` (size_t) for passing partial dataset info to the
+  JIT assembly.
+- **JIT compiler hybrid support** (`src/jit_compiler_a64.cpp`,
+  `include/armrx/jit_compiler_a64.hpp`): `generateProgramLight()` now accepts a `useHybrid`
+  parameter; when true, emits a branch to the new `_end_hybrid` entry instead of `_end_light`.
+- **CLI flag `--dataset-mb=N`** (`src/cli_parser.cpp`, `include/armrx/cli_parser.hpp`):
+  Configures partial dataset size in MiB. 0 = disabled (default, must be bit-identical to
+  today). Parsed with bounded validation.
+- **VM partial dataset integration** (`src/vm.cpp`, `include/armrx/vm.hpp`):
+  `set_partial_dataset()` method; `run_jit()` populates `MemoryRegisters` fields and passes
+  `useHybrid=true` to the JIT compiler when a partial dataset is active.
+- **MiningEngine partial dataset support** (`src/mining_engine.cpp`,
+  `include/armrx/mining_engine.hpp`): `set_partial_dataset()` setter; worker_loop passes
+  the partial dataset to each VM on job changes.
+- **MinerApp wiring** (`src/miner_app.cpp`, `include/armrx/miner_app.hpp`): Creates a
+  `PartialDataset` from `opts_.dataset_mb` in run() and passes it to both
+  `run_local_benchmark()` and `run_pool_mining()`.
+- **Differential test** (`tests/test_partial_dataset.cpp`): Verifies partial[i] ==
+  generate_dataset_item(cache, i) for 100, 200, and 5000 items with spot-check and
+  full-verify passes. Confirms disabled (0 items) identity. Added to CMakeLists.txt.
+
+### Changed
+
+- `CMakeLists.txt`: Added `src/partial_dataset.cpp` to `armrx_core` library; added
+  `test_partial_dataset` test target.
+- Fixed pre-existing `%zu`/`%u` format warning in `src/mining_engine.cpp`.
+
+Audit-finding fixes from `docs/audits/PROJECT_AUDIT_REPORT_20260728_synthesis.md`:
+
+- **Config-file-only pool mining silent no-op** (`src/cli_parser.cpp`): The config-loading block populated `o.pool_list` but never set `o.should_connect_pool` — that flag was only set by the `--pool=` CLI handler. Fixed: `should_connect_pool = true` is now set inside the `cfg.pools` loop.
+- **PoolManager unsynchronized cross-thread reads** (`src/pool_manager.cpp`): `is_connected()`, `current_pool_name()`, and `reconnect_attempts()` read `stratum_`/`current_idx_` without taking `stratum_mutex_`, creating a UAF race when the MetricsExporter background thread calls them concurrently with `tick()`'s locked destroy+reassign during failover. Fixed: all three now lock `stratum_mutex_`.
+- **TlsClient::set_verify_peer() no-op** (`include/armrx/tls_client.hpp`, `src/tls_client.cpp`): The setter was a bare member write; `SSL_CTX_set_verify()` was only called in the constructor, so post-construction `--pool-tls-verify=false` had no effect. Fixed: moved implementation to `tls_client.cpp` and re-applies `SSL_CTX_set_verify` on `ctx_`.
+- **Missing test assertion** (`tests/test_cli_parser.cpp`): `test_config_file_cli_precedence` now asserts `should_connect_pool == true` when config supplies pools.
+
 ## 2026-07-27 (3) — Four performance planning docs synthesized into one master plan; PLAN.md/NEXT_STEPS.md/ROADMAP.md repointed
 
 Four independent 2026-07-27 planning documents (`docs/plans/20260727/performance-plan-20260727.md`

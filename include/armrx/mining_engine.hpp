@@ -3,6 +3,7 @@
 #include "armrx/mining_common.hpp"
 #include "armrx/vm.hpp"
 #include "armrx/argon2.hpp"
+#include "armrx/partial_dataset.hpp"
 #include <atomic>
 #include <thread>
 #include <vector>
@@ -96,6 +97,10 @@ public:
     void set_rt_priority(bool enable) { rt_priority_ = enable; }
     void set_stagger_ms(unsigned ms) { stagger_ms_ = ms; }
     void set_affinity_mode(AffinityMode mode) { affinity_mode_ = mode; }
+
+    /// Set a partial dataset for hybrid light mode. The PartialDataset must
+    /// outlive the MiningEngine. Pass nullptr to disable.
+    void set_partial_dataset(const PartialDataset* pd) { partial_dataset_ = pd; }
 
     void set_job(const Job& job);
 
@@ -193,6 +198,8 @@ private:
     // How many entries at the front of core_order_ share the max frequency
     // (the "big" cluster size) -- used by AffinityMode::BigOnly.
     unsigned int big_core_count_ = 1;
+
+    const PartialDataset* partial_dataset_ = nullptr;
 
     std::vector<std::thread> workers_;
 };

@@ -15,6 +15,8 @@ struct ProgramConfiguration {
 struct MemoryRegisters {
     std::uint32_t mx, ma;
     const std::uint8_t* memory = nullptr;
+    const std::uint8_t* partial_dataset_ = nullptr;
+    std::size_t partial_dataset_items_ = 0;
 };
 
 class Program {

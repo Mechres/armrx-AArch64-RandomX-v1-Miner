@@ -261,6 +261,17 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
             o.use_rt_priority = true;
             continue;
         }
+        if (argument.rfind("--dataset-mb=", 0) == 0) {
+            try {
+                o.dataset_mb = static_cast<std::size_t>(parse_bounded_ull(std::string{argument.substr(13)}, 1048576));
+            } catch (...) {
+                std::cerr << "Invalid --dataset-mb value: " << argument.substr(13) << '\n';
+                result.should_exit = true;
+                result.exit_code = 64;
+                return result;
+            }
+            continue;
+        }
         if (argument.rfind("--metrics-port=", 0) == 0) {
             try {
                 o.metrics_port = static_cast<std::uint16_t>(parse_bounded_ull(std::string{argument.substr(15)}, 65535));

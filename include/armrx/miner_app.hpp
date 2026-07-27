@@ -2,6 +2,9 @@
 
 #include "armrx/cli_parser.hpp"
 #include "armrx/randomx_config.hpp"
+#include "armrx/partial_dataset.hpp"
+
+#include <memory>
 
 namespace armrx {
 
@@ -26,6 +29,7 @@ private:
     void run_pool_mining(RandomXMode effective_mode);
 
     MinerOptions opts_;
+    std::shared_ptr<PartialDataset> partial_dataset_;
 };
 
 } // namespace armrx

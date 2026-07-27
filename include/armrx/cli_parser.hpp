@@ -43,6 +43,9 @@ struct MinerOptions {
 
     bool jit_dump_mode = false;
     std::string jit_dump_key = "test key 000";
+
+    // Partial dataset (Track B): size in MiB, 0 = disabled
+    std::size_t dataset_mb = 0;
 };
 
 // Outcome of parsing: either a fully-resolved MinerOptions to run with, or

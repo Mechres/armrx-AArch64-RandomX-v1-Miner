@@ -434,9 +434,13 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 block_input = local_job.block_template;
 
                 vm.set_cache(active_cache.get());
+                // Hybrid partial dataset: pass to VM if configured
+                if (partial_dataset_ && partial_dataset_->item_count() > 0) {
+                    vm.set_partial_dataset(partial_dataset_->data(), partial_dataset_->item_count());
+                }
                 if (mode_ == RandomXMode::fast && active_dataset) {
                     if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {
-                        std::fprintf(stderr, "[worker %zu] dataset size mismatch, skipping job\n", thread_id);
+                        std::fprintf(stderr, "[worker %u] dataset size mismatch, skipping job\n", thread_id);
                         active = false;
                     }
                 }

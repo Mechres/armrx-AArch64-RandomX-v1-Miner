@@ -132,6 +132,9 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
     engine.set_affinity_mode(opts_.affinity_mode);
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
+    if (partial_dataset_) {
+        engine.set_partial_dataset(partial_dataset_.get());
+    }
     engine.set_job(job);
 
     std::atomic<std::uint64_t> shares_found{0};
@@ -278,6 +281,9 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     engine.set_affinity_mode(opts_.affinity_mode);
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
+    if (partial_dataset_) {
+        engine.set_partial_dataset(partial_dataset_.get());
+    }
 
     std::atomic<std::uint64_t> shares_submitted{0};
 
@@ -479,6 +485,14 @@ int MinerApp::run() {
               << (memory.constrained_by_cgroup ? " (cgroup-limited)" : "") << '\n'
               << "Selected mode (" << opts_.workers << " workers): " << armrx::mode_name(effective_mode)
               << " (requires " << required_bytes / (1024U * 1024U) << " MiB including reserve)\n";
+
+    // Create partial dataset if configured (Track B hybrid light mode)
+    if (opts_.dataset_mb > 0 && effective_mode == RandomXMode::light) {
+        const std::size_t item_count = (opts_.dataset_mb * 1024ULL * 1024ULL) / kRandomXDatasetItemBytes;
+        partial_dataset_ = std::make_shared<PartialDataset>(item_count);
+        std::cout << "Partial dataset: " << item_count << " items ("
+                  << opts_.dataset_mb << " MiB)\n";
+    }
 
     // Lock all pages into RAM if requested
     if (opts_.use_mlock) {
