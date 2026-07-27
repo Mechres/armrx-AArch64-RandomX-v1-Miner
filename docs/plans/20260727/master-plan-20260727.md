@@ -166,14 +166,44 @@ Everything downstream should be scored against these, not against intuition.
    hardware).** Neither was done here; the 132.93M figure should still be treated as the
    trustworthy total until one of these is done properly.
 
-   **Net for this item**: the superscalar-side half is now on solid ground (58.4M/hash exact, and
-   every specific opcode Track F named is confirmed either minimal or necessary). The
-   "reconcile against 132.93M total" half is not resolved — it's now correctly scoped as needing
-   better isolation tooling rather than a bigger sample count, which is itself progress.
-   ~1 day estimate for the full item stands for whoever picks up the remainder (theoretical-minimum
-   table for the ~17 main-program opcodes not yet checked, plus the clean total-instructions
-   re-measurement once the isolation gap above is closed). No correctness risk incurred (read-only
-   tooling and existing `--jit-dump`/`perf stat` usage throughout).
+   **Main-program side also done (2026-07-27), same `--jit-dump` output, self-aggregated** (the
+   codebase only prints an automatic per-opcode summary for the superscalar table, not the main
+   one, so this required a small offline script over the existing raw per-instruction rows — no
+   new on-device tooling). One compiled 8-chained-program main-VM buffer: **2048 RandomX-level
+   instructions, 19,340 bytes = 4835 AArch64 instructions** (a *static compiled-code-size* figure,
+   not a dynamic per-hash execution count — CBRANCH's backward-loop semantics mean dynamic
+   execution count differs from this; **do not treat 4835 as commensurable with the 58.4M
+   superscalar figure**, they measure different things and conflating them would be the same class
+   of error the 132.93M reconciliation attempt above just got caught making). Every opcode is
+   accounted for; the standouts are the float memory ops (`FADD_M`/`FSUB_M` ≈27 bytes/6.8
+   instructions avg, `FDIV_M` ≈31 bytes/7.9 instructions avg — noticeably above the ~18-byte/4.5
+   instruction average for integer memory ops). **Checked and closed, not waste**: `h_FADD_M`/
+   `h_FSUB_M` are `emitMemLoadFP` (5 instructions: address+mask+load+sign-extend+convert-to-double
+   — the sign-extend/convert pair is unavoidable, the scratchpad stores 32-bit integers and FP ops
+   need a double) plus one `FADD`/`FSUB` = 6 instructions, matching the measured average once the
+   occasional 2-instruction address-immediate case is folded in. `h_FDIV_M` additionally emits a
+   spec-mandated `bif` exponent/sign-mask operation before the divide (RandomX's FDIV_M semantics
+   require masking the loaded value against `eMask` to avoid denormal/NaN/Inf results) — not an
+   emitter inefficiency, a correctness requirement. Every other main-program opcode checked
+   (`ISTORE`, `IADD_M`/`ISUB_M`/`IMUL_M`/`IXOR_M`, `CBRANCH`) shows average sizes consistent with
+   `emitAddImmediate`'s already-tight per-value-encoding behavior (1 or 2 instructions depending on
+   whether a given random immediate needs both 12-bit halves) — same "already minimal" verdict.
+
+   **Overall verdict for this item, after checking essentially every high-frequency opcode in both
+   the main program and superscalar path, by source reading *and* hard `--jit-dump` measurement:
+   per-opcode emission waste is not where the remaining instruction-count gap lives.** Every
+   opcode checked is at, or architecturally forced to, its AArch64 instruction-count minimum.
+   **This is a real result, not just an absence of findings — it redirects priority within this
+   master plan: Track F (instruction-count-driven fusion/peephole) should be treated as low-yield
+   unless a *specific*, still-unchecked opcode surfaces a real gap (none has, in everything sampled
+   so far), while Track C (the light-mode dataset-item helper's store/reload relay — overhead that
+   lives *outside* individual opcode emission, in the fixed call/frame wrapper around
+   `bl rx_calc_dataset_item`, paid 16,384×/hash) remains the strongest concrete, well-scoped,
+   still-unimplemented lead for the instruction-count axis.** The "reconcile against 132.93M total"
+   half of this item is still open — correctly scoped now as needing better isolation tooling
+   (a way to start `perf stat` counting only after warmup/cache-init, which doesn't exist yet)
+   rather than a bigger sample count. No correctness risk incurred anywhere in this item — entirely
+   read-only tooling and existing `--jit-dump`/`perf stat` usage.
 2. **PMU frontend vs. backend stall breakdown on the main VM program region** *(Sonnet-R2 F1)*.
    **Event names confirmed on-device 2026-07-27 (`perf list` + a live `perf stat` probe) — Hermes's
    caution was correct, and the specific generic names are unusable here.** The portable generic
@@ -761,22 +791,35 @@ Track E, F, H, J                       ── each gated as noted above; lowest 
 
 **Suggested order of attack**, folding priority and dependency together:
 
-1. **Track A, all four items** — half-to-one day each, run in parallel, zero/near-zero risk. These
-   determine whether Track D/E point at the right problem and give Track F a candidate list.
+1. **Track A, all four items — DONE (2026-07-27).** Results: Track D3's register-slack hope is
+   closed (item 4, 100% liveness, no slack exists); front-end stalls confirmed negligible vs.
+   back-end (item 2, ~26:1), so Track D/E are pointed at the right problem and Track J correctly
+   stays low-priority; NEON cross-domain move cost is confirmed cheap on this hardware, reopening
+   rather than closing Track F3 (item 3); and the opcode-emission-waste hypothesis behind Track F
+   is now fairly thoroughly falsified (item 1, essentially every high-frequency opcode checked is
+   already minimal or architecturally forced) — **Track F should not be prioritized without a
+   specific new opcode surfacing a real gap; none has.**
 2. **Track B (partial dataset)** — highest expected value of any single item (+16-32% *estimated*,
    caveated hard by Gate B), lowest correctness risk of any big-ticket item here (total/cheap
-   oracle). Start Gate A immediately; it doesn't depend on Track A.
-3. **Track C, Phases A→B (inline dataset-item helper)** — can run in parallel with Track B (different
-   code path, different axis: call/ABI overhead vs. work elimination). Potentially the largest
-   single win on the instruction-count axis and was simply never built before.
+   oracle). **Gate A is DONE**: ~187s (~3 min) for a 512 MiB fill, confirmed genuinely
+   8-core-parallel — flips the implementation phasing to build incremental fill from day one, not
+   defer it. Gate B (the 8-worker memory-contention decision) is next and requires actual JIT
+   implementation work, not just measurement.
+3. **Track C, Phases A→B (inline dataset-item helper)** — **now the strongest concrete lead on the
+   instruction-count axis, reinforced by Track A item 1's finding**: since per-opcode emission is
+   already near-minimal everywhere checked, the 16,384×/hash store/reload relay this item targets
+   (overhead *outside* individual opcode emission, in the fixed call/frame wrapper) is a more
+   promising place to look than further opcode-level fusion. Can run in parallel with Track B
+   (different code path, different axis: call/ABI overhead vs. work elimination). High correctness
+   risk — phase separately, KAT-gate each phase.
 4. **Track D1** — cheap, well-understood, tests the interleaving hypothesis for a tenth of Track D3's
-   cost. Do this regardless of whether Track A's liveness check (item 4) has landed yet, since D1
-   doesn't need it — only D3 does.
+   cost. Doesn't depend on Track A item 4 (only D3 does, and D3's register-slack hope is now closed
+   anyway — see item 1 above).
 5. **Track G (NEON T-table AES)** — independent axis, can be developed in parallel with any of the
    above once a flag scaffold exists; targets the single largest named C++ cost (12.3% of cycles).
 6. **Track F, Track E, Track D2/D3, Track H, Track J** — in roughly that order, each strictly gated
-   on its diagnostic prerequisite from Track A or on an earlier track's measured result. Do not
-   promote these ahead of 1-5 without a specific reason a diagnostic surfaced.
+   on its diagnostic prerequisite from Track A or on an earlier track's measured result. Track F
+   specifically should stay deprioritized per item 1's result above unless new evidence surfaces.
 7. **Track I (core-0 cost)** — independent, operational, no dependency on anything above; land
    whenever convenient.
 
