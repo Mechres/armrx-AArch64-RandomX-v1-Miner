@@ -25,6 +25,16 @@ in yet.
 the repo. It is present at `docs/plans/20260727/hail-mary-ideas-20260727.md` now — that loose end
 is resolved, all four source files live in this folder.)*
 
+**Verification pass (Hermes, 2026-07-27, independently checked and confirmed against source):**
+the mechanism claims and closed-leads list hold up, and the clean-room boundary (no XMRig
+disassembly) is honored. Five concrete factual errors were found and corrected in place —
+stale `.S` line numbers in Track C, a wrong handler-table symbol in Track A item 1
+(`kCompileHandlers` is the interpreter's table; the JIT's is `engine[256]`), the unverified
+"~96.6M/hash" superscalar figure now marked as such rather than presented as an established
+discrepancy, an understated register-save count in Track C, and a note to confirm A53 PMU event
+numbers before Track A item 2 is run. None of the corrections change any track's sequencing,
+priority, or expected payoff — they only fix citations an executor would otherwise trip over.
+
 ---
 
 ## 0. The load-bearing disagreement between these docs — read this before picking an item
@@ -88,8 +98,9 @@ each, not two:
 - **Instruction-budget audit** = Opus Item 5 ("instruction-budget reconciliation") = Hermes Item 1
   ("per-opcode AArch64 instruction-budget audit"). Same diagnostic: account for where
   `132.93M instructions/hash` actually goes, per-opcode, against a theoretical minimum. Hermes's
-  version is more actionable (ties directly into `kCompileHandlers`, proposes the concrete tool
-  extension). **Track A uses Hermes's framing.**
+  version is more actionable (ties directly into the JIT's per-opcode handler table, proposes the
+  concrete tool extension). **Track A uses Hermes's framing** (with one correction applied — see
+  Track A item 1's note on which handler table this actually means).
 - **Worker/main-thread core-0 cost** = Opus Item 6 = Hermes Item 7. Both point at the same
   `NEXT_STEPS.md` open item: worker 0 shares core 0 with the stratum reader / JSON / per-second
   console print, and under `isolcpus` it can't be relocated (no sysfs `cpufreq` data →
@@ -102,28 +113,125 @@ each, not two:
 Everything downstream should be scored against these, not against intuition.
 
 1. **Per-opcode instruction-budget audit** *(Hermes #1 = Opus #5)*. For every emitted VM opcode
-   (`kCompileHandlers` in `src/jit_compiler_a64.cpp`) and superscalar opcode (`src/superscalar.cpp`),
-   compute a theoretical-minimum AArch64 instruction count and diff against `--jit-dump`'s actual
-   emission. This is the map to the whole remaining instruction-count gap and the gating input for
-   Track F. Also reconciles a standing discrepancy Opus flagged: two prior counts of the
-   superscalar path's cost (58.4M/hash vs ≈96.6M/hash) don't agree — ~38M instructions/call
-   unaccounted for. ~1 day. No correctness risk (read-only tooling).
-2. **PMU `STALL_FRONTEND` vs `STALL_BACKEND` breakdown on the main VM program region**
-   *(Sonnet-R2 F1)*. The "94% architectural" finding was derived from memory-latency experiments,
-   not a direct front-end/back-end stall split. If a meaningful share turns out to be front-end
-   (I-cache miss, fetch bubbles, branch-recovery) rather than back-end (waiting on ALU/MUL), that
-   redirects effort toward code-layout fixes (cheap) instead of concurrency (expensive) — determines
-   whether Track D/E are even pointed at the right problem. ~0.5 day, pure measurement. **Do this
-   before committing to Track D or Track E.**
-3. **NEON cross-domain move latency measurement** *(Sonnet-R2 F3, cheap-to-falsify)*. Measure
-   GPR↔NEON transfer latency (`FMOV`/`INS`/`UMOV`) on the devbox in isolation. If it's as expensive
-   as the A53 SOG implies, it kills the NEON-multiply-offload idea on paper before anyone prototypes
-   it. ~0.5 day.
-4. **Register-liveness check for dual-nonce interleaving** *(Sonnet-R2, gates E1/Item 4 specifically)*.
-   Dump how many of the 8 int + 12 float registers are simultaneously live at each instruction
-   across real compiled main-program instances. If routinely near 8/8 with no slack, Track D's
-   expensive end (Opus Item 4 / Sonnet-R2 E1) is dead on arrival and shouldn't be prototyped — only
-   the cheap end (Opus Item 3) remains viable. Cheap script, not a feature.
+   and superscalar opcode, compute a theoretical-minimum AArch64 instruction count and diff
+   against `--jit-dump`'s actual emission. This is the map to the whole remaining instruction-count
+   gap and the gating input for Track F. **Correction (Hermes's own follow-up review, verified
+   against source): the table to instrument is `JitCompilerA64::engine[256]`
+   (`src/jit_compiler_a64.cpp:1941`, built from `INST_HANDLE` in `instruction_weights.hpp`), not
+   `kCompileHandlers` — that symbol is the *interpreter's* dispatch table (`vm.cpp:542`,
+   `vm.hpp:156`), a different, non-JIT code path. Hermes's own breakthrough plan made the same
+   mix-up; instrumenting the wrong table would silently audit interpreted-mode instruction counts
+   instead of the JIT's.** Also cross-check a standing discrepancy: item 13's documented **58.4M/hash
+   lower bound** for the superscalar path (`docs/archived/plan_phase6_completed.md:502`, already
+   reconciled there to ~74.5M via +~7.4M fixed wrappers +~4-5M main-program body) against the
+   ≈96.6M/hash figure obtained by applying Phase 7's `72.71%`-of-instructions region share
+   (`docs/archived/plan_phase7_completed.md:23`) to the 132.93M/hash total — **that 96.6M figure is
+   Opus's arithmetic extrapolation across two differently-measured reports, not itself a repo-verified
+   number; treat it as unverified and let this audit item measure it directly rather than assuming
+   the ~38M gap is real.** ~1 day. No correctness risk (read-only tooling).
+2. **PMU frontend vs. backend stall breakdown on the main VM program region** *(Sonnet-R2 F1)*.
+   **Event names confirmed on-device 2026-07-27 (`perf list` + a live `perf stat` probe) — Hermes's
+   caution was correct, and the specific generic names are unusable here.** The portable generic
+   events this item originally assumed (`stalled-cycles-frontend`/`stalled-cycles-backend`, exposed
+   as perf's `frontend_cycles_idle`/`backend_cycles_idle` metric aliases) come back **`<not
+   supported>`/NaN on this Cortex-A53's kernel PMU driver** — confirmed by directly running
+   `perf stat -M backend_cycles_idle,frontend_cycles_idle -- sleep 0.2` and getting exactly that.
+   There is no `STALL_FRONTEND`/`STALL_BACKEND` on this hardware at all. What *is* available is a
+   set of A53-specific implementation-defined dep-stall events (`perf list`), several finer-grained
+   than a simple two-way split and one of which (`ld_dep_stall`) is already a proven, previously-used
+   event in this project's own history (the Phase 6 XMRig comparison's 11.41%-vs-16.70% figure).
+   Use these directly with `-e`, bucketed:
+   - **Front-end-like** (fetch/decode starvation): `ic_dep_stall` (I-cache miss), `iutlb_dep_stall`
+     (I-µTLB miss), `decode_dep_stall` (pre-decode error), `other_iq_dep_stall` (instruction-queue
+     empty, other cause).
+   - **Back-end-like** (execution-stage interlock): `ld_dep_stall`, `st_dep_stall`, `agu_dep_stall`
+     (address-generation interlock), `other_interlock_stall`, `simd_dep_stall`, `stall_sb_full`
+     (store-buffer full).
+   The "94% architectural" finding was derived from memory-latency experiments, not a direct
+   front-end/back-end stall split. If a meaningful share of the main VM program's stall cycles turns
+   out to be front-end-like rather than back-end-like, that redirects effort toward code-layout
+   fixes (cheap, Track J) instead of concurrency (expensive, Track D/E) — determines whether those
+   tracks are even pointed at the right problem.
+
+   **DONE (2026-07-27), decisive result: back-end-dominated, ~26:1.** Measured on
+   `bench_armrx --scratchpad-real` (the same main-VM-program-execute-only isolation Phase 9's
+   scratchpad-locality experiment used), `taskset -c 3`, three grouped `perf stat` passes (A53 has
+   too few physical counters for all 11 events + cycles at once):
+
+   | Group | Event | % of cycles |
+   |---|---|---|
+   | Front-end-like | `ic_dep_stall` | 0.855% |
+   | Front-end-like | `iutlb_dep_stall` | 0.0009% |
+   | Front-end-like | `decode_dep_stall` | 0.000% |
+   | Front-end-like | `other_iq_dep_stall` | 0.045% |
+   | **Front-end-like total** | | **0.901%** |
+   | Back-end-like | `ld_dep_stall` | 11.132% |
+   | Back-end-like | `st_dep_stall` | 0.309% |
+   | Back-end-like | `agu_dep_stall` | 1.107% |
+   | Back-end-like | `other_interlock_stall` | 6.735% |
+   | Back-end-like | `simd_dep_stall` | 3.645% |
+   | Back-end-like | `stall_sb_full` | 0.149% |
+   | **Back-end-like total** | | **23.08%** |
+
+   **Back-end-like stalls outweigh front-end-like ones ~26:1.** Cross-validated: the isolated
+   `ld_dep_stall` figure (11.13%) lands almost exactly on the independently-measured Phase 6
+   XMRig-comparison figure (11.41%, measured a different way, on the full mining workload rather
+   than this main-program-only isolation) — strong evidence the methodology here is sound, not an
+   artifact. `simd_dep_stall` (3.65%) and `other_interlock_stall` (6.74%, execution-stage
+   interlocks other than SIMD/FP) are both real and non-trivial too — worth remembering as
+   secondary contributors if `ld_dep_stall` alone is ever targeted in isolation.
+   **Consequence: this confirms Track D and Track E are pointed at the right problem
+   (execution-stage/dependency-chain stalls dominate overwhelmingly) and Track J (code-layout,
+   I-cache) is correctly deprioritized — front-end effects are real but under 1% of cycles, not
+   worth chasing on their own.** Does not by itself validate any specific Track D/E mechanism will
+   pay off — it only rules out redirecting effort toward front-end fixes instead.
+3. **NEON cross-domain move latency measurement** *(Sonnet-R2 F3, cheap-to-falsify)* —
+   **DONE (2026-07-27), and it did NOT falsify the idea — the opposite of what was expected.**
+   Built a three-way AArch64 micro-benchmark (`bench_gpr_chain`/`bench_neon_chain`/
+   `bench_cross_chain`, 16×2 = 32 chained same-length instructions per iteration, ×20M iterations,
+   pinned via `taskset -c 1`, measured with `perf stat -e cycles,instructions`, each chain a true
+   serialized RAW dependency chain an in-order core can't reorder around): a pure-GPR `mov` chain,
+   a pure-NEON `fmov d,d` chain, and a GPR↔NEON `fmov d0,x0`/`fmov x0,d0` cross-domain chain
+   (confirmed via `objdump` to be the real general-purpose `FMOV` cross-domain encodings, `9e67`/
+   `9e66`, not the immediate-move form). **Result: cycle counts were identical across all three
+   chains to within 0.004%** (640,116,634 / 640,113,517 / 640,136,097 cycles respectively, at
+   680,031,6xx instructions each). On *this specific* Cortex-A53 implementation, a GPR↔NEON
+   `FMOV` round-trip costs the same as a same-domain register move — there is no measurable
+   cross-domain transfer penalty here, contradicting the generic A53 Software Optimization Guide
+   assumption this item was built on (SOG figures are worst-case/typical across A53
+   implementations generically, not necessarily this exact core revision `r0p1`). **This does not
+   mean Track F3 (NEON-pipe multiply offload for `IMUL_R`/`IMUL_RCP`) is proven to work — it means
+   the specific mechanism this item worried about (move overhead eating the gain) is not the
+   blocker on this hardware, so F3 is no longer "almost certainly negative" and is worth an actual
+   NEON-multiply-vs-scalar-multiply latency comparison next, not dismissal on paper.** That
+   follow-up measurement (NEON integer multiply latency vs. `mul`/`umulh`/`smulh`) has not been
+   done yet — it's the next cheap step if anyone picks F3 back up. Tool:
+   `/tmp/.../reg_move_latency.S` + `reg_move_latency_main.c` (ad hoc, not committed).
+4. **Register-liveness check for dual-nonce interleaving** *(Sonnet-R2, gates E1/Item 4 specifically)*
+   — **DONE (2026-07-27), definitive negative result, no slack exists.** Built a standalone
+   backward-liveness analyzer (links against `armrx_core`, generates real main programs via the
+   production `AesGenerator4R` path, classifies each instruction's register reads/writes by
+   mirroring `src/vm.cpp`'s `h_*` handlers, then does classic backward dataflow liveness with the
+   sink at end-of-program = "all registers live," matching `getFinalResult()`'s real behavior of
+   reading every register). 20,000 programs × 256 instructions = 5.12M sample points. **Result: the
+   8 integer registers, the 4 `f`-group floats, and the 4 `e`-group floats are simultaneously live
+   100.00% of the time, at every single instruction point, with zero variance across all 20,000
+   programs.** This is not a measurement artifact — verified directly against `src/vm.cpp`'s opcode
+   handlers: every register-writing instruction in the RandomX v1 ISA is compound-assignment style
+   (`*ibc.idst += ...`, `-=`, `*=`, `^=`, in-place `sqrt`/byte-swap) — **every write reads its own
+   destination first, by construction of the ISA.** There is no instruction anywhere in the set that
+   kills a register's value without using it, so backward liveness can structurally never drop below
+   8/8 (or 4/4 per float group). **Consequence for Track D**: the optimistic escape hatch Sonnet-R2's
+   original writeup left open — "find that RandomX programs rarely use all 8 registers live-
+   simultaneously in practice" — is now closed with certainty, not just suspected. This is a
+   VM-logical-register finding, not a physical-AArch64-register finding: it says nothing new about
+   the JIT's ~12-14-of-31 physical GPR budget per stream (still the open question), but it does mean
+   **D3/E1's register-pressure mitigation option (b) is eliminated — spilling (option (a)) is the
+   only remaining path if D3 is ever attempted**, raising its effective cost/risk versus how the
+   original writeup framed the choice. Does not change D1's viability (D1 doesn't touch the main
+   VM program's logical registers at all — it's superscalar-only). Analysis tool:
+   `/tmp/.../reg_liveness.cpp` (ad hoc, not committed — self-contained, ~230 lines, rerunnable if
+   the opcode frequency table or handler semantics ever change).
 
 ---
 
@@ -150,15 +258,57 @@ KAT-verified. This item chooses between two proven computations; it invents noth
    (`jit_compiler_a64_static.S:528`), a bound check before `bl rx_calc_dataset_item` — hit → direct
    load via `rx_program_xor_with_dataset_line`; miss → existing derivation, unchanged. ~4 extra
    instructions on a ~3,563-instruction path.
-3. Incremental fill (do second, not first): the bound is re-readable at each of the JIT's 8
-   per-hash recompiles, so mining can start in pure light mode and the threshold can rise as a
-   background fill progresses, at zero extra runtime risk once the blocking version is validated.
+3. Incremental fill. **Correction (Gate A result below, measured 2026-07-27): build this from the
+   start, not after validating a blocking version** — a 512 MiB fill takes ~3 minutes even with
+   correct 8-core parallelism, so a blocking implementation would stall mining for minutes at every
+   seed rotation. The bound is re-readable at each of the JIT's 8 per-hash recompiles, so mining can
+   start in pure light mode and the threshold can rise as a background fill progresses, at zero
+   extra runtime risk. Also **use explicit per-thread `pthread_setaffinity_np` pinning for the fill
+   worker threads** (see Gate A's isolcpus finding below) — without it, an `isolcpus`-configured
+   deployment silently serializes the fill onto one core, ~4-5× slower than genuine parallelism.
 4. CLI: `--dataset-mb=N` (0 = off) plus an `auto` policy sized from `MemAvailable`.
 
 **Gates, in order:**
-- **Gate A — init cost.** Measure fill wall-clock for 512 MiB before wiring into the JIT. If
-  seconds, negligible against a ~2.8-day seed rotation; if minutes, incremental fill (step 3)
-  becomes mandatory, not optional.
+- **Gate A — init cost. DONE (2026-07-27), decisive: it's minutes, not seconds — incremental fill
+  is now mandatory, not optional.** Measured on-device with a standalone harness that replicates
+  production's exact call shape (`Argon2dCache::initialize()` then `initialize_dataset()` split
+  across N `std::thread`s, one sub-range each, mirroring `mining_engine.cpp`'s fast-mode fallback
+  at lines 234-259). **Real numbers, genuinely 8-core-parallel** (see the pinning finding below —
+  this required an explicit fix to get true parallelism): 512 MiB (8,388,608 items) —
+  `cache_init_ms=7979.9` (~8.0s) + `fill_ms=179393.1` (**179.4s, ~3.0 minutes**) = **~187s
+  (~3.1 minutes) total**. Extrapolating linearly (the per-item cost is constant, independent of
+  which items are computed): 768 MiB ≈ 4.5 min, 896 MiB ≈ 5.2 min, all fill-only (cache init is a
+  fixed ~8s regardless of partial-dataset size). **This triggers the gate as written: the phasing
+  in the implementation sketch above ("ship the blocking version first; add incremental fill once
+  the win is confirmed") is now wrong — incremental fill (step 3 in that sketch) must be built from
+  the start, not deferred, or every seed rotation blocks mining for 3-5+ minutes.** Amortized over a ~2.8-day seed
+  rotation this is a negligible ~0.07-0.13% of uptime *if* incremental fill means mining starts
+  immediately in pure light mode while the partial dataset fills in the background — but a naive
+  blocking implementation would impose a real, user-visible multi-minute stall at every rotation.
+
+  **Related finding, found while chasing down why the first (unpinned) measurement showed 835s
+  instead of ~180s: a real latent gap in production's own fast-mode dataset-init fallback code,
+  not just an artifact of the ad hoc test harness.** Under this device's `isolcpus=1-7` config, 8
+  plain `std::thread`s spawned with only a process-level `taskset -c 0-7` (no per-thread affinity
+  call) all landed on core 0 — confirmed via `/proc/<tid>/stat` field 39 (`psr`) showing all 9
+  threads (main + 8 workers) at `psr=0`. This is the same isolcpus scheduler-placement gotcha
+  `docs/experiments/isolcpus-rt-priority-win.md`'s "Second footgun" and `PLAN.md` Phase 12's
+  auto-repin watcher already documented for *build* jobs — the kernel doesn't proactively spread
+  inherited-affinity threads across isolated cores even when the mask allows it. **The exact same
+  pattern exists in `mining_engine.cpp`'s fast-mode dataset-init fallback (lines 234-259,
+  `init_threads.emplace_back([...]{ initialize_dataset(...); })` — plain `std::thread`, no
+  `pthread_setaffinity_np`), unlike `worker_loop()` elsewhere in the same file, which explicitly
+  pins every persistent worker thread (lines 318-335).** This path is currently dormant (only
+  reachable in fast mode, and this device is forced into light mode), so it isn't live today — but
+  Track B's own fill code, if it reuses `initialize_dataset()` the way the implementation sketch
+  above says to ("reuse verbatim"), needs to add explicit per-thread pinning from day one, or it
+  will silently serialize onto one core on any `isolcpus`-configured deployment and produce
+  wall-clock numbers ~4-5× worse than genuine 8-core parallelism (835s vs. 179s observed here —
+  close to, though not exactly, the naive 8-9x oversubscription ratio, plausibly reduced somewhat
+  by this device's fast/slow cluster asymmetry). Fix demonstrated and verified: adding
+  `pthread_setaffinity_np(pthread_self(), ..., CPU_SET(i, ...))` at the top of each worker thread
+  (mirroring `worker_loop()`'s own `AffinityMode::All` pattern) spread the 8 threads cleanly across
+  `psr=0..7`, one each, confirmed live before trusting the timing result.
 - **Gate B — the memory-path caveat (real, not theoretical).** This device's known 8-worker
   bottleneck is shared memory-path arbitration between the two L2 clusters. This item trades ALU
   work for random DRAM traffic (~2.5M extra 64-byte reads/sec aggregate at 50% hit rate) — exactly
@@ -194,10 +344,18 @@ Track B — orthogonal axis (reduces the cost of every derivation call rather th
 number of calls) and composes with it.*
 
 Per light-mode iteration (16,384×/hash: 2048 iterations × 8 programs), the current path pays a
-`bl`/`ret`, a 96-byte outer frame, a 112-byte inner frame, 8 saved+restored GPRs, a 64-byte store to
-a temp buffer, then an immediate 64-byte reload of that same buffer to XOR into VM registers — a
-full round-trip the data never needed to make (`jit_compiler_a64_static.S:504,536,824-919,338-349`).
-The item is computed in x0-x7 and could be XORed **directly** into the live VM registers.
+`bl`/`ret`, a 96-byte outer frame, a 112-byte inner frame, 14 saved+restored GPRs (x0-x13, seven
+`stp` pairs), a 64-byte store to a temp buffer, then an immediate 64-byte reload of that same
+buffer to XOR into VM registers — a full round-trip the data never needed to make. **Line numbers
+corrected against source (verified 2026-07-27; the plan originally cited stale ones):** caller
+side is `randomx_program_aarch64_vm_instructions_end_light` at
+`jit_compiler_a64_static.S:528` (not 504), which saves x0/x1/x2/x30 to a 96-byte frame (529-531),
+calls `bl rx_calc_dataset_item` (560), restores (562-564), and branches to
+`rx_program_xor_with_dataset_line` (567) — whose body is at **358-369** (not 338-349; 338-349 is
+the dataset-prefetch region, a different block). The helper's own 112-byte frame/14-register save
+is at 848-855; it stores the derived 64-byte item to the caller's frame at **931-934** and reloads
+its own saved registers at **936-942**. The item is computed in x0-x7 and could be XORed
+**directly** into the live VM registers.
 
 **Phased, each independently revertible:**
 - Phase A — remove duplicate register preservation.
@@ -259,8 +417,18 @@ small groups, each stream's internal order left untouched (still whatever the ve
 produced) — correctness reduces to "no register/memory collision between streams" (checkable
 exhaustively) rather than a semantic reordering proof (the class of proof that broke the memory-op
 scheduler). Register pressure is the central open question: one stream already occupies ~12-14 of
-31 GPRs; two need ~24-28, leaving little room for loop/base-pointer bookkeeping. **Gated entirely on
-Track A item 4 (the liveness check) — do not prototype until that returns.** If it clears, ceiling
+31 GPRs; two need ~24-28, leaving little room for loop/base-pointer bookkeeping. **Track A item 4
+(the liveness check) is done (2026-07-27): definitive negative result.** The VM-logical 8 integer
+registers (and all 8 float destination registers) are live 100.00% of the time at every instruction
+point, with zero exceptions across 20,000 sampled programs — a direct consequence of RandomX v1's
+accumulator-style ISA (every register-writing opcode reads its own destination first, so no
+instruction ever kills a value without using it). **This closes off the optimistic mitigation this
+item originally listed as option (b) ("find that RandomX programs rarely use all 8 registers live-
+simultaneously") — there is no such slack, anywhere, by construction.** Only option (a) remains:
+explicit register spilling to a small stack frame for stream B between uses, paying real load/store
+cost on top of the interleave. This doesn't kill D3 outright (spilling was always the fallback), but
+it removes the free-lunch case and should raise this item's effort/risk estimate accordingly — go in
+expecting spill cost, not hoping to avoid it. If it's still pursued, ceiling
 is "up to most of the main VM program's 20% cycle share," likely much less once register-spill and
 doubled memory-bandwidth-per-worker costs are counted (this could just move the bottleneck from ALU
 stalls to memory bandwidth, mirroring Track B's Gate B risk, self-inflicted instead of
@@ -328,18 +496,61 @@ per §0, because instruction count is a different axis from IPC and was never se
 - **Fusion/peephole, re-scored.** `docs/plans/peephole-jit-plan.md` and the 2025-07-25 closure were
   right that the main-program region isn't stall-dominated — but that's an IPC-axis conclusion, not
   an instruction-count one. Re-run candidate search using Track A item 1's budget table as the
-  source (e.g. an `IADD_RS` shift+add the emitter currently splits, or adjacent `ISTORE`+`IADD_M`
-  sharing an address computation), and **gate purely on `instructions/hash` delta**, not IPC. Adopt
-  only if instruction count drops *and* hashrate holds or rises.
-- **Multiply-width reduction in the superscalar path.** `IMULH_R`/`ISMULH_R` (128-bit-product high
-  half) and `IMUL_RCP`'s reciprocal-correction sequence are candidates for non-minimal emission —
-  Track A item 1 will flag this directly if the emitter isn't using the minimal `umulh`/`smulh` +
-  merge sequence. This targets the >35%-of-cycles multiply region the scheduler has already
-  squeezed (+0.233%, then +0.156% on widening) with essentially nothing left to schedule — the
-  remaining lever here is reducing the multiply's *own* instruction cost, not hiding its latency.
-  Low correctness risk (emission reshaping within the already-reviewed superscalar path).
+  source, and **gate purely on `instructions/hash` delta**, not IPC. Adopt only if instruction count
+  drops *and* hashrate holds or rises. **Partial result (2026-07-27, direct source reading of
+  `src/jit_compiler_a64.cpp`, no device needed): the specific example this item originally named —
+  "an `IADD_RS` shift+add the emitter currently splits" — is factually wrong, both in the main
+  program's `h_IADD_RS` (line 1322) and the superscalar path (line 1101). Both already emit a single
+  fused `add dst, dst, src, lsl #shift` — AArch64's shifted-register add form, not a split
+  shift-then-add. There is no fusion opportunity here; withdraw this example.** The other named
+  example, `ISTORE`+`IADD_M` address-computation sharing, is also checked now: `h_ISTORE`
+  (line 1904) and `h_IADD_M` (via `emitMemLoad`, line 1261) both already use the minimal 3-instruction
+  shape for their own address (`add`-immediate + mask + load-or-store), and structurally there is
+  nothing to *share* between two adjacent instances — `ISTORE`'s address comes from its own `dst`
+  register and immediate, `IADD_M`'s from its own independently-random `dst`/`src`/immediate, with
+  no guaranteed relationship between them. Two independently-random-field instructions coincidentally
+  addressing the same base+offset would be rare in real generated programs — the same shape of
+  reasoning that closed the `IXOR_C*` logical-immediate idea (0 of 20,000 real cases applicable).
+  Not exhaustively quantified the way that case was (no 20,000-sample check run here), so treat as
+  "likely a dead end, not fully closed" rather than fully closed — but not a promising lead either.
+- **Multiply-width reduction in the superscalar path — largely re-treads already-closed ground,
+  verified 2026-07-27.** Read every candidate opcode's actual emission directly (no `--jit-dump`
+  needed; the emitter's code *is* the ground truth for what it emits):
+  - `IMULH_R`/`ISMULH_R`, **both** the main-program handlers (`h_IMULH_R`/`h_ISMULH_R`,
+    `jit_compiler_a64.cpp:1441,1472`) and the superscalar path's inline switch
+    (`generateSuperscalarHash()`, lines 1121-1126): **already minimal — a single `umulh`/`smulh`,
+    nothing to trim.** AArch64 has no cheaper way to get a 128-bit product's high half. This item's
+    premise (non-minimal emission) is false for these two opcodes.
+  - `IMUL_RCP`, **main program** (`h_IMUL_RCP`, line 1503): already has a smart register-
+    pre-assignment fast path — the first 12 distinct divisors per compile get a dedicated
+    pre-loaded literal register (1 `mul` instruction, no load), only the 13th+ falls back to
+    `ldr`+`mul` (2 instructions). Given `IMUL_RCP`'s frequency (8/256 ≈ 3.1%) rarely exceeds 12
+    distinct divisors in one 256-instruction program, the 1-instruction fast path dominates in
+    practice. Already good; not a fresh candidate.
+  - `IMUL_RCP`, **superscalar path** (line 1127-1139): unconditionally `ldr` (literal load) +
+    `mul` — 2 instructions, no pre-assignment fast path. **This is not a new finding — it is
+    exactly the ground two already-closed experiments covered**: "`IMUL_RCP` literal-load
+    elimination" (replacing the `ldr`+`mul` with direct immediate materialization, implemented,
+    measured, reverted at −0.3% net — see the "do not repeat" list) and "`IMUL_RCP` register
+    pre-assignment" (extending the main program's own working <12-slot trick to this exact
+    superscalar site, root-caused and closed-for-now at a safe budget of ≤1 register — see the
+    same list, revisit path in `mid-high-risk-performance-ideas-20260726.md` §1). **Re-labeling
+    this as a fresh Track F candidate would send an executor down a path already walked twice.**
+  - `IXOR_C7`/`C8`/`C9` (superscalar, line 1115-1119): 2 instructions (`movImmediate`+`eor`) — also
+    not fresh; already closed by the standalone logical-immediate-encoder result (0 of 20,000 real
+    immediates encodable as a single AArch64 logical immediate, see "do not repeat" list). The
+    2-instruction cost here is verified-necessary, not waste.
+  - **Net: every specific opcode this item named has already been checked, and none of them yields
+    a new instruction-count-reduction opportunity — either because the emitter is already minimal,
+    or because the gap is real but has already been tried and closed twice.** This doesn't mean
+    Track F is dead — only ~7 of the ISA's ~30+ opcodes (main + superscalar combined) have been
+    checked this way. It does mean this item's *original* framing (treating these as unexamined
+    candidates) was wrong, and the remaining search space is genuinely unexamined opcodes, not
+    these ones. Whoever picks this up next should start from Track A item 1's full audit table
+    once built, not from this item's original examples.
 
-Both items are contingent on Track A item 1's output — there is no candidate list without it.
+Both items are contingent on Track A item 1's output — there is no full candidate list without it,
+though the partial manual check above already removed the specific examples originally cited.
 
 ---
 
@@ -402,7 +613,7 @@ anything. Not a JIT change; can land independently, any time, in parallel with e
 
 ## Track J — Cheap layout tweak *(low priority, measure-if-curious)*
 
-**JIT buffer hot/cold reordering** *(Deepseek C3)*: reorder emission so hot superscalar code is
+**JIT buffer hot/cold reordering** *(Deepseek V4)*: reorder emission so hot superscalar code is
 I-cache-line-contiguous and the cold, once-per-hash main program trails after. Current I-cache miss
 rate is already 0.788% (cheap on A53, ~1-2 cycle penalty), so expected effect is small (~1% at
 most). ~1 day, no correctness risk (layout only). Worth doing if Track C's Phase C /
