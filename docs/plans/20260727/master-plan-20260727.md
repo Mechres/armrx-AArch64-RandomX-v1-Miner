@@ -314,6 +314,9 @@ Everything downstream should be scored against these, not against intuition.
 
 *Opus Item 1 = Deepseek D2; Opus Item 2 / Deepseek B1 as follow-ons.*
 
+**Handoff plan (Gate B/C, ready for an independent agent):**
+`docs/plans/track-b-gate-b-plan-20260728.md`.
+
 RandomX's fast/light split is a spec convenience, not a hard requirement — the dataset is a pure
 function of the cache, so any precomputed prefix is valid and bit-identical to on-the-fly
 derivation. This device has ~950 MiB free while mining. Caching a `B`-byte prefix gives a hit rate
@@ -418,6 +421,10 @@ promoting ahead of Track B's main item as a smaller, faster test of the same und
 Track B — orthogonal axis (reduces the cost of every derivation call rather than reducing the
 number of calls) and composes with it.*
 
+**Handoff plan (Phase A retry bisection, ready for an independent agent):**
+`docs/plans/track-c-phase-a-bisection-plan-20260728.md`. Read alongside
+`docs/experiments/light-mode-dataset-item-prologue-attempt.md` (the prior attempt's full account).
+
 Per light-mode iteration (16,384×/hash: 2048 iterations × 8 programs), the current path pays a
 `bl`/`ret`, a 96-byte outer frame, a 112-byte inner frame, 14 saved+restored GPRs (x0-x13, seven
 `stp` pairs), a 64-byte store to a temp buffer, then an immediate 64-byte reload of that same
@@ -494,6 +501,7 @@ each, which is already verified). Interleaving two streams at emission time is "
 done by the compiler instead of hardware.
 
 **D1 — 2-way interleaved superscalar dataset-item derivation** *(Opus Item 3, do this first — cheapest, best-understood)*.
+**Handoff plan, ready for an independent agent:** `docs/plans/track-d1-superscalar-interleave-plan-20260728.md`.
 Both the current and next dataset-item address are already simultaneously live in the light-mode
 loop (`jit_compiler_a64_static.S:528-560`); RandomX's one-iteration lookahead exists precisely so
 implementations can do this. Emission is mechanically simple — emit each superscalar instruction
@@ -546,7 +554,10 @@ pay off, D3 won't either.
 
 *Sonnet-R2 Category F, minus F1/F3 which live in Track A as diagnostics.*
 
-**F2 — exact A53 dual-issue-slot scheduler** *(Sonnet-R2)*. The current emitter scheduler reorders
+**F2 — exact A53 dual-issue-slot scheduler** *(Sonnet-R2)*.
+**Handoff plan, ready for an independent agent (gate now cleared — Track A item 2 confirmed
+back-end/dependency attribution):** `docs/plans/track-e-f2-dual-issue-scheduler-plan-20260728.md`.
+The current emitter scheduler reorders
 on a register-hazard model only — it doesn't know which specific instruction-type pairs can actually
 co-issue on the A53's two pipes (branch+simple-ALU vs ALU+MUL+DIV+NEON, per the A53 Software
 Optimization Guide). A hazard-clean reorder can still be issue-slot-suboptimal. Building a real
@@ -659,7 +670,9 @@ though the partial manual check above already removed the specific examples orig
 
 ## Track G — NEON T-table AES vectorization *(independent, can run in parallel once flagged)*
 
-*Hermes Item 4.* `hash_aes_1r_x4`/`fill_aes_1r_x4` cost ~12.3% of all cycles — the single biggest
+*Hermes Item 4.*
+**Handoff plan, ready for an independent agent:** `docs/plans/track-g-neon-ttable-aes-plan-20260728.md`.
+`hash_aes_1r_x4`/`fill_aes_1r_x4` cost ~12.3% of all cycles — the single biggest
 named C++ cost. The hardware AESE/AESD path is spec-incompatible (wrong AddRoundKey order,
 previously removed) and the tried `vtbl`/vector-permute NEON AES measured **-19.4%** and is
 flag-gated off (`docs/experiments/neon-vector-permute-aes.md` — read before touching this again).
@@ -702,7 +715,9 @@ verified. Effort: ~2-4 days. Potentially the largest single-target upside in the
 
 ## Track I — Operational: worker/main-thread cost on core 0 *(the one confirmed-open non-JIT item)*
 
-*Opus Item 6 = Hermes Item 7, deduplicated.* Under `isolcpus=1-7`, `detect_core_order()` has no
+*Opus Item 6 = Hermes Item 7, deduplicated.*
+**Handoff plan, ready for an independent agent:** `docs/plans/track-i-core0-cost-plan-20260728.md`.
+Under `isolcpus=1-7`, `detect_core_order()` has no
 `cpufreq` sysfs data to work from and falls back to sequential `[0..7]` placement, landing worker 0
 on core 0 — the only unisolated core, which also hosts the stratum reader, JSON/job handling, and
 the per-second console print. This costs worker 0 real throughput under actual pool mining
