@@ -13,6 +13,16 @@ why-and-how behind everything already shipped. The chronological, dated record o
 history lives in `changelogs.md`; the short-list actionable view at any point in time lives in
 `NEXT_STEPS.md`; completed/remaining status tables live in `ROADMAP.md`.
 
+**As of 2026-07-27, the live backlog of *unstarted* performance work is tracked in
+[`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md),
+not as new phases appended here.** That file is a synthesis of four independently-written
+2026-07-27 planning documents (kept alongside it for full reasoning) into one sequenced,
+deduplicated backlog (Tracks A-J, gated and cross-referenced), plus the two still-unstarted
+Tier 2/3 items carried forward from `docs/plans/mid-high-risk-performance-ideas-20260726.md`.
+New phases will still be added below **once an item from that backlog is actually implemented
+and measured** — this file's phase history remains the record of what shipped, the master plan
+is where what-to-try-next lives.
+
 ---
 
 ## Completed — Phases 1–5 (2026-07-21 through 2026-07-23)
@@ -346,9 +356,12 @@ randomly-halved workers — the original Phase 8 "Mechanism" finding), just not 
 originally headlined. Full account in `docs/experiments/isolcpus-rt-priority-win.md`'s "Third
 finding" section.
 
-This closes the aggregate-hashrate mystery. Worker-to-core placement is the only remaining open
-item project-wide (worker-count default is now fixed — see Phase 13 below), and it isn't
-performance-tuning work.
+This closes the aggregate-hashrate mystery. At the time of this phase, worker-to-core placement
+(non-performance-tuning) was the only tracked open item project-wide. **That was superseded the
+same day** — see the pointer at the top of this file: a fresh planning round found real
+untried structural axes (do-less-work / do-more-independent-work), now tracked in
+`docs/plans/20260727/master-plan-20260727.md`, which folds worker-to-core placement in as its
+Track I alongside everything else.
 
 ## Completed — Phase 13 (2026-07-27): worker-count-default bug fixed; CPU temperature reporting added
 
@@ -373,3 +386,22 @@ pool-mining modes, ` | CPU: NN.NC` appended when available), the TUI dashboard's
 providers). Verified on-device end to end: console line showed real readings (`CPU: 47.0C`), and
 the metrics endpoint returned all 5 zones with distinct real values (43-48°C range) matching the
 thermal logging already gathered for Phase 12's investigation above.
+
+---
+
+## Open — Master Performance Plan (2026-07-27)
+
+**Status:** planned, nothing implemented yet. Phases 1-13 above are all shipped and measured;
+this is where the *next* candidate phase comes from.
+
+Four independent planning documents, written the same day to re-examine whether Phase 9/10's
+"no genuinely open performance lead remains" conclusion actually held, converged on: it didn't
+— every closed lead to that point shared one premise (do the same work slightly cheaper), and
+two structural axes had never been tried (do less work; do more independent work at once), plus
+a real methodological correction (the XMRig gap is on the *instruction-count* axis, not the IPC
+axis several prior closures were scored on). Those four documents were synthesized into one
+sequenced, deduplicated backlog — **[`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)**
+— which also folds in the two still-unstarted Tier 2/3 items from Phase 11's tracking doc
+(BOLT; a full dependency-graph list scheduler; register-allocation restructuring). Read that
+file for the full track list (A through J), gating, and recommended sequence; the next phase
+here will be whichever item is implemented and measured first.

@@ -1,35 +1,28 @@
 # armrx — Status Tracker
 
 > **Status tracker for completed and remaining work.**
-> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md) (current: Phase 7).
+> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md) (current: Phase 13 shipped;
+> open backlog tracked in [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
 > For the full narrative behind everything already completed, see
-> [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) (Phases 1–5) and
-> [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6).
+> [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) (Phases 1–5),
+> [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6), and
+> [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) (Phase 7).
 
-> **Current status (2026-07-25):** Phases 1–5 and Phase 6 are both fully resolved. Phase 6's
-> headline results: two independent performance master plans reconciled into one adopted plan;
-> huge-page residency and a worker-count sweep both closed as no-ops (already ~97.6-100%
-> THP-coalesced, 8 workers remains the highest-throughput default, no plateau); a major
-> unplanned finding that this device has two asymmetric 4-core L2 clusters with a dynamic
-> interconnect-arbitration effect under contention (not thermal, not a power cap); an emitter
-> lookahead scheduler implemented, extended to the actual hot JIT region after an initial null
-> result, measured as a small real IPC/cycle win (+0.233%/−0.036%, `taskset`-pinned) and adopted;
-> three independent code reviews of that scheduler plus a full third-party audit, all verified
-> claim-by-claim; and PGO re-checked on the post-scheduler code shape, still a confirmed null
-> (after catching and correcting a misleading unpinned core-cluster measurement artifact).
-> **Current work is Phase 7**: `-frounding-math` is applied; the CBRANCH assert was added then
-> removed the same day (its "theoretical only" premise was factually wrong). Peephole JIT
-> coalescing is **closed** — extending `tools/jit_correlate.py` to split its old
-> ~22%-unattributed bucket by the `CodeSize` region boundary found the main VM program carries
-> 9.23% of instructions but 20.04% of cycles (a 2.2× IPC penalty, a memory-op stall signature,
-> not an instruction-count one) — evidence against starting it, not just an unmet gate. The
-> natural follow-on (extending the emitter scheduler to hide that same region's memory-op
-> latency) was tried and **reverted** — it caused a real JIT/interpreter divergence whose exact
-> mechanism wasn't conclusively identified; reverting fully was the responsible choice given the
-> failure mode is silent wrong hashes. **Performance work is closed out for this session.**
-> `--rt-priority`/`isolcpus=` remains blocked on user device access — the only open item. See
-> `PLAN.md` for the live, short version of all of this.
+> **Current status (2026-07-27):** Phases 1–13 are all fully resolved — see `PLAN.md` for the
+> complete phase-by-phase account (Phase 8's `isolcpus`/`rcu_nocbs` deployment win, Phase 9's
+> scratchpad-locality gate closure, Phase 10's low-risk backlog closure, Phase 11's scheduler
+> window widening, Phase 12's burst-vs-sustained hashrate reconciliation, Phase 13's
+> worker-count-default fix and CPU temperature reporting are the highlights since the 2026-07-25
+> snapshot this callout used to describe). **All *new* open performance work is tracked in
+> [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)**,
+> a synthesized, deduplicated, gated backlog (Tracks A-J) replacing four independent 2026-07-27
+> planning documents plus two carried-forward unstarted items from Phase 11's tracking doc. It
+> found real untried structural axes — do less work (a hybrid partial dataset), do more
+> independent work at once (dual-nonce instruction interleaving), plus a methodological
+> correction that the measured XMRig gap is on the *instruction-count* axis, not the IPC axis
+> most prior closures were scored on. See that file for the full track list, gating, and
+> recommended sequence.
 >
 > **Major finding, same day, later session:** this device actually has **two separate 4-core L2
 > cache clusters** (cores 0-3 / cores 4-7, confirmed via kernel cache-topology sysfs), not one
@@ -101,9 +94,25 @@
   light-mode JIT call boundary doesn't protect two of the main program's own live registers; the
   real safe budget is at most 1, too small to be worth shipping right now (left open, not closed
   permanently). See `docs/plans/mid-high-risk-performance-ideas-20260726.md`.
+- **Burst-vs-sustained hashrate reconciled (2026-07-27, `PLAN.md` Phase 12):** the 24.76 vs.
+  28.4 H/s gap between real overnight pool mining and the benchmarked `isolcpus` win turned out
+  to be a measurement-window artifact, not a bug or regression — cores 4-7's isolated rate is a
+  short burst that settles to ~2.13 H/s under sustained load (cores 0-3 show zero decay). Honest
+  deployable expectation for this device: **~24.4-24.8 H/s sustained**, not the original 28.4 H/s
+  burst figure; `isolcpus` is still worth keeping for its per-worker consistency win. See
+  `docs/experiments/isolcpus-rt-priority-win.md`'s "Third finding" section.
+- **Worker-count-default bug fixed; CPU temperature reporting added (2026-07-27, `PLAN.md`
+  Phase 13):** `armrx::online_cpu_count()` reads `/sys/devices/system/cpu/online` instead of the
+  affinity-sensitive `hardware_concurrency()`, fixing a real bug where `isolcpus` hosts silently
+  ran with 1 worker instead of 8 when `--workers` wasn't passed explicitly. Separately, CPU
+  thermal-zone reporting was added to the console line, TUI, and Prometheus endpoint.
+- **New open-performance-work backlog (2026-07-27):** four independent planning documents plus
+  two carried-forward Tier 2/3 items were synthesized into
+  [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) —
+  see that file for the current live backlog; nothing in it has been implemented yet.
 - **Perf profile:** **98.24% of hash time is JIT execution**, 1.76% JIT compile. IPC **0.708** on A53 (~35% of dual-issue peak) — this is Phase 6's central fact: a memory-latency-stall-bound workload, not an instruction-throughput-bound one. The widely-cited **31.08%** aggregate branch-miss rate does **not** represent the mining hot path — isolating `bench_armrx --full-hash-only` (2026-07-22) shows only **2.4%** there; the aggregate is 94.93% driven by `--attribution-only`'s non-representative interpreted-mode comparison run. See `docs/experiments/branchless-cbranch.md`'s "The 31.08% figure does not represent the mining hot path" section.
 - **Region breakdown:** chain/final `run()` = **99%** of hash; AES scratchpad = 0.3%; Blake2b = 0.0%; get_final_result = 0.5%.
-- **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad is asserted (`MAP_HUGETLB`/`MADV_HUGEPAGE` "succeeding") but never actually verified on-device — the top open lead.
+- **Light-mode hot path (Phase 6 framing):** per-hash cost is dominated by superscalar dataset-item derivation plus ~16K random 64-byte probes into the 256 MiB Argon2 cache — not fast-mode bandwidth. Huge-page residency for this cache and the 2 MiB scratchpad was verified on-device in Phase 6 (~97.6-100% THP-coalesced) and closed as a no-op — no longer an open lead; see the master plan above for what is.
 
 ---
 
@@ -344,3 +353,9 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |
 | [`docs/audits/jit-buffer-size-audit.md`](docs/audits/jit-buffer-size-audit.md) | JIT buffer size analysis and security audit |
 | [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |
+| [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) ("Third finding") | Burst-vs-sustained hashrate reconciliation, 2026-07-27 (`PLAN.md` Phase 12) |
+| [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | **Current live performance backlog** — synthesizes the four docs below plus two carried-forward Tier 2/3 items into one sequenced, deduplicated, gated plan (Tracks A-J). Read this one first. |
+| [`docs/plans/20260727/performance-plan-20260727.md`](docs/plans/20260727/performance-plan-20260727.md) | Source doc (Claude Opus 5): hybrid partial dataset, dual-nonce interleaving — folded into the master plan's Tracks B/D |
+| [`docs/plans/20260727/hail-mary-ideas-20260727.md`](docs/plans/20260727/hail-mary-ideas-20260727.md) | Source doc (Deepseek V4): per-cluster cache replication, hybrid JIT/interpreter, partial fast mode — folded into Tracks B/H |
+| [`docs/plans/20260727/hail-mary-round2-20260727.md`](docs/plans/20260727/hail-mary-round2-20260727.md) | Source doc (Claude Sonnet 5): cross-hash pipelining, PMU stall breakdown, issue-slot scheduler — folded into Tracks A/D/E |
+| [`docs/plans/20260727/performance-plan-breakthrough-20260727.md`](docs/plans/20260727/performance-plan-breakthrough-20260727.md) | Source doc (Hermes): instruction-count-axis reframing, inline dataset-item helper, NEON T-table AES gather — folded into Tracks C/F/G |

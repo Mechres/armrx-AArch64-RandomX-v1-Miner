@@ -1,15 +1,35 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-26
+**Updated:** 2026-07-27
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 
-Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
+Phases 1–13 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
 `docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`,
 `docs/experiments/isolcpus-rt-priority-win.md`,
 `docs/experiments/scratchpad-locality-bound-20260726.md`,
 `docs/plans/experimental-performance-ideas-20260725.md`, and
-`docs/plans/mid-high-risk-performance-ideas-20260726.md` for the full narratives.
+`docs/plans/mid-high-risk-performance-ideas-20260726.md` for the full narratives. `PLAN.md` has
+the complete phase-by-phase account.
+
+**The current, live source of truth for what to work on next is
+[`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)** —
+a synthesized, deduplicated, gated backlog (Tracks A-J) replacing the standalone
+`performance-plan-20260727.md` bullet this file used to point to below. Highest-value next
+actions per that plan's recommended sequence:
+
+1. **Track A (diagnostics)** — instruction-budget audit, PMU frontend/backend stall breakdown,
+   NEON cross-domain move latency, register-liveness check for dual-nonce interleaving. All
+   half-to-one day each, near-zero risk, run in parallel; they gate everything else.
+2. **Track B, Gate A** — measure partial-dataset fill wall-clock time (the highest expected-value
+   item in the whole backlog). Doesn't depend on Track A; can start immediately.
+3. **Track C, Phase A** — begin the inline light-mode dataset-item helper (remove duplicate
+   register preservation). Independent of Track B.
+4. **Track I** — worker/main-thread cost on core 0, independent and operational, land whenever
+   convenient.
+
+See the master plan for the full track list, gates, dependency graph, and the consolidated
+"do not repeat" list of everything already closed on evidence.
 
 *   [x] ~~Mid/high-risk performance work (`docs/plans/mid-high-risk-performance-ideas-20260726.md`)~~
     — **one adopted, one root-caused and closed for now, 2026-07-26.** Widened the main VM
@@ -100,13 +120,21 @@ Phases 1–11 are all **fully resolved** — see `docs/archived/plan_completed_p
     the originally headlined magnitude. Full writeup: `docs/experiments/isolcpus-rt-priority-win.md`
     "Third finding" section.
 
-No genuinely open performance items remain as of 2026-07-27 (the gated plan's Step 1 result
-above closed Steps 2-3, and the third finding above closes the sustained-vs-burst hashrate
-question). The worker-count-default bug is now fixed; **worker-to-core placement (worker 0
-sharing core 0 with the main/stratum thread) is the only real open item project-wide.** If
-performance work resumes anyway, `docs/plans/experimental-performance-ideas-20260725.md` is the
-speculative, unmeasured backlog to start from — `docs/plans/performance-plan-20260725.md`'s gated
-steps are all closed.
+*   [x] ~~New plan opened 2026-07-27: `docs/plans/performance-plan-20260727.md`~~ — **superseded
+    the same day.** That plan (a "change the axis" pivot: do less work via a hybrid partial
+    dataset, or do more independent work at once via instruction interleaving) was one of four
+    independent 2026-07-27 planning documents. All four, plus the two never-started Tier 2/3
+    items from `docs/plans/mid-high-risk-performance-ideas-20260726.md`, are now combined into
+    one deduplicated, gated backlog — see the pointer at the top of this file:
+    `docs/plans/20260727/master-plan-20260727.md`.
+
+Apart from that master plan, no *previously tracked* performance item remains open as of
+2026-07-27 (the gated plan's Step 1 result above closed Steps 2-3, and the third finding above
+closes the sustained-vs-burst hashrate question). The worker-count-default bug is now fixed;
+worker-to-core placement (worker 0 sharing core 0 with the main/stratum thread) is folded into
+the master plan as Track I, alongside everything else the four 2026-07-27 documents found.
+`docs/plans/experimental-performance-ideas-20260725.md` and
+`docs/plans/performance-plan-20260725.md` are both worked to closure.
 
 Everything from here down is Phase 6's history, kept as the short-list view of already-completed
 work. See `PLAN.md` for the full evidence/reasoning behind each item.

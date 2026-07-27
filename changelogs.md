@@ -1,5 +1,44 @@
 # Changelog
 
+## 2026-07-27 (3) — Four performance planning docs synthesized into one master plan; PLAN.md/NEXT_STEPS.md/ROADMAP.md repointed
+
+Four independent 2026-07-27 planning documents (`docs/plans/20260727/performance-plan-20260727.md`
+[Claude Opus 5], `hail-mary-ideas-20260727.md` [Deepseek V4], `hail-mary-round2-20260727.md`
+[Claude Sonnet 5], `performance-plan-breakthrough-20260727.md` [Hermes]) were combined into one
+sequenced backlog: **`docs/plans/20260727/master-plan-20260727.md`**.
+
+- **Deduplicated three ideas independently proposed under different names**: hybrid partial
+  dataset (Opus Item 1 = Deepseek D2), cross-hash/dual-nonce interleaving (Opus Items 3-4 =
+  Sonnet-R2's Category E), and the instruction-budget audit (Opus Item 5 = Hermes Item 1) — each
+  merged into one track instead of being listed as separate items.
+- **Surfaced and applied the one substantive disagreement between the source docs**: three
+  documents score ideas by IPC/stall cycles (the framing that closed most of Phases 6-10's leads);
+  Hermes points out the actual measured XMRig gap is on the **instruction-count** axis (armrx:
+  132.93M instructions/hash vs. XMRig's 99.57M, despite armrx already having *better* IPC and
+  stall rate) — a different metric that several "IPC-closed" ideas (peephole coalescing, etc.)
+  were never separately screened against. That reframing is called out explicitly (§0) and used to
+  deliberately re-open one closed item (Track F) rather than let three-against-one silently
+  overrule it.
+- **Organized into 10 gated tracks (A-J)** — diagnostics, partial dataset, inline dataset-item
+  helper (ABI/call overhead), concurrency/interleaving, scheduler refinement, instruction-count
+  micro-opt, NEON AES vectorization, alternative execution models, the operational core-0/worker
+  placement item, and cheap layout tweaks — with an explicit dependency graph and a consolidated
+  "do not repeat" list merged from all four documents (correcting one entry along the way: BOLT
+  had been miscategorized as a measured closure when it was only ever a predicted, never-run,
+  null).
+- **Folded in the two never-started Tier 2/3 items** from
+  `docs/plans/mid-high-risk-performance-ideas-20260726.md` (BOLT; a full dependency-graph list
+  scheduler; register-allocation restructuring) as escalations within Track E/J, gated behind the
+  cheaper diagnostics that answer the same question first.
+- **`PLAN.md`, `NEXT_STEPS.md`, `ROADMAP.md` repointed** to the master plan as the live backlog:
+  corrected several now-stale "no genuinely open performance lead remains" / "worker-to-core
+  placement is the only open item" statements left over from Phases 9-12, fixed a leftover
+  ROADMAP.md line that still called huge-page residency "the top open lead" (closed as a no-op
+  back in Phase 6), and refreshed ROADMAP.md's "Current status" callout, which had been stale
+  since Phase 7 (2026-07-25) despite Phases 8-13 having since landed.
+
+No code changed; this is a planning/documentation consolidation only.
+
 ## 2026-07-27 (2) — Fixed worker-count-default bug; added CPU temperature reporting
 
 - **Fix**: `--workers=N` used to silently default to 1 instead of 8 under `isolcpus` (musl's
