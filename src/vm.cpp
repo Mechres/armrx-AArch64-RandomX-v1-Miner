@@ -789,7 +789,9 @@ void VirtualMachine::run_jit() {
     if (!is_fast_mode()) {
         // Light mode: JIT compiler generates inline dataset item derivation
         const bool useHybrid = (partial_dataset_data_ != nullptr);
-        jit_->generateProgramLight(program_, config, static_cast<uint32_t>(dataset_offset_), useHybrid);
+        const std::size_t items = useHybrid ? partial_dataset_item_count_ptr_->load(std::memory_order_acquire) : 0;
+        jit_->generateProgramLight(program_, config, static_cast<uint32_t>(dataset_offset_),
+                                   partial_dataset_data_, items);
     } else {
         // Fast mode: JIT compiler reads directly from pre-computed dataset
         jit_->generateProgram(program_, config);

@@ -833,7 +833,8 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 #endif
 }
 
-void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset, bool useHybrid)
+void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset,
+                                           const std::byte* partial_dataset_data, std::size_t partial_dataset_items)
 {
 	uint32_t codePos;
 	emitPrologueMix(program, codePos);
@@ -854,13 +855,82 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		memcpy(code + dst, code + src, 8);
 	}
 
-	// Jump back to the main loop
-	const uint32_t offset = (useHybrid ? 
-		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64)) :
-		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64))) - codePos;
-	emit32(ARMV8A::B | (offset / 4), code, codePos);
+	const bool enableHybrid = (partial_dataset_data != nullptr && partial_dataset_items > 0);
+	const uint32_t end_light_offset = 
+		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64));
 
-	if (useHybrid) {
+	if (enableHybrid) {
+		// Emit inline hybrid bound check.
+		// Register state at this point (after all 256 VM instructions):
+		//   x2 = item number (with dataset offset applied)
+		//   x1 = cache pointer   x9 = mx (tweaked)  x20 = spMix2
+		//   x4-x7, x12-x15 = VM registers (must NOT clobber)
+		//   x19 = L1 mask, x21-x28 = IMUL_RCP literals (must NOT clobber)
+		// Available temps: x0-x3, x10-x11, x16-x17
+		// x0-x3 are scratch (not VM registers);
+		// the XOR entry restores x0 from the stack, so clobbering x0 is safe.
+		
+		const uint32_t itemCount = static_cast<uint32_t>(partial_dataset_items);
+		const uint64_t dataPtr = reinterpret_cast<uint64_t>(partial_dataset_data);
+		
+		// The miss-path fallthrough target (right after the hit-path code)
+		uint32_t after_hit = codePos;
+		
+		// Load items count
+		emit32(ARMV8A::MOVZ | 16 | ((itemCount & 0xFFFF) << 5), code, codePos);
+		if (itemCount > 0xFFFF) {
+			emit32(ARMV8A::MOVK | 16 | (1u << 21) | (((itemCount >> 16) & 0xFFFF) << 5), code, codePos);
+		}
+		
+		// CMP x2, x16
+		emit32(0xEB00001F | (16 << 16) | (2 << 5), code, codePos);
+		
+		// B.HS (placeholder, patched below)
+		uint32_t branch_pos = codePos;
+		emit32(0x54000002 | (0 << 5), code, codePos);
+		
+		// ── HIT path: load 64 bytes from partial_dataset_[item] to [sp] ──
+		// Load partial dataset base pointer
+		emit32(ARMV8A::MOVZ | 17 | ((dataPtr & 0xFFFF) << 5), code, codePos);
+		emit32(ARMV8A::MOVK | 17 | (1u << 21) | (((dataPtr >> 16) & 0xFFFF) << 5), code, codePos);
+		if (dataPtr > 0xFFFFFFFFULL) {
+			emit32(ARMV8A::MOVK | 17 | (2u << 21) | (((dataPtr >> 32) & 0xFFFF) << 5), code, codePos);
+		}
+		
+		// x17 = dataPtr + item * 64: ADD x17, x17, x2, lsl #6
+		emit32(ARMV8A::ADD | 17 | (17 << 5) | (6 << 10) | (2 << 16), code, codePos);
+		
+		// Copy 64 bytes from [x17] to [sp] using ldp/stp (4 pairs of 16 bytes each)
+		// ldp x0, x1, [x17, #off]; stp x0, x1, [sp, #off]
+		for (int off = 0; off < 64; off += 16) {
+			// ldp x0, x1, [x17, #off]: 0xA9400620 | ((off/8) << 15)
+			emit32(0xA9400620 | ((off / 8) << 15), code, codePos);
+			// stp x0, x1, [sp, #off]: 0xA90003E0 | ((off/8) << 15)
+			emit32(0xA90003E0 | ((off / 8) << 15), code, codePos);
+		}
+		
+		// Jump to XOR entry: prepare x10 and restore regs, same as _end_light's common exit
+		emit32(0xAA1F03EA, code, codePos);  // mov x10, sp
+		emit32(0xA94007E0, code, codePos);  // ldp x0, x1, [sp, #64]
+		emit32(0xA9417BE2, code, codePos);  // ldp x2, x30, [sp, #80]
+		emit32(0x910183FF, code, codePos);  // add sp, sp, #96
+		// B to XOR entry — compute PC-relative offset
+		const uint32_t xor_offset = 
+			(((uint8_t*)randomx_program_aarch64_xor_with_dataset_line) - ((uint8_t*)randomx_program_aarch64));
+		const int32_t xor_branch_off = static_cast<int32_t>(xor_offset) - static_cast<int32_t>(codePos);
+		emit32(ARMV8A::B | (xor_branch_off / 4), code, codePos);
+		
+		// ── Patch B.HS placeholder ──
+		const int32_t hs_offset = static_cast<int32_t>(after_hit) - static_cast<int32_t>(branch_pos);
+		code[branch_pos + 0] = 0x54;
+		code[branch_pos + 1] = 0x00 | ((hs_offset / 4) & 0x7F);
+		code[branch_pos + 2] = ((hs_offset / 4) >> 7) & 0xFF;
+		code[branch_pos + 3] = 0x02 | (((hs_offset / 4) >> 15) & 0x0F) << 4;
+	}
+	
+	emit32(ARMV8A::B | ((end_light_offset - codePos) / 4), code, codePos);
+
+	if (enableHybrid) {
 		// Patch hybrid-specific symbols (same values as the light path equivalents)
 		codePos = (((uint8_t*)randomx_program_aarch64_hybrid_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
 		emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
