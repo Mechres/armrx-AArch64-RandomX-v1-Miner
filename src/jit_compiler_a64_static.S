@@ -60,7 +60,6 @@
 	.global DECL(randomx_program_aarch64_vm_instructions_end_v2)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_light_v1)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_light_v2)
-	.global DECL(randomx_program_aarch64_xor_with_dataset_line)
 	.global DECL(randomx_init_dataset_aarch64)
 	.global DECL(randomx_init_dataset_aarch64_end)
 	.global DECL(randomx_calc_dataset_item_aarch64)

@@ -59,7 +59,6 @@ extern "C" {
 	void randomx_program_aarch64_vm_instructions_end_v2();
 	void randomx_program_aarch64_vm_instructions_end_light_v1();
 	void randomx_program_aarch64_vm_instructions_end_light_v2();
-	void randomx_program_aarch64_xor_with_dataset_line();
 	void randomx_init_dataset_aarch64();
 	void randomx_init_dataset_aarch64_end();
 	void randomx_calc_dataset_item_aarch64();
