@@ -872,14 +872,22 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		
 		const uint32_t itemCount = static_cast<uint32_t>(partial_dataset_items);
 		const uint64_t dataPtr = reinterpret_cast<uint64_t>(partial_dataset_data);
+		const uint32_t dsOffsetItems = datasetOffset / CacheLineSize;  // offset in item units
+		// The bound check: x2 has the dataset offset applied. Compare against
+		// (itemCount + dsOffsetItems) so items just beyond the cached range
+		// are correctly identified as miss.
+		const uint32_t cmpLimit = itemCount + dsOffsetItems;
 		
 		// The miss-path fallthrough target (right after the hit-path code)
 		uint32_t after_hit = codePos;
 		
-		// Load items count
-		emit32(ARMV8A::MOVZ | 16 | ((itemCount & 0xFFFF) << 5), code, codePos);
-		if (itemCount > 0xFFFF) {
-			emit32(ARMV8A::MOVK | 16 | (1u << 21) | (((itemCount >> 16) & 0xFFFF) << 5), code, codePos);
+		// Load comparison limit: items + dataset_offset_items
+		emit32(ARMV8A::MOVZ | 16 | ((cmpLimit & 0xFFFF) << 5), code, codePos);
+		if (cmpLimit > 0xFFFF) {
+			emit32(ARMV8A::MOVK | 16 | (1u << 21) | (((cmpLimit >> 16) & 0xFFFF) << 5), code, codePos);
+		}
+		if (cmpLimit > 0xFFFFFFFFULL) {
+			emit32(ARMV8A::MOVK | 16 | (2u << 21) | (((cmpLimit >> 32) & 0xFFFF) << 5), code, codePos);
 		}
 		
 		// CMP x2, x16
