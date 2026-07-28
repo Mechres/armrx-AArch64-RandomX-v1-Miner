@@ -43,6 +43,12 @@ public:
     /// Returns the number of cached items (0 = disabled).
     [[nodiscard]] std::size_t item_count() const { return item_count_.load(std::memory_order_acquire); }
 
+    /// Returns a pointer to the atomic item count for live JIT bound checking.
+    /// The JIT reads this pointer every hash via memory_order_acquire, paired
+    /// with the fill worker's memory_order_release CAS — guaranteeing written
+    /// item bytes are visible when item_count increases.
+    [[nodiscard]] const std::atomic<std::size_t>* item_count_atomic() const { return &item_count_; }
+
     /// Returns a pointer to the start of the cached data (or nullptr if disabled).
     [[nodiscard]] const std::byte* data() const { return data_; }
 

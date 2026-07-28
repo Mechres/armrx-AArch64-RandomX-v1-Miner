@@ -807,10 +807,13 @@ void VirtualMachine::run_jit() {
     if (!is_fast_mode()) {
         // Light mode: JIT needs cache pointer to derive dataset items on the fly
         mem_regs.memory = cache_ ? reinterpret_cast<const uint8_t*>(cache_->blocks().data()) : nullptr;
-        // Hybrid: pass partial dataset information for bound check
-        if (partial_dataset_data_ != nullptr && partial_dataset_items_ > 0) {
+        // Hybrid: pass partial dataset information for bound check.
+        // Read item_count fresh from the atomic every hash — the fill
+        // publishes chunks with release ordering, this load pairs with
+        // acquire, guaranteeing written item bytes are visible.
+        if (partial_dataset_data_ != nullptr && partial_dataset_item_count_ptr_) {
             mem_regs.partial_dataset_ = reinterpret_cast<const uint8_t*>(partial_dataset_data_);
-            mem_regs.partial_dataset_items_ = partial_dataset_items_;
+            mem_regs.partial_dataset_items_ = partial_dataset_item_count_ptr_->load(std::memory_order_acquire);
         }
     } else {
         // Fast mode: JIT reads from pre-computed dataset

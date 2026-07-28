@@ -4,6 +4,7 @@
 #include "armrx/aes_hash.hpp"
 #include "armrx/argon2.hpp"
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -72,12 +73,14 @@ public:
     [[nodiscard]] bool set_dataset(std::span<const std::byte> dataset);
 
     /// Configure a partial dataset for hybrid light mode (Track B).
-    /// When set, the JIT bound-checks item_number < partial_item_count before
-    /// deciding whether to load directly (hit) vs. derive on the fly (miss).
-    /// Partial dataset lifetime must exceed the VM's.
-    void set_partial_dataset(const std::byte* data, std::size_t item_count) {
+    /// When set, the JIT bound-checks item_number < *partial_dataset_item_count_ptr_
+    /// before deciding whether to load directly (hit) vs. derive on the fly (miss).
+    /// item_count_ptr is the PartialDataset's atomic item count, read fresh every
+    /// hash via memory_order_acquire. Partial dataset lifetime must exceed the VM's.
+    void set_partial_dataset(const std::byte* data,
+                             const std::atomic<std::size_t>* item_count_ptr) {
         partial_dataset_data_ = data;
-        partial_dataset_items_ = item_count;
+        partial_dataset_item_count_ptr_ = item_count_ptr;
     }
 
     void allocate();
@@ -202,7 +205,7 @@ private:
     const Argon2dCache* cache_ = nullptr;
     std::span<const std::byte> dataset_;
     const std::byte* partial_dataset_data_ = nullptr;
-    std::size_t partial_dataset_items_ = 0;
+    const std::atomic<std::size_t>* partial_dataset_item_count_ptr_ = nullptr;
 
     std::uint64_t dataset_offset_ = 0;
     std::uint32_t mx_ = 0;

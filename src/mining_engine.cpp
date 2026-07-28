@@ -455,7 +455,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 // enables the hybrid code emission. item_count_ rises
                 // atomically as fill progresses.
                 if (partial_dataset_) {
-                    vm.set_partial_dataset(partial_dataset_->data(), partial_dataset_->item_count());
+                    vm.set_partial_dataset(partial_dataset_->data(),
+                                           partial_dataset_->item_count_atomic());
                 }
                 if (mode_ == RandomXMode::fast && active_dataset) {
                     if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {
