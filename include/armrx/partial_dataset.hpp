@@ -55,10 +55,12 @@ public:
     /// Start background fill of the buffer using initialize_dataset.
     /// Fills from start_item to item_count, incrementally raising item_count_ as each
     /// chunk completes. Threads are explicitly pinned mirroring worker_loop()'s
-    /// AffinityMode::All pattern.
+    /// AffinityMode::All pattern, skipping any CPU IDs in `exclude_cores`
+    /// (e.g. cores already occupied by mining workers).
     void start_fill(const Argon2dCache& cache,
                     const std::vector<unsigned>& core_order,
-                    std::shared_ptr<void> cache_lifetime_holder = {});
+                    std::shared_ptr<void> cache_lifetime_holder = {},
+                    const std::vector<unsigned>& exclude_cores = {});
 
     /// Returns true if the fill has completed (all items fully computed).
     [[nodiscard]] bool fill_complete() const {

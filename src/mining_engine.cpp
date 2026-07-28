@@ -205,7 +205,15 @@ void MiningEngine::set_job(const Job& job) {
         // Start background fill of the partial dataset if configured.
         // Only starts once (checked by partial_dataset_fill_started_ flag).
         if (partial_dataset_ && !partial_dataset_fill_started_.test_and_set(std::memory_order_relaxed)) {
-            partial_dataset_->start_fill(*shared_cache_, core_order_, shared_cache_);
+            // Collect mining worker cores to exclude fill threads from them
+            std::vector<unsigned> mining_cores;
+            for (unsigned i = 0; i < num_threads_; ++i) {
+                mining_cores.push_back(core_order_[i % core_order_.size()]);
+            }
+            // Deduplicate
+            std::sort(mining_cores.begin(), mining_cores.end());
+            mining_cores.erase(std::unique(mining_cores.begin(), mining_cores.end()), mining_cores.end());
+            partial_dataset_->start_fill(*shared_cache_, core_order_, shared_cache_, mining_cores);
         }
 
         if (mode_ == RandomXMode::fast) {
