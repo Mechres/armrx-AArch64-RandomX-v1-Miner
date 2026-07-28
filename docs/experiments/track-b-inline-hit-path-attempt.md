@@ -88,6 +88,52 @@ crash and correlate the timing with fill completion / job events / recompiles, t
 consider returning to the live-load design — the pre-fix assembly path's memory
 access pattern never crashed; its bug was the activation guard, not the loads.
 
+### Independent review (Gemini 3.1 Pro via agy, 2026-07-28) — hypothesis challenged
+
+An independent review of this doc + the static.S entry points weakens the two
+hypotheses above and proposes a stronger one:
+
+- **Dangling pointer: implausible for this crash.** Seed rotation is ~2.8 days;
+  nothing replaces the PartialDataset buffer during a 360s fixed-seed benchmark.
+- **Torn/stale baked count: implausible as a SIGSEGV cause.** The count grows
+  monotonically, so a stale baked snapshot is conservative (smaller) — it can only
+  push items to the safe miss/derivation path, never out of bounds.
+- **Stronger candidate — "fix #2"'s bound-check window is itself out-of-bounds.**
+  The fix compared offset-applied `x2 < items + ds_offset_items`, but the buffer
+  only holds `items` entries. If the HIT path's address computation used the same
+  offset-applied `x2` against the buffer base (`dataPtr + x2*64`), any item in
+  `[items, items + ds_offset_items)` passes the check yet reads past the 512 MiB
+  allocation → SIGSEGV. This would also explain the ~112s timing naturally: the
+  crash fires when the background fill first publishes enough items that a
+  generated item lands in the bad window — i.e., crash time should correlate with
+  fill progress, which is directly checkable. **CONFIRMED against the reverted
+  code (2026-07-28, `git show 196a6ad:src/jit_compiler_a64.cpp`, hybrid emission
+  block ~lines 862-940): the HIT-path address is `ADD x17, x17, x2, lsl #6` =
+  `dataPtr + x2*64` using the OFFSET-APPLIED x2 against the RAW buffer base.**
+  This is worse than the boundary-window case: for any nonzero dataset offset,
+  every hit reads from `dataPtr + (raw_item + dsOffsetItems)*64` — the whole hit
+  range is shifted `dsOffsetItems` entries past the actual data (wrong values),
+  and the top of the range reads past the 512 MiB allocation (SIGSEGV). The
+  correct emission needed either the raw item for the address computation, or
+  `dataPtr - dsOffsetItems*64` as the baked base. This is the leading root-cause
+  candidate for the 112s crash; the gdb/si_addr diagnostic below would confirm it
+  in one run if anyone wants certainty before rebuilding. (Minor tell from the
+  same code: `cmpLimit` is `uint32_t`, so its `> 0xFFFFFFFFULL` MOVK branch is
+  dead code — always false.)
+- **Secondary candidates the doc missed:** (a) missing acquire barrier between the
+  fill worker's data stores and the JIT hit path's loads (ARM64 weak ordering —
+  the hit path loads dataset lines with plain `ldp`, no `ldar`/`dmb ish`);
+  (b) I-cache maintenance after emitting the inline sequence (should be covered by
+  the existing JIT flush path, but worth confirming the inline emission went
+  through it).
+- **Cheapest discriminating diagnostic: catch the SIGSEGV in gdb and read
+  `si_addr`** (`p $_siginfo._sifields._sigfault.si_addr`). Decision rule:
+  `si_addr == dataPtr + x2*64` with `items <= x2 < items + ds_offset_items` proves
+  the bound-check-window bug; `si_addr` wildly outside process space indicates
+  pointer corruption; `si_addr` inside valid buffer bounds points at memory
+  ordering / page-fault interaction. One crash, three-way discrimination — do this
+  before any instruction-sequence re-review.
+
 ### Bound-Check Convention
 
 The item number x2 at the emission point (after the light-path computation) has
