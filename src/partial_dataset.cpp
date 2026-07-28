@@ -31,39 +31,19 @@ PartialDataset::PartialDataset(std::size_t item_count)
 
     const std::size_t total_bytes = item_count * kRandomXDatasetItemBytes;
 
-    // Over-allocate by 2 MiB to ensure 2 MiB alignment for THP
-    const std::size_t kHugePageSize = 2ULL * 1024ULL * 1024ULL;
-    const std::size_t alloc_bytes = total_bytes + kHugePageSize;
-
-    void* raw = ::mmap(nullptr, alloc_bytes, PROT_READ | PROT_WRITE,
-                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (raw == MAP_FAILED) {
+    // Simple mmap with transparent hugepage hint
+    data_ = static_cast<std::byte*>(
+        ::mmap(nullptr, total_bytes, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    if (data_ == MAP_FAILED) {
         throw std::bad_alloc();
     }
 
-    // Align to 2 MiB boundary for THP
-    void* aligned = reinterpret_cast<void*>(
-        (reinterpret_cast<std::uintptr_t>(raw) + kHugePageSize - 1) & ~(kHugePageSize - 1));
-    data_ = static_cast<std::byte*>(aligned);
-
-    // Unmap the unaligned prefix and suffix
-    const auto prefix_bytes = static_cast<std::size_t>(
-        static_cast<std::byte*>(aligned) - static_cast<std::byte*>(raw));
-    if (prefix_bytes > 0) {
-        ::munmap(raw, prefix_bytes);
-    }
-    const auto suffix_start = static_cast<std::byte*>(aligned) + total_bytes;
-    const auto suffix_bytes = alloc_bytes - prefix_bytes - total_bytes;
-    if (suffix_bytes > 0) {
-        ::munmap(suffix_start, suffix_bytes);
-    }
-
-    // Hugepage hint
+    // Hugepage hint (best-effort; succeeds silently if THP is available)
     ::madvise(data_, total_bytes, MADV_HUGEPAGE);
 
-    // Do NOT prefault with MADV_POPULATE_WRITE — it faults in 4 KiB pages
-    // and prevents THP coalescing. Let the fill workers' sequential writes
-    // naturally allocate 2 MiB huge pages instead.
+    // Touch pages to fault them in proactively (Linux 5.14+)
+    ::madvise(data_, total_bytes, MADV_POPULATE_WRITE);
 
     ARMRX_LOG_INFO << "PartialDataset: allocated " << item_count
                    << " items (" << (total_bytes / (1024ULL * 1024ULL))
