@@ -1,5 +1,12 @@
 # Track B Gate B/C: Partial Dataset Memory-Contention Test — Plan for the Next Agent
 
+**STATUS AS OF 2026-07-28: PAUSED.** Concept validated (~9-10% instructions/cycles
+per hash reduction at 25% hit rate, 1 worker), but both JIT implementations failed.
+See `docs/experiments/track-b-inline-hit-path-attempt.md` for full debrief. The
+infrastructure (PartialDataset class, CLI flag, fill pinning, differential test) is
+landed and inert. When work resumes, the Gate B protocol below is unchanged, with
+the thermal-equalization addition.
+
 ## Status this plan assumes
 
 Track B (hybrid partial dataset: cache a `B`-byte prefix of the fast-mode dataset,

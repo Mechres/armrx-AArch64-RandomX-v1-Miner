@@ -310,7 +310,7 @@ Everything downstream should be scored against these, not against intuition.
 
 ---
 
-## Track B — Do less work: hybrid partial dataset *(highest expected value, correctness risk genuinely low)*
+## Track B — Do less work: hybrid partial dataset *(PAUSED — concept validated, implementation reverted)*
 
 *Opus Item 1 = Deepseek D2; Opus Item 2 / Deepseek B1 as follow-ons.*
 

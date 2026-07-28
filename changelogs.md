@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026-07-28 — Track B closed: concept validated, implementation reverted after two JIT failures
+
+Track B hybrid partial dataset is **paused** — the concept was validated (~9-10%
+instructions/cycles per hash reduction at 25% hit rate, 1 worker, measured on the
+now-reverted assembly path), but two separate JIT-boundary implementations failed:
+
+- **Template-based `_end_hybrid` entry** (commits up to bdfd160): segfault from
+  x21 register clobber (main loop's `ldr x21, literal` overwrites the saved
+  MemoryRegisters* pointer). Reverted in 7429537 (hybrid disabled).
+- **Inline emitted bound check** (commits b58585c..196a6ad): crashed at ~112s in long
+  benchmarks after fixing LDP encoding and offset comparison. Reverted in 2886b04.
+- **Inline hit path reverted**. All independently-good fixes kept: PoolManager
+  self-deadlock, fill-thread pinning, cache lifetime holder, PartialDataset class,
+  CLI flag, differential test, and the safety state (always jump to `_end_light`).
+- **Full experiment writeup**: `docs/experiments/track-b-inline-hit-path-attempt.md`.
+- **Plan docs updated**: Track B marked paused in master plan and gate-B plan.
+- **Inert state verified**: long benchmark with `--dataset-mb=512` produces
+  steady-state 4.25 H/s (identical to baseline), zero crashes, shares match.
+
 ## 2026-07-28 — Track B fixups: segfault, live bound, fill pinning (post-reboot)
 
 Multiple follow-on fixes after on-device validation of the hybrid partial dataset:
