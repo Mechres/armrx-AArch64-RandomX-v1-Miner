@@ -67,6 +67,13 @@
 	.global DECL(randomx_calc_dataset_item_aarch64_mix)
 	.global DECL(randomx_calc_dataset_item_aarch64_store_result)
 	.global DECL(randomx_calc_dataset_item_aarch64_end)
+	# Track D1: 2-way interleaved dataset-item derivation (new, separate
+	# entry point -- see the register-contract comment at its definition).
+	.global DECL(randomx_calc_dataset_item_aarch64_2way)
+	.global DECL(randomx_calc_dataset_item_aarch64_2way_prefetch)
+	.global DECL(randomx_calc_dataset_item_aarch64_2way_mix)
+	.global DECL(randomx_calc_dataset_item_aarch64_2way_store_result)
+	.global DECL(randomx_calc_dataset_item_aarch64_2way_end)
 
 #include "configuration.h"
 
@@ -1023,3 +1030,289 @@ DECL(randomx_calc_dataset_item_aarch64_store_result):
 	ret
 
 DECL(randomx_calc_dataset_item_aarch64_end):
+
+# ══════════════════════════════════════════════════════════════════════
+# Track D1 (docs/plans/track-d1-superscalar-interleave-plan-20260728.md):
+# 2-way interleaved dataset-item derivation.
+#
+# NEW, SEPARATE entry point -- parallel to, and does NOT replace, modify,
+# or share any register with, randomx_calc_dataset_item_aarch64 above.
+# That function, rx_calc_dataset_item_prefetch/_mix/_store_result, and
+# every existing caller (randomx_program_aarch64_vm_instructions_end_light,
+# _end_hybrid, and the dead-code randomx_init_dataset_aarch64_main_loop)
+# are completely untouched by this block.
+#
+# This entry is ALSO not reached by generateSuperscalarHash()'s existing
+# copy-and-splice mechanism, is NOT wired into the JIT-emitted main VM
+# program template (randomx_program_aarch64_main_loop) or its _end_light/
+# _end_hybrid exits, and is NOT called from anywhere in the live mining
+# path. It is only ever reached by the new, standalone
+# src/jit_dataset_2way.cpp module's own memcpy-and-splice logic (a
+# SEPARATE JIT buffer from JitCompilerA64::code), which builds a per-seed
+# interleaved-derivation function for testing/benchmarking two dataset
+# items at once. Track D1's plan explicitly scopes wiring this into the
+# live per-hash call sites as a distinct, not-yet-attempted follow-on
+# (see the plan's Step 5) -- so this cannot yet suffer the specific
+# failure class documented in
+# docs/experiments/track-b-inline-hit-path-attempt.md (a hidden
+# `ldr x21, <literal>` inside the MAIN LOOP template clobbering a
+# register a new template entry assumed was live): there is no caller
+# template here to clobber anything, because there is no caller yet.
+#
+# extern "C" void randomx_calc_dataset_item_aarch64_2way(
+#     const void* cache,          // x0
+#     void* outA, uint64_t itemA, // x1, x2
+#     void* outB, uint64_t itemB) // x3, x4
+#
+# ── FULL REGISTER CONTRACT (read this before extending or calling this
+#    function from anywhere new) ──────────────────────────────────────
+#
+# Inputs (standard AAPCS64 argument registers x0-x4; each is relocated to
+# a persistent register -- see below -- in the first few instructions,
+# then dead/reused):
+#   x0 = cache pointer            -> copied to x8  (shared by both
+#                                     streams; cache access is read-only,
+#                                     so sharing one pointer register
+#                                     between streams introduces no
+#                                     aliasing hazard)
+#   x1 = output pointer, stream A -> copied to x9 before being clobbered
+#                                     as rl_A[1]
+#   x2 = item number,   stream A  -> consumed directly by the rl_A[0]
+#                                     `madd`, then reused in place as
+#                                     rl_A[2] (identical technique to the
+#                                     existing single-stream function
+#                                     above: the input register becomes
+#                                     a working register once its input
+#                                     value has been consumed)
+#   x3 = output pointer, stream B -> copied to x27 before being
+#                                     clobbered as rl_A[3] (stream A's
+#                                     setup runs first and physically
+#                                     overwrites x3)
+#   x4 = item number,   stream B  -> copied to x16 before being
+#                                     clobbered as rl_A[4]; x16's copy is
+#                                     then consumed by the rl_B[0] `madd`
+#                                     and left dead (rl_B[2] is NOT
+#                                     aliased to x16 the way rl_A[2]/x2
+#                                     is -- x16 has a second job as
+#                                     stream B's temp/tmp_reg register
+#                                     from the very next round onward,
+#                                     so its item-number value is
+#                                     deliberately not preserved further)
+#
+# Stream A -- IDENTICAL physical registers to the existing single-stream
+# randomx_calc_dataset_item_aarch64 above (deliberate: stream A's
+# arithmetic is byte-for-byte the same sequence as the proven
+# single-stream path, just missing that function's own x0-x13
+# save/restore, which this function does not need -- see "ABI" below):
+#   x0-x7  = rl_A[0..7]   (working/output registers)
+#   x8     = cache pointer            (SHARED with stream B, read-only)
+#   x9     = output pointer, stream A
+#   x10    = registerValue, stream A
+#   x11    = mixBlock pointer, stream A
+#   x12    = temp A / tmp_reg for instruction emission
+#   x13    = temp A (mix-step second XOR operand only)
+#
+# Stream B -- new registers. Working set extends into the callee-saved
+# range x19-x26; the four "helper" roles use x27/x28 (callee-saved) plus
+# x16/x17/x14 (caller-saved scratch -- safe to use with no save/restore
+# because this is a leaf function containing no internal `bl`, so
+# nothing downstream can observe them as clobbered mid-call the way a
+# real nested call could). x15 and x18 are deliberately left completely
+# unused: x15 as a spare in case a future revision needs one more temp,
+# x18 because it is the reserved platform register on some AArch64 ABIs
+# (notably Apple/Darwin, which this file's DECL() macro already
+# special-cases) even though armrx only targets AArch64 Linux -- costs
+# nothing to avoid it here.
+#   x19-x26 = rl_B[0..7]   (working/output registers)
+#   x27     = output pointer, stream B
+#   x28     = registerValue, stream B
+#   x17     = mixBlock pointer, stream B
+#   x16     = temp B / tmp_reg for instruction emission
+#   x14     = temp B (mix-step second XOR operand only)
+#
+# ABI: this is a plain, AAPCS64-conforming leaf function, callable via an
+# ordinary `bl`/`blr` from arbitrary C++ (specifically: the differential
+# test and any future benchmark harness in jit_dataset_2way.cpp) with NO
+# special caller-side bookkeeping required, unlike
+# randomx_calc_dataset_item_aarch64 above (which additionally preserves
+# x0-x13 as a defensive convention specific to its own JIT-splice caller
+# site's needs). This function saves/restores every callee-saved
+# register it touches (x19-x28, 5 stp/ldp pairs) and nothing else --
+# x29/x30 are untouched (no frame record needed: leaf function, no
+# internal calls). Every other register (x0-x18) is caller-saved by
+# standard AAPCS64 semantics and this function makes no extra promise
+# about them, exactly matching how a normal call already works.
+#
+# This prologue ends with an explicit `b rx_calc_dataset_item_2way_prefetch`
+# (see the comment right before it, below) that jumps over the 8 literal
+# constants both streams' rl[0] computations read -- unlike the
+# single-stream prologue's own trailing branch (a same-address, effectively
+# no-op fallthrough there, since nothing sits between it and _prefetch),
+# this one is load-bearing: omitting it was tried first and produced a
+# real on-device SIGSEGV (PC landed inside the literal pool, decoded as
+# garbage instructions) during this feature's own differential testing.
+# After that branch lands at _2way_prefetch, the REST of the transition
+# into round 0 (the compile-time AND-mask instructions) is genuinely
+# sequential C++ emission with no branch involved -- jit_dataset_2way.cpp
+# emits them at the current codePos immediately after memcpy'ing this
+# whole prologue chunk, then memcpy's [_2way_prefetch, _2way_mix) right
+# after that.
+DECL(randomx_calc_dataset_item_aarch64_2way):
+rx_calc_dataset_item_2way:
+	sub	sp, sp, 80
+	stp	x19, x20, [sp]
+	stp	x21, x22, [sp, 16]
+	stp	x23, x24, [sp, 32]
+	stp	x25, x26, [sp, 48]
+	stp	x27, x28, [sp, 64]
+
+	ldr	x12, superscalarMul0_2way
+	mov	x8, x0
+	mov	x9, x1
+	mov	x10, x2
+	mov	x27, x3
+	mov	x16, x4
+
+	# rl_A[0] = (itemA + 1) * superscalarMul0
+	madd	x0, x2, x12, x12
+	ldr	x12, superscalarAdd1_2way
+	eor	x1, x0, x12               // rl_A[1]
+	ldr	x12, superscalarAdd2_2way
+	eor	x2, x0, x12               // rl_A[2]
+	ldr	x12, superscalarAdd3_2way
+	eor	x3, x0, x12               // rl_A[3]
+	ldr	x12, superscalarAdd4_2way
+	eor	x4, x0, x12               // rl_A[4]
+	ldr	x12, superscalarAdd5_2way
+	eor	x5, x0, x12               // rl_A[5]
+	ldr	x12, superscalarAdd6_2way
+	eor	x6, x0, x12               // rl_A[6]
+	ldr	x12, superscalarAdd7_2way
+	eor	x7, x0, x12               // rl_A[7]
+
+	# rl_B[0] = (itemB + 1) * superscalarMul0   (itemB copy is in x16)
+	ldr	x17, superscalarMul0_2way
+	madd	x19, x16, x17, x17
+	mov	x28, x16                  // registerValue_B = itemB (matches
+	                                  // stream A's x10 = itemA convention)
+	ldr	x17, superscalarAdd1_2way
+	eor	x20, x19, x17             // rl_B[1]
+	ldr	x17, superscalarAdd2_2way
+	eor	x21, x19, x17             // rl_B[2]
+	ldr	x17, superscalarAdd3_2way
+	eor	x22, x19, x17             // rl_B[3]
+	ldr	x17, superscalarAdd4_2way
+	eor	x23, x19, x17             // rl_B[4]
+	ldr	x17, superscalarAdd5_2way
+	eor	x24, x19, x17             // rl_B[5]
+	ldr	x17, superscalarAdd6_2way
+	eor	x25, x19, x17             // rl_B[6]
+	ldr	x17, superscalarAdd7_2way
+	eor	x26, x19, x17             // rl_B[7]
+
+	# Unlike the single-stream prologue's trailing branch (which really is
+	# a same-address fallthrough, since nothing sits between it and
+	# _prefetch there), THIS branch is load-bearing: the 8 literal
+	# constants immediately below are 64 bytes of DATA sitting between
+	# here and _2way_prefetch, and without an explicit jump execution
+	# would fall through into them as if they were instructions. (Found
+	# by exactly that crash -- PC landing inside this literal pool --
+	# during on-device differential testing; see
+	# docs/plans/track-d1-superscalar-interleave-plan-20260728.md's
+	# implementation notes.) Both this branch and its target are inside
+	# the SAME contiguous memcpy'd prologue chunk (jit_dataset_2way.cpp's
+	# first copy, [randomx_calc_dataset_item_aarch64_2way,
+	# randomx_calc_dataset_item_aarch64_2way_prefetch)), so its
+	# PC-relative offset is trivially preserved under relocation -- no
+	# textual-adjacency reasoning required, unlike a branch whose target
+	# lives in a separately-copied chunk.
+	b	rx_calc_dataset_item_2way_prefetch
+
+superscalarMul0_2way: .quad 6364136223846793005
+superscalarAdd1_2way: .quad 9298411001130361340
+superscalarAdd2_2way: .quad 12065312585734608966
+superscalarAdd3_2way: .quad 9306329213124626780
+superscalarAdd4_2way: .quad 5281919268842080866
+superscalarAdd5_2way: .quad 10536153434571861004
+superscalarAdd6_2way: .quad 3398623926847679864
+superscalarAdd7_2way: .quad 9549104520008361294
+
+# Per-round prefetch wrapper (doubled). The compile-time AND-mask
+# instructions (mask depends on RANDOMX_CACHE_ACCESSES config, same as
+# the single-stream path) are emitted by the C++ generator immediately
+# before this copied chunk, one per stream:
+#   and x11, x10, CacheSize/CacheLineSize-1     (stream A, emitted by C++)
+#   and x17, x28, CacheSize/CacheLineSize-1     (stream B, emitted by C++)
+# then this chunk computes both prefetch addresses and issues both
+# prefetches:
+DECL(randomx_calc_dataset_item_aarch64_2way_prefetch):
+rx_calc_dataset_item_2way_prefetch:
+	add	x11, x8, x11, lsl 6
+	prfm	pldl1keep, [x11]
+	add	x17, x8, x17, lsl 6
+	prfm	pldl1keep, [x17]
+
+	# Generated 2-way interleaved SuperScalar hash program goes here
+	# (jit_dataset_2way.cpp emits each scheduled instruction twice, once
+	# per stream's disjoint register set, in the SAME order
+	# JitCompilerA64::computeSuperscalarEmitOrder() already produces for
+	# the single-stream path -- no new hazard analysis, per the plan.)
+
+DECL(randomx_calc_dataset_item_aarch64_2way_mix):
+rx_calc_dataset_item_2way_mix:
+	ldp	x12, x13, [x11]
+	eor	x0, x0, x12
+	eor	x1, x1, x13
+	ldp	x12, x13, [x11, 16]
+	eor	x2, x2, x12
+	eor	x3, x3, x13
+	ldp	x12, x13, [x11, 32]
+	eor	x4, x4, x12
+	eor	x5, x5, x13
+	ldp	x12, x13, [x11, 48]
+	eor	x6, x6, x12
+	eor	x7, x7, x13
+
+	ldp	x16, x14, [x17]
+	eor	x19, x19, x16
+	eor	x20, x20, x14
+	ldp	x16, x14, [x17, 16]
+	eor	x21, x21, x16
+	eor	x22, x22, x14
+	ldp	x16, x14, [x17, 32]
+	eor	x23, x23, x16
+	eor	x24, x24, x14
+	ldp	x16, x14, [x17, 48]
+	eor	x25, x25, x16
+	eor	x26, x26, x14
+
+# After this label, the C++ generator emits two register-move
+# instructions per round (registerValue update, one per stream):
+#   mov x10, x{A-stream physical register for prog.address_register()}
+#   mov x28, x{B-stream physical register for prog.address_register()}
+# before either falling through to the next round's compile-time
+# AND-mask pair (see above) or, after the final round, falling through
+# to the epilogue immediately below.
+
+DECL(randomx_calc_dataset_item_aarch64_2way_store_result):
+rx_calc_dataset_item_2way_store_result:
+	stp	x0, x1, [x9]
+	stp	x2, x3, [x9, 16]
+	stp	x4, x5, [x9, 32]
+	stp	x6, x7, [x9, 48]
+
+	stp	x19, x20, [x27]
+	stp	x21, x22, [x27, 16]
+	stp	x23, x24, [x27, 32]
+	stp	x25, x26, [x27, 48]
+
+	ldp	x19, x20, [sp]
+	ldp	x21, x22, [sp, 16]
+	ldp	x23, x24, [sp, 32]
+	ldp	x25, x26, [sp, 48]
+	ldp	x27, x28, [sp, 64]
+	add	sp, sp, 80
+
+	ret
+
+DECL(randomx_calc_dataset_item_aarch64_2way_end):

@@ -66,4 +66,15 @@ extern "C" {
 	void randomx_calc_dataset_item_aarch64_mix();
 	void randomx_calc_dataset_item_aarch64_store_result();
 	void randomx_calc_dataset_item_aarch64_end();
+
+	// Track D1: 2-way interleaved dataset-item derivation (new, separate
+	// entry point -- see the register-contract comment at its definition
+	// in jit_compiler_a64_static.S). Not used by generateSuperscalarHash()
+	// or any existing call site; only src/jit_dataset_2way.cpp references
+	// these.
+	void randomx_calc_dataset_item_aarch64_2way();
+	void randomx_calc_dataset_item_aarch64_2way_prefetch();
+	void randomx_calc_dataset_item_aarch64_2way_mix();
+	void randomx_calc_dataset_item_aarch64_2way_store_result();
+	void randomx_calc_dataset_item_aarch64_2way_end();
 }

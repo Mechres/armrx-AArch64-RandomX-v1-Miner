@@ -1201,6 +1201,11 @@ size_t JitCompilerA64::getCodeSize() const
 	return CodeSize;
 }
 
+JitCompilerA64::CalcDatasetItemFunc JitCompilerA64::getCalcDatasetItemFunc() const
+{
+	return reinterpret_cast<CalcDatasetItemFunc>(reinterpret_cast<void*>(code + CodeSize));
+}
+
 void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;

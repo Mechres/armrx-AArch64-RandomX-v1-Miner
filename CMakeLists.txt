@@ -57,6 +57,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64|aarch64_be")
     target_sources(armrx_core PRIVATE
         src/jit_compiler_a64.cpp
         src/jit_compiler_a64_static.S
+        src/jit_dataset_2way.cpp
         src/virtual_memory.c
     )
     target_compile_definitions(armrx_core PUBLIC ARMRX_HAVE_JIT=1)
@@ -309,6 +310,22 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_aes_neon PRIVATE armrx_core)
     target_compile_options(test_aes_neon PRIVATE -UNDEBUG)
     add_test(NAME test_aes_neon COMMAND test_aes_neon)
+
+    # Track D1 (docs/plans/track-d1-superscalar-interleave-plan-20260728.md):
+    # exhaustive differential test for the new, standalone 2-way interleaved
+    # dataset-item derivation entry point. See the test file's own header
+    # comment for the oracle and seed-diversity rationale.
+    add_executable(test_jit_dataset_2way tests/test_jit_dataset_2way.cpp)
+    target_link_libraries(test_jit_dataset_2way PRIVATE armrx_core)
+    target_compile_options(test_jit_dataset_2way PRIVATE -UNDEBUG)
+    add_test(NAME test_jit_dataset_2way COMMAND test_jit_dataset_2way)
+
+    # Track D1's actual decision gate (L1 I-cache refill rate, 1-way vs
+    # 2-way) -- perf-stat-wrapped microbenchmark invoked manually on device,
+    # not part of the default ctest run (requires mode+iteration args; see
+    # the file's own header comment).
+    add_executable(bench_dataset_2way tests/bench_dataset_2way.cpp)
+    target_link_libraries(bench_dataset_2way PRIVATE armrx_core)
     endif()
 endif()
 

@@ -67,6 +67,18 @@ namespace armrx {
 		DatasetInitFunc* getDatasetInitFunc();
 		size_t getCodeSize() const;
 
+		// Track D1: read-only accessor for the single-stream dataset-item
+		// derivation function generateSuperscalarHash() just built at
+		// `code + CodeSize` -- needed so a benchmark can call the existing,
+		// proven single-stream path directly (same calling convention as
+		// randomx_calc_dataset_item_aarch64: cache, output, itemNumber) for
+		// a fair 1-way-vs-2-way comparison against JitDataset2Way. Purely
+		// additive: exposes a region generateSuperscalarHash() already
+		// wrote and JIT-executes via `bl rx_calc_dataset_item` in
+		// production; this just hands back the same address as a callable.
+		using CalcDatasetItemFunc = void (*)(const void* cache, void* output, std::uint64_t itemNumber);
+		[[nodiscard]] CalcDatasetItemFunc getCalcDatasetItemFunc() const;
+
 		// Read-only view of the emitted code buffer, for test/introspection use only
 		// (e.g. decoding a specific instruction's bytes via a JitDumpEntry's offset).
 		// Deliberately const-qualified and read-only, unlike the deleted getCode()
@@ -79,6 +91,20 @@ namespace armrx {
 		bool enableExecution();
 
 		void setFlags(randomx_flags f) { flags = f; }
+
+		// Track D1 (docs/plans/track-d1-superscalar-interleave-plan-20260728.md):
+		// read-only passthrough to the private, already-verified superscalar
+		// scheduler, so the new standalone 2-way dataset-item derivation
+		// module (jit_dataset_2way.cpp) can reuse the exact same emission
+		// order both streams must share, without duplicating the
+		// hazard-detection logic (computeSuperscalarFootprint/hasHazard)
+		// -- re-deriving that independently would risk exactly the kind of
+		// silent divergence this project's postmortems warn about. Purely
+		// additive; does not change scheduleSuperscalarProgram() itself or
+		// any existing call site's behavior.
+		std::vector<uint32_t> computeSuperscalarEmitOrder(const SuperscalarProgram& program) const {
+			return scheduleSuperscalarProgram(program);
+		}
 	private:
 		bool rwx_ = false;
 		void emitPrologueMix(Program& program, uint32_t& codePos);
