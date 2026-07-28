@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-07-28 — Track B fixups: segfault, live bound, fill pinning (post-reboot)
+
+Multiple follow-on fixes after on-device validation of the hybrid partial dataset:
+
+- **Fill pinning fix** (`src/mining_engine.cpp`, `src/partial_dataset.cpp`,
+  `include/armrx/partial_dataset.hpp`): fill_worker pinned to
+  `core_order_[i % core_order_.size()]` which included core 0 — the same core as
+  the mining worker. Halved both throughputs, extended fill to ~360s. Fixed by
+  adding `exclude_cores` parameter; fill_worker uses `avail_cores` (core_order
+  minus mining cores). MiningEngine passes deduplicated mining-worker core set.
+- **JIT hybrid path activation fix** (`src/vm.cpp`, `src/mining_engine.cpp`,
+  `include/armrx/vm.hpp`, `include/armrx/partial_dataset.hpp`): the bound was a
+  snapshot taken at job-change time when `item_count()` was still 0 (fill hadn't
+  started). Guards `> 0` in both worker_loop and `run_jit()` prevented the hybrid
+  path from ever being enabled. Fixed by storing a pointer to the atomic counter
+  and reading it fresh every hash with `memory_order_acquire` (paired with the
+  fill worker's `memory_order_release` CAS). The assembly `cbz` handles count=0.
+- **Segfault fix** (`src/partial_dataset.cpp`): fill_worker held a const reference
+  to the Argon2dCache, kept alive by `shared_ptr<void>`. When SIGTERM killed the
+  main thread early (short benchmark), destructor destroyed the holder while
+  workers still accessed the cache. Fixed by passing `shared_ptr<const Argon2dCache>`
+  by value to each fill_worker, giving each its own independent reference.
+  Destructor checks `fill_finished` before `munmap`; detaches and skips `munmap`
+  if fill still in progress (deliberate leak, safe for process exit only).
+- **Assembler comment syntax** (`src/jit_compiler_a64_static.S`): this device's
+  GAS interprets `#` as preprocessor directive. All inline `#` comments replaced
+  with multi-line `/* */` or separate-line comments.
+- **Pre-existing -Wconversion fixes** (`src/jit_compiler_a64.cpp`, `src/vm.cpp`):
+  device's GCC 15 treats -Wconversion and -Wshadow as errors. ~20+ explicit
+  casts added across the JIT compiler and VM hot path (all pre-existing code, not
+  related to Track B).
+
 ## 2026-07-28 — Part 1: Three audit fixes (config-file pool mining, PoolManager races, TLS verify)
 
 Audit-finding fixes from `docs/audits/PROJECT_AUDIT_REPORT_20260728_synthesis.md`:

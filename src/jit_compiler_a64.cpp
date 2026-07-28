@@ -856,7 +856,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 
 	// Jump back to the main loop
 	const uint32_t offset = (useHybrid ? 
-		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_hybrid) - ((uint8_t*)randomx_program_aarch64)) :
+		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64)) :
 		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64))) - codePos;
 	emit32(ARMV8A::B | (offset / 4), code, codePos);
 

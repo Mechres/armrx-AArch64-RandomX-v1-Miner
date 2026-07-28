@@ -590,9 +590,12 @@ DECL(randomx_program_aarch64_light_dataset_offset):
 # is configured.
 
 DECL(randomx_program_aarch64_vm_instructions_end_hybrid):
-	sub	sp, sp, 96
+	sub	sp, sp, 112
 	stp	x0, x1, [sp, 64]
 	stp	x2, x30, [sp, 80]
+	# Save MemoryRegisters* at [sp, 96] — x1 is the struct pointer at entry
+	# (prologue hasn't overwritten it yet — that happens at literal_x21 load).
+	str	x1, [sp, 96]
 
 	lsr	x2, x9, 32
 
@@ -606,24 +609,16 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	# x2 -> raw item number (before dataset offset)
 	lsr	x2, x2, 6
 
-	# Bound check: raw item < partial_dataset_items_?
-	# Uses x16 as temp (scratch per AArch64 ABI)
-	# MemoryRegisters* from saved x1
-	ldr	x16, [sp, 72]
-	# partial_dataset_items_
+	# Bound check using saved MemoryRegisters* at [sp, 96]
+	ldr	x16, [sp, 96]
 	ldr	w16, [x16, 24]
-	/* if 0, always miss */
 	cbz	w16, 1f
 	cmp	x2, x16
-	/* if >= count, miss */
 	b.hs	1f
 
 	# ── HIT path: load from partial_dataset_ directly ──
-	# x16 still holds MemoryRegisters*; load partial_dataset_ base pointer
 	ldr	x16, [x16, 16]
-	# &partial_dataset_[raw_item]
 	add	x16, x16, x2, lsl 6
-	# Copy 64 bytes to stack output for rx_program_xor_with_dataset_line
 	ldp	x17, x0, [x16]
 	stp	x17, x0, [sp]
 	ldp	x17, x0, [x16, 16]
@@ -632,10 +627,9 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	stp	x17, x0, [sp, 32]
 	ldp	x17, x0, [x16, 48]
 	stp	x17, x0, [sp, 48]
-	b	3f
+	b	2f
 
 1:	# ── MISS path: apply dataset offset and derive ──
-	# x2 = raw item number (from above). Apply dataset offset (patched).
 DECL(randomx_program_aarch64_hybrid_dataset_offset):
 	add	x2, x2, 0
 	add	x2, x2, 0
@@ -643,11 +637,11 @@ DECL(randomx_program_aarch64_hybrid_dataset_offset):
 	mov	x1, sp
 	bl	rx_calc_dataset_item
 
-3:	# ── Common exit ──
+2:	# ── Common exit ──
 	mov	x10, sp
 	ldp	x0, x1, [sp, 64]
 	ldp	x2, x30, [sp, 80]
-	add	sp, sp, 96
+	add	sp, sp, 112
 	b	rx_program_xor_with_dataset_line
 
 DECL(randomx_program_aarch64_vm_instructions_end_v1):
