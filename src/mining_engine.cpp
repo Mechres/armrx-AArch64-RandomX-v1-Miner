@@ -213,7 +213,7 @@ void MiningEngine::set_job(const Job& job) {
             // Deduplicate
             std::sort(mining_cores.begin(), mining_cores.end());
             mining_cores.erase(std::unique(mining_cores.begin(), mining_cores.end()), mining_cores.end());
-            partial_dataset_->start_fill(*shared_cache_, core_order_, shared_cache_, mining_cores);
+            partial_dataset_->start_fill(shared_cache_, core_order_, mining_cores);
         }
 
         if (mode_ == RandomXMode::fast) {

@@ -2,7 +2,7 @@
  * test_partial_dataset — differential correctness for PartialDataset (Track B).
  *
  * Verifies that:
- *   1. partial[i] == generate_dataset_item(cache, i) for every cached item
+ *   1. partial[i] == generate_dataset_item(*cache, i) for every cached item
  *   2. Out-of-range indices still produce the same result as generate_dataset_item
  *      (the miss path is bit-identical to today)
  *   3. --dataset-mb=0 produces bit-identical results to pure light mode
@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include <vector>
 
 namespace {
@@ -31,17 +32,18 @@ const std::vector<std::byte> kTestKey = []{
 }();
 
 // Create cache once, reuse it — Argon2dCache is non-copyable
-const auto& get_test_cache() {
-    static auto* cache = []{
-        auto* c = new armrx::Argon2dCache();
-        c->initialize(kTestKey);
-        return c;
-    }();
-    return *cache;
+std::shared_ptr<const armrx::Argon2dCache> get_test_cache() {
+    static std::shared_ptr<const armrx::Argon2dCache> cache = std::make_shared<armrx::Argon2dCache>();
+    static bool initialized = false;
+    if (!initialized) {
+        const_cast<armrx::Argon2dCache*>(cache.get())->initialize(kTestKey);
+        initialized = true;
+    }
+    return cache;
 }
 
 void test_cached_items_match() {
-    const auto& cache = get_test_cache();
+    const auto cache = get_test_cache();
 
     // A small partial dataset (100 items = 6400 bytes)
     constexpr std::size_t kTestItems = 100;
@@ -60,7 +62,7 @@ void test_cached_items_match() {
 
     // Check every cached item against generate_dataset_item
     for (std::size_t i = 0; i < kTestItems; ++i) {
-        const auto expected = armrx::generate_dataset_item(cache, static_cast<std::uint64_t>(i));
+        const auto expected = armrx::generate_dataset_item(*cache, static_cast<std::uint64_t>(i));
         const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
         if (std::memcmp(expected.data(), actual, armrx::kRandomXDatasetItemBytes) != 0) {
             std::fprintf(stderr, "MISMATCH at item %zu\n", i);
@@ -73,7 +75,7 @@ void test_cached_items_match() {
 }
 
 void test_large_partial_dataset() {
-    const auto& cache = get_test_cache();
+    const auto cache = get_test_cache();
 
     // Test with a larger partial dataset (5000 items)
     constexpr std::size_t kTestItems = 5000;
@@ -87,7 +89,7 @@ void test_large_partial_dataset() {
 
     // Spot-check every 100th item to keep test fast
     for (std::size_t i = 0; i < kTestItems; i += 100) {
-        const auto expected = armrx::generate_dataset_item(cache, static_cast<std::uint64_t>(i));
+        const auto expected = armrx::generate_dataset_item(*cache, static_cast<std::uint64_t>(i));
         const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
         if (std::memcmp(expected.data(), actual, armrx::kRandomXDatasetItemBytes) != 0) {
             std::fprintf(stderr, "MISMATCH at item %zu (spot check)\n", i);
@@ -110,7 +112,7 @@ void test_partial_dataset_disabled() {
 }
 
 void test_incremental_fill_consistent() {
-    const auto& cache = get_test_cache();
+    const auto cache = get_test_cache();
 
     // Fill 200 items
     constexpr std::size_t kTotalItems = 200;
@@ -122,7 +124,7 @@ void test_incremental_fill_consistent() {
 
     // Verify ALL items one by one
     for (std::size_t i = 0; i < kTotalItems; ++i) {
-        const auto expected = armrx::generate_dataset_item(cache, static_cast<std::uint64_t>(i));
+        const auto expected = armrx::generate_dataset_item(*cache, static_cast<std::uint64_t>(i));
         const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
         if (std::memcmp(expected.data(), actual, armrx::kRandomXDatasetItemBytes) != 0) {
             std::fprintf(stderr, "MISMATCH at item %zu (incremental fill)\n", i);

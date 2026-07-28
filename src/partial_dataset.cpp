@@ -51,25 +51,40 @@ PartialDataset::PartialDataset(std::size_t item_count)
 }
 
 PartialDataset::~PartialDataset() {
-    // Ensure fill threads are done before unmapping
+    // Detach any still-running fill threads. We check if fill completed
+    // synchronously: if so, all threads have exited and we can unmap safely.
+    // If not, the threads are still writing to data_ — skip munmap and let
+    // the OS reclaim the mapping on process exit (the process is shutting
+    // down anyway in this case, e.g. SIGTERM during a benchmark).
+    // This avoids a race between fill_worker's data access and munmap.
+    // Check if all items are filled (fill_worker threads have completed).
+    // If the fill finished before shutdown, join and unmap cleanly.
+    // If still in progress, detach and skip munmap to avoid racing with
+    // fill_worker's data_ access — the OS reclaims the mapping on exit.
+    bool fill_finished = (item_count_.load(std::memory_order_acquire) >= allocated_items_);
     for (auto& t : fill_threads_) {
-        if (t.joinable()) t.join();
+        if (t.joinable()) {
+            if (fill_finished) {
+                t.join();
+            } else {
+                t.detach();
+            }
+        }
     }
-    if (data_) {
+    if (data_ && fill_finished) {
         ::munmap(data_, allocated_items_ * kRandomXDatasetItemBytes);
         data_ = nullptr;
     }
 }
 
-void PartialDataset::start_fill(const Argon2dCache& cache,
+void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder,
                                  const std::vector<unsigned>& core_order,
-                                 std::shared_ptr<void> cache_lifetime_holder,
                                  const std::vector<unsigned>& exclude_cores)
 {
     if (allocated_items_ == 0) return;
 
     // Keep the cache alive while fill threads are running
-    cache_lifetime_holder_ = std::move(cache_lifetime_holder);
+    cache_holder_ = cache_holder;
 
     const auto total_items = static_cast<std::uint64_t>(allocated_items_);
 
@@ -99,18 +114,22 @@ void PartialDataset::start_fill(const Argon2dCache& cache,
 
         const unsigned cpu_id = avail_cores[i % avail_cores.size()];
         fill_threads_.emplace_back(&PartialDataset::fill_worker, this,
-                                   std::ref(cache), start, end, cpu_id);
+                                   cache_holder_, start, end, cpu_id);
     }
 
     ARMRX_LOG_INFO << "PartialDataset: started fill with " << num_workers
                    << " workers (" << items_per_worker << " items each)";
 }
 
-void PartialDataset::fill_worker(const Argon2dCache& cache,
+void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
                                   std::uint64_t start_item,
                                   std::uint64_t end_item,
                                   unsigned cpu_id)
 {
+    // Keep the cache alive for the duration of this fill worker.
+    // The shared_ptr is passed by value into the thread, so each worker
+    // holds its own reference independently.
+
     // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern)
     cpu_set_t cpus{};
     CPU_ZERO(&cpus);
@@ -124,8 +143,9 @@ void PartialDataset::fill_worker(const Argon2dCache& cache,
         data_ + byte_offset,
         static_cast<std::size_t>(total_items * kRandomXDatasetItemBytes));
 
-    // Fill the chunk using the existing vectorized initialize_dataset
-    initialize_dataset(span, cache, start_item, total_items);
+    // Fill the chunk using the existing vectorized initialize_dataset.
+    // The cache is valid because cache_holder keeps it alive.
+    initialize_dataset(span, *cache_holder, start_item, total_items);
 
     // Atomically advance the published bound. Each worker reports its
     // progress as the max item it has completed. The item_count_ is

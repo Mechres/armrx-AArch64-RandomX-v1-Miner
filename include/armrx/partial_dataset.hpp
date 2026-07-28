@@ -4,6 +4,7 @@
 #include "armrx/dataset.hpp"
 #include "armrx/randomx_config.hpp"
 
+#include <memory>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -63,9 +64,8 @@ public:
     /// chunk completes. Threads are explicitly pinned mirroring worker_loop()'s
     /// AffinityMode::All pattern, skipping any CPU IDs in `exclude_cores`
     /// (e.g. cores already occupied by mining workers).
-    void start_fill(const Argon2dCache& cache,
+    void start_fill(std::shared_ptr<const Argon2dCache> cache_holder,
                     const std::vector<unsigned>& core_order,
-                    std::shared_ptr<void> cache_lifetime_holder = {},
                     const std::vector<unsigned>& exclude_cores = {});
 
     /// Returns true if the fill has completed (all items fully computed).
@@ -83,9 +83,9 @@ private:
     std::atomic<bool> fill_complete_{false};
     mutable std::vector<std::thread> fill_threads_;
     // Keeps the Argon2dCache alive while fill threads are running
-    std::shared_ptr<void> cache_lifetime_holder_;
+    std::shared_ptr<const Argon2dCache> cache_holder_;
 
-    void fill_worker(const Argon2dCache& cache,
+    void fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
                      std::uint64_t start_item,
                      std::uint64_t end_item,
                      unsigned cpu_id);
