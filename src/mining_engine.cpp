@@ -202,6 +202,12 @@ void MiningEngine::set_job(const Job& job) {
         new_cache->initialize(job.seed_key);
         shared_cache_ = new_cache;
 
+        // Start background fill of the partial dataset if configured.
+        // Only starts once (checked by partial_dataset_fill_started_ flag).
+        if (partial_dataset_ && !partial_dataset_fill_started_.test_and_set(std::memory_order_relaxed)) {
+            partial_dataset_->start_fill(*shared_cache_, core_order_, shared_cache_);
+        }
+
         if (mode_ == RandomXMode::fast) {
             auto dataset_bytes = randomx_dataset_item_count() * 64;
             ARMRX_LOG_INFO << "Initializing " << dataset_bytes / (1024U * 1024U) << " MiB dataset...";

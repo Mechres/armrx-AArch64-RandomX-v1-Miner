@@ -833,7 +833,7 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 #endif
 }
 
-void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset)
+void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration& config, uint32_t datasetOffset, bool useHybrid)
 {
 	uint32_t codePos;
 	emitPrologueMix(program, codePos);
@@ -860,21 +860,46 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		(((uint8_t*)randomx_program_aarch64_vm_instructions_end_light) - ((uint8_t*)randomx_program_aarch64))) - codePos;
 	emit32(ARMV8A::B | (offset / 4), code, codePos);
 
-	// and w2, w2, CacheLineAlignMask
-	codePos = (((uint8_t*)randomx_program_aarch64_light_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
-	emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
+	if (useHybrid) {
+		// Patch hybrid-specific symbols (same values as the light path equivalents)
+		codePos = (((uint8_t*)randomx_program_aarch64_hybrid_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
+		emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
-	emitSpMix2(config, codePos);
+		// Patch hybrid tweak (same v1/v2 selection as light path)
+		uint32_t tweak_src;
+		if (flags & RANDOMX_FLAG_V2) {
+			tweak_src = (((uint8_t*)randomx_program_aarch64_vm_instructions_end_light_v2) - ((uint8_t*)randomx_program_aarch64));
+		} else {
+			tweak_src = (((uint8_t*)randomx_program_aarch64_vm_instructions_end_light_v1) - ((uint8_t*)randomx_program_aarch64));
+		}
+		uint32_t tweak_dst = (((uint8_t*)randomx_program_aarch64_vm_instructions_end_hybrid_tweak) - ((uint8_t*)randomx_program_aarch64));
+		memcpy(code + tweak_dst, code + tweak_src, 8);
 
-	// Apply dataset offset
-	codePos = ((uint8_t*)randomx_program_aarch64_light_dataset_offset) - ((uint8_t*)randomx_program_aarch64);
+		emitSpMix2(config, codePos);
 
-	datasetOffset /= CacheLineSize;
-	const uint32_t imm_lo = datasetOffset & ((1 << 12) - 1);
-	const uint32_t imm_hi = datasetOffset >> 12;
+		codePos = ((uint8_t*)randomx_program_aarch64_hybrid_dataset_offset) - ((uint8_t*)randomx_program_aarch64);
+		datasetOffset /= CacheLineSize;
+		const uint32_t imm_lo = datasetOffset & ((1 << 12) - 1);
+		const uint32_t imm_hi = datasetOffset >> 12;
+		emit32(ARMV8A::ADD_IMM_LO | 2 | (2 << 5) | (imm_lo << 10), code, codePos);
+		emit32(ARMV8A::ADD_IMM_HI | 2 | (2 << 5) | (imm_hi << 10), code, codePos);
+	} else {
+		// and w2, w2, CacheLineAlignMask
+		codePos = (((uint8_t*)randomx_program_aarch64_light_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
+		emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
-	emit32(ARMV8A::ADD_IMM_LO | 2 | (2 << 5) | (imm_lo << 10), code, codePos);
-	emit32(ARMV8A::ADD_IMM_HI | 2 | (2 << 5) | (imm_hi << 10), code, codePos);
+		emitSpMix2(config, codePos);
+
+		// Apply dataset offset
+		codePos = ((uint8_t*)randomx_program_aarch64_light_dataset_offset) - ((uint8_t*)randomx_program_aarch64);
+
+		datasetOffset /= CacheLineSize;
+		const uint32_t imm_lo = datasetOffset & ((1 << 12) - 1);
+		const uint32_t imm_hi = datasetOffset >> 12;
+
+		emit32(ARMV8A::ADD_IMM_LO | 2 | (2 << 5) | (imm_lo << 10), code, codePos);
+		emit32(ARMV8A::ADD_IMM_HI | 2 | (2 << 5) | (imm_hi << 10), code, codePos);
+	}
 
 #ifdef __GNUC__
 	__builtin___clear_cache(reinterpret_cast<char*>(code + MainLoopBegin), reinterpret_cast<char*>(code + codePos));
@@ -1034,12 +1059,12 @@ void JitCompilerA64::dumpJitCode() const {
 
 void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& programs, const std::vector<uint64_t>& reciprocalCache)
 {
-	uint32_t codePos = CodeSize;
+	uint32_t codePos = static_cast<uint32_t>(CodeSize);
 
 	uint8_t* p1 = (uint8_t*)randomx_calc_dataset_item_aarch64;
 	uint8_t* p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_prefetch;
 	memcpy(code + codePos, p1, p2 - p1);
-	codePos += p2 - p1;
+	codePos += static_cast<uint32_t>(p2 - p1);
 
 	// Pinned at the cap (not 0, like emitPrologueMix's reset) so
 	// emitMovImmediate's `num32bitLiterals < 64` branch (the shared NEON
@@ -1063,7 +1088,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		p1 = ((uint8_t*)randomx_calc_dataset_item_aarch64_prefetch) + 4;
 		p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_mix;
 		memcpy(code + codePos, p1, p2 - p1);
-		codePos += p2 - p1;
+		codePos += static_cast<uint32_t>(p2 - p1);
 
 		const SuperscalarProgram& prog = programs[i];
 		const size_t progSize = prog.size();
@@ -1150,7 +1175,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_mix;
 		p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_store_result;
 		memcpy(code + codePos, p1, p2 - p1);
-		codePos += p2 - p1;
+		codePos += static_cast<uint32_t>(p2 - p1);
 
 		// Update registerValue
 		emit32(ARMV8A::MOV_REG | 10 | (prog.address_register() << 16), code, codePos);
@@ -1159,7 +1184,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_store_result;
 	p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_end;
 	memcpy(code + codePos, p1, p2 - p1);
-	codePos += p2 - p1;
+	codePos += static_cast<uint32_t>(p2 - p1);
 
 #ifdef __GNUC__
 	__builtin___clear_cache(reinterpret_cast<char*>(code + CodeSize), reinterpret_cast<char*>(code + codePos));
@@ -1176,7 +1201,7 @@ size_t JitCompilerA64::getCodeSize() const
 	return CodeSize;
 }
 
-void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* code, uint32_t& codePos)
+void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
 
@@ -1224,7 +1249,7 @@ void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* code,
 	codePos = k;
 }
 
-void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint8_t* code, uint32_t& codePos)
+void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
 
@@ -1260,7 +1285,7 @@ void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, 
 }
 
 template<uint32_t tmp_reg>
-void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr, uint8_t* code, uint32_t& codePos)
+void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
 
@@ -1293,7 +1318,7 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 }
 
 template<uint32_t tmp_reg_fp>
-void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* code, uint32_t& codePos)
+void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
 
@@ -1514,8 +1539,8 @@ void JitCompilerA64::h_IMUL_RCP(Instruction& instr, uint32_t& codePos)
 	constexpr uint32_t tmp_reg = 20;
 	const uint32_t dst = IntRegMap[instr.dst];
 
-	const uint32_t literal_id = (ImulRcpLiteralsEnd - literalPos) / sizeof(uint64_t);
-	literalPos -= sizeof(uint64_t);
+	const uint32_t literal_id = static_cast<uint32_t>((ImulRcpLiteralsEnd - literalPos) / sizeof(uint64_t));
+	literalPos -= static_cast<uint32_t>(sizeof(uint64_t));
 
 	const uint64_t reciprocal = randomx_reciprocal(divisor);
 	memcpy(code + literalPos, &reciprocal, sizeof(reciprocal));
@@ -1933,7 +1958,7 @@ void JitCompilerA64::h_ISTORE(Instruction& instr, uint32_t& codePos)
 	codePos = k;
 }
 
-void JitCompilerA64::h_NOP(Instruction& instr, uint32_t& codePos)
+void JitCompilerA64::h_NOP(Instruction& /*instr*/, uint32_t& /*codePos*/)
 {
 }
 

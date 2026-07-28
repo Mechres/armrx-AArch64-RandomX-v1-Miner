@@ -56,6 +56,30 @@ fill with explicit CPU pinning, and the correctness differential test.
   `test_partial_dataset` test target.
 - Fixed pre-existing `%zu`/`%u` format warning in `src/mining_engine.cpp`.
 
+## 2026-07-28 — Part 2 fixups: PoolManager deadlock, JIT assembly bugs, fill thread safety
+
+Follow-on fixes found during on-device validation of the Part 2 Track B changes:
+
+- **PoolManager self-deadlock** (`src/pool_manager.cpp`, `include/armrx/pool_manager.hpp`):
+  `current_pool_name()` locked `stratum_mutex_`, but `tick()` already held that mutex when
+  printing failover messages (lines 132, 148) — a guaranteed self-deadlock. Added private
+  `pool_name_nolock()` helper (caller must hold lock) and replaced the two internal call sites.
+  Also fixed `connect_to_current()`'s unlocked `stratum_->` configuration calls (lines 70-76
+  after the lock guard) by extending the lock scope to cover them with a captured raw pointer.
+- **JIT assembly: bound check on raw item number** (`src/jit_compiler_a64_static.S`):
+  The `_end_hybrid` bound check was comparing against the dataset-offset-shifted item number
+  instead of the raw item number, causing the HIT path to load from out-of-bounds memory.
+  Restructured: bound check applied before dataset offset, offset only applied in MISS path.
+- **JIT assembly: x9 tweak consistency** (`src/jit_compiler_a64_static.S`): The x9 tweak
+  (eor/ror) was applied in the HIT path but not consistently in all MISS path entry points.
+  Restructured with three labeled paths (HIT, MISS-from-bound-check, MISS-from-cbz) so x9
+  tweak is applied exactly once regardless of which path is taken.
+- **Fill thread cache lifetime** (`src/partial_dataset.hpp`, `src/partial_dataset.cpp`,
+  `src/mining_engine.cpp`): The fill thread held a const reference to the MiningEngine's
+  `shared_cache_`, which was destroyed before the fill completed, causing a shutdown segfault.
+  Fixed by passing `shared_cache_` as a `shared_ptr<void>` lifetime holder stored in
+  `PartialDataset::cache_lifetime_holder_`.
+
 Audit-finding fixes from `docs/audits/PROJECT_AUDIT_REPORT_20260728_synthesis.md`:
 
 - **Config-file-only pool mining silent no-op** (`src/cli_parser.cpp`): The config-loading block populated `o.pool_list` but never set `o.should_connect_pool` — that flag was only set by the `--pool=` CLI handler. Fixed: `should_connect_pool = true` is now set inside the `cfg.pools` loop.

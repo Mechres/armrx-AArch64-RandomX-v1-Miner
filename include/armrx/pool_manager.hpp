@@ -68,6 +68,12 @@ private:
 
     void connect_to_current();
 
+    /// Returns pool_name without locking (caller must hold stratum_mutex_).
+    std::string pool_name_nolock() const {
+        if (current_idx_ >= pools_.size()) return "(none)";
+        return pools_[current_idx_].host + ":" + std::to_string(pools_[current_idx_].port);
+    }
+
     std::vector<PoolEntry> pools_;
     unsigned current_idx_ = 0;
     unsigned failover_cooldown_ = 0;

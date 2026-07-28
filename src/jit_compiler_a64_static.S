@@ -49,6 +49,10 @@
 	#endif
 	.global DECL(randomx_program_aarch64_aes_lut_pointers)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_light)
+	.global DECL(randomx_program_aarch64_vm_instructions_end_hybrid)
+	.global DECL(randomx_program_aarch64_hybrid_cacheline_align_mask)
+	.global DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak)
+	.global DECL(randomx_program_aarch64_hybrid_dataset_offset)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_light_tweak)
 	.global DECL(randomx_program_aarch64_light_cacheline_align_mask)
 	.global DECL(randomx_program_aarch64_light_dataset_offset)
@@ -592,37 +596,34 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid):
 
 	lsr	x2, x9, 32
 
-	# Load partial_dataset_items_ from MemoryRegisters (saved x1 at [sp,72] + offset 24)
-	ldr	x16, [sp, 72]
-	ldr	w16, [x16, 24]
-
-	# If partial_dataset_items_ == 0, skip the bound check entirely (always miss)
-	cbz	w16, 1f
-
-	# Mask (patched by JIT compiler — same as light path)
+DECL(randomx_program_aarch64_hybrid_cacheline_align_mask):
 	and	w2, w2, 1
 
-	# Tweak
+DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	eor	x9, x9, x20
 	ror	x9, x9, 32
 
-	# x2 -> item number
+	# x2 -> raw item number (before dataset offset)
 	lsr	x2, x2, 6
 
-	# Apply dataset offset (patched)
-	add	x2, x2, 0
-	add	x2, x2, 0
-
-	# Bound check: item < partial_dataset_items_?
+	# Bound check: raw item < partial_dataset_items_?
+	# Uses x16 as temp (scratch per AArch64 ABI)
+	# MemoryRegisters* from saved x1
+	ldr	x16, [sp, 72]
+	# partial_dataset_items_
+	ldr	w16, [x16, 24]
+	# if 0, always miss
+	cbz	w16, 1f
 	cmp	x2, x16
+	# if >= count, miss
 	b.hs	1f
 
-	# ── HIT path: load 64 bytes from partial_dataset_ directly ──
-	# x16 = partial_dataset_ pointer (MemoryRegisters offset 16)
+	# ── HIT path: load from partial_dataset_ directly ──
+	# x16 still holds MemoryRegisters*; load partial_dataset_ base pointer
 	ldr	x16, [x16, 16]
-	# x16 = &partial_dataset[item_number]
+	# &partial_dataset_[raw_item]
 	add	x16, x16, x2, lsl 6
-	# Copy 64 bytes to stack output area for rx_program_xor_with_dataset_line
+	# Copy 64 bytes to stack output for rx_program_xor_with_dataset_line
 	ldp	x17, x0, [x16]
 	stp	x17, x0, [sp]
 	ldp	x17, x0, [x16, 16]
@@ -631,33 +632,18 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid):
 	stp	x17, x0, [sp, 32]
 	ldp	x17, x0, [x16, 48]
 	stp	x17, x0, [sp, 48]
-	b	2f
+	b	3f
 
-1:	# ── MISS path: on-the-fly derivation (same as _end_light) ──
-	# Mask was already applied above if we took the hybrid path; if we jumped
-	# here from the cbz (partial_dataset_items_ == 0), apply mask+tweak now.
-	# x2 currently holds the raw (mx >> 32) value; apply the mask+tweak.
-	# (If we fell through from the hybrid path above, the mask and tweak were
-	# already applied and x2 is the item number already — but the dataset
-	# offset add was also done. Re-deriving x2 here would be wrong. Since we
-	# skipped the mask/tweak when partial_dataset_items_ == 0 (cbz to 1f),
-	# we need to do it here for that case only.)
-	#
-	# Simple approach: always re-derive at the miss label. The mask/tweak
-	# and dataset offset path is idempotent for the miss case since x9 hasn't
-	# been modified differently between the two paths.
-	lsr	x2, x9, 32
-	and	w2, w2, 1
-	eor	x9, x9, x20
-	ror	x9, x9, 32
+1:	# ── MISS path: apply dataset offset and derive ──
+	# x2 = raw item number (from above). Apply dataset offset (patched).
+DECL(randomx_program_aarch64_hybrid_dataset_offset):
+	add	x2, x2, 0
+	add	x2, x2, 0
 	mov	x0, x1
 	mov	x1, sp
-	lsr	x2, x2, 6
-	add	x2, x2, 0
-	add	x2, x2, 0
 	bl	rx_calc_dataset_item
 
-2:	# ── Common exit ──
+3:	# ── Common exit ──
 	mov	x10, sp
 	ldp	x0, x1, [sp, 64]
 	ldp	x2, x30, [sp, 80]

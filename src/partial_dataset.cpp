@@ -66,14 +66,18 @@ PartialDataset::~PartialDataset() {
 }
 
 void PartialDataset::start_fill(const Argon2dCache& cache,
-                                 const std::vector<unsigned>& core_order)
+                                 const std::vector<unsigned>& core_order,
+                                 std::shared_ptr<void> cache_lifetime_holder)
 {
     if (allocated_items_ == 0) return;
 
+    // Keep the cache alive while fill threads are running
+    cache_lifetime_holder_ = std::move(cache_lifetime_holder);
+
     const auto total_items = static_cast<std::uint64_t>(allocated_items_);
-    const unsigned num_workers = std::min<std::size_t>(
+    const unsigned num_workers = static_cast<unsigned>(std::min<std::size_t>(
         (total_items + kFillChunkItems - 1) / kFillChunkItems,
-        std::max<std::size_t>(1, core_order.size()));
+        std::max<std::size_t>(1, core_order.size())));
 
     const auto items_per_worker = (total_items + num_workers - 1) / num_workers;
 

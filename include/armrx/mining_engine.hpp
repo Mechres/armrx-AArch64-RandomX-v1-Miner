@@ -100,7 +100,7 @@ public:
 
     /// Set a partial dataset for hybrid light mode. The PartialDataset must
     /// outlive the MiningEngine. Pass nullptr to disable.
-    void set_partial_dataset(const PartialDataset* pd) { partial_dataset_ = pd; }
+    void set_partial_dataset(PartialDataset* pd) { partial_dataset_ = pd; }
 
     void set_job(const Job& job);
 
@@ -199,7 +199,8 @@ private:
     // (the "big" cluster size) -- used by AffinityMode::BigOnly.
     unsigned int big_core_count_ = 1;
 
-    const PartialDataset* partial_dataset_ = nullptr;
+    PartialDataset* partial_dataset_ = nullptr;
+    std::atomic_flag partial_dataset_fill_started_ = ATOMIC_FLAG_INIT;
 
     std::vector<std::thread> workers_;
 };

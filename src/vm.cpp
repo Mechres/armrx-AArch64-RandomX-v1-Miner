@@ -253,7 +253,7 @@ void VirtualMachine::h_IADD_RS(const Instruction& instr, int i, InstructionByteC
     ibc.type = InstructionType::IADD_RS;
     ibc.idst = &reg_.r[dst];
     ibc.isrc = &reg_.r[src];
-    ibc.shift = instr.getModShift();
+    ibc.shift = static_cast<std::uint16_t>(instr.getModShift());
     ibc.imm = (dst != 5) ? 0 : signExtend2sCompl(instr.getImm32());
     register_usage_[dst] = i;
 }
@@ -274,7 +274,7 @@ static void compile_mem_op(InstructionByteCode& ibc, const Instruction& instr,
     }
 }
 
-static void compile_alu_reg(InstructionByteCode& ibc, const Instruction& instr,
+static void compile_alu_reg(InstructionByteCode& ibc, const Instruction& /*instr*/,
                             std::uint64_t* dst_ptr, std::uint64_t* src_ptr,
                             InstructionType type, std::uint64_t imm) {
     ibc.type = type;
@@ -491,7 +491,7 @@ void VirtualMachine::h_CBRANCH(const Instruction& instr, int i, InstructionByteC
     // behavior, matching the JIT's own reg_changed_offset[] (reset to
     // PrologueSize, VM instruction 0's own code offset, before every
     // compile in emitPrologueMix). Not a bug.
-    ibc.target = register_usage_[creg];
+    ibc.target = static_cast<std::int16_t>(register_usage_[creg]);
     int shift = instr.getModCond() + 8;
     ibc.imm = signExtend2sCompl(instr.getImm32()) | (1ULL << shift);
     if (shift > 0) {
@@ -705,7 +705,7 @@ void VirtualMachine::execute_bytecode() {
                 }
                 break;
             case InstructionType::CFROUND: {
-                std::uint64_t isrc = rotr(*ibc.isrc, ibc.imm);
+                std::uint64_t isrc = rotr(*ibc.isrc, static_cast<unsigned int>(ibc.imm));
                 rx_set_rounding_mode(static_cast<std::uint32_t>(isrc % 4), last_rounding_mode_);
                 break;
             }
@@ -789,7 +789,7 @@ void VirtualMachine::run_jit() {
     if (!is_fast_mode()) {
         // Light mode: JIT compiler generates inline dataset item derivation
         const bool useHybrid = (partial_dataset_data_ != nullptr && partial_dataset_items_ > 0);
-        jit_->generateProgramLight(program_, config, dataset_offset_, useHybrid);
+        jit_->generateProgramLight(program_, config, static_cast<uint32_t>(dataset_offset_), useHybrid);
     } else {
         // Fast mode: JIT compiler reads directly from pre-computed dataset
         jit_->generateProgram(program_, config);
@@ -863,9 +863,9 @@ void VirtualMachine::run_interpreted() {
 
     for (unsigned int ic = 0; ic < 2048; ++ic) {
         std::uint64_t spMix = reg_.r[read_reg0_] ^ reg_.r[read_reg1_];
-        spAddr0 ^= spMix;
+        spAddr0 ^= static_cast<std::uint32_t>(spMix);
         spAddr0 &= kScratchpadL3Mask64;
-        spAddr1 ^= spMix >> 32;
+        spAddr1 ^= static_cast<std::uint32_t>(spMix >> 32);
         spAddr1 &= kScratchpadL3Mask64;
 
         for (unsigned int i = 0; i < 8; ++i) {
@@ -898,7 +898,7 @@ void VirtualMachine::run_interpreted() {
         execute_bytecode();
 
         const std::uint64_t readPtr = dataset_offset_ + (ma_ & 0x7fffffc0ULL);
-        mx_ ^= reg_.r[read_reg2_] ^ reg_.r[read_reg3_];
+        mx_ ^= static_cast<std::uint32_t>(reg_.r[read_reg2_] ^ reg_.r[read_reg3_]);
 
         dataset_read(readPtr, reg_.r);
 

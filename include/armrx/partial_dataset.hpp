@@ -57,7 +57,8 @@ public:
     /// chunk completes. Threads are explicitly pinned mirroring worker_loop()'s
     /// AffinityMode::All pattern.
     void start_fill(const Argon2dCache& cache,
-                    const std::vector<unsigned>& core_order);
+                    const std::vector<unsigned>& core_order,
+                    std::shared_ptr<void> cache_lifetime_holder = {});
 
     /// Returns true if the fill has completed (all items fully computed).
     [[nodiscard]] bool fill_complete() const {
@@ -73,6 +74,8 @@ private:
     std::atomic<std::size_t> item_count_{0};
     std::atomic<bool> fill_complete_{false};
     mutable std::vector<std::thread> fill_threads_;
+    // Keeps the Argon2dCache alive while fill threads are running
+    std::shared_ptr<void> cache_lifetime_holder_;
 
     void fill_worker(const Argon2dCache& cache,
                      std::uint64_t start_item,

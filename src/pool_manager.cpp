@@ -61,22 +61,25 @@ void PoolManager::connect_to_current() {
     if (current_idx_ >= pools_.size()) return;
     const auto& entry = pools_[current_idx_];
 
+    StratumClient* raw_stratum = nullptr;
     {
         std::lock_guard<std::mutex> lock(stratum_mutex_);
         stratum_ = std::make_unique<StratumClient>(
             entry.host, entry.port, wallet_, password_);
+        raw_stratum = stratum_.get();
+
+        // Fast configuration calls under the lock (not blocking like connect())
+        raw_stratum->enable_tls(tls_);
+        raw_stratum->set_tls_verify_peer(tls_verify_);
+        if (job_cb_) raw_stratum->set_job_callback(job_cb_);
+        if (error_cb_) raw_stratum->set_error_callback(error_cb_);
+        raw_stratum->set_reconnect_config(5, 1000);
     }
 
-    stratum_->enable_tls(tls_);
-    stratum_->set_tls_verify_peer(tls_verify_);
-
-    if (job_cb_) stratum_->set_job_callback(job_cb_);
-    if (error_cb_) stratum_->set_error_callback(error_cb_);
-
-    stratum_->set_reconnect_config(5, 1000);
-
+    // Slow blocking connect() runs unlocked to avoid holding the lock
+    // across a potentially-long TCP/TLS handshake.
     try {
-        stratum_->connect();
+        raw_stratum->connect();
     } catch (const std::exception& ex) {
         ARMRX_LOG_ERROR << current_pool_name() << ": " << ex.what();
     }
@@ -129,7 +132,7 @@ void PoolManager::tick() {
                 if (retries >= 5) {
                     current_idx_ = (current_idx_ + 1) % pools_.size();
                     failover_cooldown_ = 2;
-                    ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+                    ARMRX_LOG_WARN << "Failing over to " << pool_name_nolock();
                 }
             } else {
                 // No async reconnect_loop has ever run for this connection
@@ -145,7 +148,7 @@ void PoolManager::tick() {
                     current_idx_ = (current_idx_ + 1) % pools_.size();
                     failover_cooldown_ = 2;
                     sync_retry_count_ = 0;
-                    ARMRX_LOG_WARN << "Failing over to " << current_pool_name();
+                    ARMRX_LOG_WARN << "Failing over to " << pool_name_nolock();
                 } else {
                     // Retry the same (still-current) pool after a short cooldown.
                     failover_cooldown_ = 2;
