@@ -220,6 +220,15 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
     const auto snap_end = engine.snapshot();
     engine.stop();
 
+    // If the partial dataset fill completed before shutdown, wait for fill
+    // threads to finish so the destructor can unmap cleanly (avoids detached
+    // thread SIGSEGV during process exit). If fill is still in progress,
+    // skip the wait and let the OS reclaim the mapping — the process is
+    // exiting anyway.
+    if (partial_dataset_ && partial_dataset_->item_count() >= 8388608 /* 512 MiB items */) {
+        partial_dataset_->wait_for_fill();
+    }
+
     // Compute steady-state rates from snapshot delta
     double steady_total = 0.0;
     std::vector<double> steady_per_worker;

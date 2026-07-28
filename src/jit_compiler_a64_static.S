@@ -612,10 +612,10 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	ldr	x16, [sp, 72]
 	# partial_dataset_items_
 	ldr	w16, [x16, 24]
-	# if 0, always miss
+	/* if 0, always miss */
 	cbz	w16, 1f
 	cmp	x2, x16
-	# if >= count, miss
+	/* if >= count, miss */
 	b.hs	1f
 
 	# ── HIT path: load from partial_dataset_ directly ──

@@ -42,9 +42,6 @@ PartialDataset::PartialDataset(std::size_t item_count)
     // Hugepage hint (best-effort; succeeds silently if THP is available)
     ::madvise(data_, total_bytes, MADV_HUGEPAGE);
 
-    // Touch pages to fault them in proactively (Linux 5.14+)
-    ::madvise(data_, total_bytes, MADV_POPULATE_WRITE);
-
     ARMRX_LOG_INFO << "PartialDataset: allocated " << item_count
                    << " items (" << (total_bytes / (1024ULL * 1024ULL))
                    << " MiB)";
