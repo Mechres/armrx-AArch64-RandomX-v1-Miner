@@ -448,8 +448,13 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 block_input = local_job.block_template;
 
                 vm.set_cache(active_cache.get());
-                // Hybrid partial dataset: pass to VM if configured
-                if (partial_dataset_ && partial_dataset_->item_count() > 0) {
+                // Hybrid partial dataset: pass to VM if configured.
+                // Always pass even if current item_count_ is 0 — the JIT
+                // hybrid entry handles 0 items via cbz (always takes miss
+                // path), and we want the pointer to be non-null so run_jit()
+                // enables the hybrid code emission. item_count_ rises
+                // atomically as fill progresses.
+                if (partial_dataset_) {
                     vm.set_partial_dataset(partial_dataset_->data(), partial_dataset_->item_count());
                 }
                 if (mode_ == RandomXMode::fast && active_dataset) {
