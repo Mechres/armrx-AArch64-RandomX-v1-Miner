@@ -319,6 +319,16 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_jit_dataset_2way PRIVATE armrx_core)
     target_compile_options(test_jit_dataset_2way PRIVATE -UNDEBUG)
     add_test(NAME test_jit_dataset_2way COMMAND test_jit_dataset_2way)
+    set_tests_properties(test_jit_dataset_2way PROPERTIES TIMEOUT 120)
+
+    # Track C Phase A (master-plan-20260727.md): diagnostic test comparing
+    # the light-mode reduced-preservation JIT prologue's dataset-item outputs
+    # against the C++ reference implementation for (seed, itemNumber) pairs.
+    # Any mismatch reveals a data-flow bug in the prologue.
+    add_executable(test_jit_dataset_light tests/test_jit_dataset_light.cpp)
+    target_link_libraries(test_jit_dataset_light PRIVATE armrx_core)
+    add_test(NAME test_jit_dataset_light COMMAND test_jit_dataset_light)
+    set_tests_properties(test_jit_dataset_light PROPERTIES TIMEOUT 600)
 
     # Track D1's actual decision gate (L1 I-cache refill rate, 1-way vs
     # 2-way) -- perf-stat-wrapped microbenchmark invoked manually on device,

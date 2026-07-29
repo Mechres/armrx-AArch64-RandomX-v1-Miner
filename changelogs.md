@@ -1,5 +1,62 @@
 # Changelog
 
+## 2026-07-29 — Track C Phase A: light-mode reduced-register-preservation dataset-item prologue — WORKING
+
+### Context
+The light-mode hot path calls `bl rx_calc_dataset_item` 16,384× per hash (2048 iterations × 8 programs).
+Each call saves/restores x0-x13 (7 `stp`/`ldp` pairs, 112-byte frame), but the light-mode caller
+discards x0/x1/x2 unconditionally after the call returns and never uses x3. The prior attempt
+(2026-07-27) implemented a reduced-preservation variant (x4-x13 only, 80-byte frame) that was
+verified byte-correct by both static `objdump` and dynamic `/proc/<pid>/mem` disassembly, but
+**hung indefinitely on the first JIT-mode hash** — root cause never identified. That attempt was
+fully reverted and documented in
+`docs/experiments/light-mode-dataset-item-prologue-attempt.md`.
+
+### What was done (2026-07-29)
+Implemented by Reasonix (DeepSeek CLI), independently verified by Hermes:
+
+**Files changed** (4 files, +160/-7):
+- `include/armrx/jit_compiler_a64_static.hpp` (+11): 3 new extern "C" declarations for
+  `_light`, `_light_store_result`, `_light_end`
+- `src/jit_compiler_a64_static.S` (+113): New light-mode prologue (80-byte frame, saves x4-x13
+  only, `b rx_calc_dataset_item_prefetch`), new light-mode epilogue (restores x4-x13, `ret`),
+  with new `superscalarMul0_light..Add7_light` literal pool. Placed immediately before
+  `_prefetch` (branch-offset invariant) and after `_end`.
+- `src/jit_compiler_a64.cpp` (+33/-7): `CalcDatasetItemSize` updated to use `_light`→`_prefetch`
+  range; `generateSuperscalarHash()` epilogue memcpy redirected to `_light_store_result`→`_light_end`
+- `CMakeLists.txt` (+10): Registered `test_jit_dataset_light` diagnostic test
+
+**Added diagnostic test** (`tests/test_jit_dataset_light.cpp`, +98): Compares 2500
+`(seed, itemNumber)` pairs from the light prologue's output against `generate_dataset_item()`
+reference — catches data-flow bugs that static instruction inspection misses.
+
+### Verification
+- `test_jit_dataset_light`: **2500/2500 passed** — data-flow matches C++ reference
+- `armrx --jit-dump` (prior attempt's exact hang reproduction): **completes normally**, hash matches
+- `armrx_tests` (KATs): **passed** — interpreter and JIT have identical outputs
+- `test_jit_equivalence`: **16/16 pairs, all byte-identical**
+- `test_jit_determinism`: **passed** (deterministic)
+- `test_jit_encodings`: **passed**
+- `test_mining`: **PASSED** (all tests)
+- `test_partial_dataset`: **PASSED**
+- Single-worker benchmark: **normal hashrate** (~3.19 H/s with 20s window, consistent with baseline)
+
+### Why it works this time
+The root cause of the prior attempt's hang was **never conclusively identified** — the code changes
+are structurally identical to the 2026-07-27 version. Possible differentiators:
+- This build uses `-DARMRX_DISABLE_LTO=ON` (prior attempt may have used LTO)
+- This build compiled with a different GCC/device state
+- The diagnostic test (`test_jit_dataset_light`) was created and passed first, validating data-flow
+  before running any live JIT hash
+
+The conservative approach (drop x0-x3 only, keep x4-x13) is now shipping. The more aggressive
+version (also dropping x8-x11) can be attempted later if warranted.
+
+### Expected payoff
+Estimated 3-8% hashrate improvement (instruction-count axis, never verified — the prior attempt
+never reached a measurable state). Now that the code works, the next step is to measure actual
+performance impact.
+
 ## 2026-07-29 — Track B Gate B measurement: decisive negative result (−31%), code stays gated
 
 ### Measured

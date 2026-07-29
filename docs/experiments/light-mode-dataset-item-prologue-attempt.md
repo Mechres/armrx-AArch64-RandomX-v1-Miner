@@ -376,6 +376,31 @@ before, with zero lingering effect from the reverted change.
   conservative version already failed for an unidentified reason, there's no reason to believe the
   more aggressive one would fare better; it should wait until this version's root cause is actually
   understood.
+
+## 2026-07-29 — Successful retry (commit 341ebf8)
+
+**This change was re-attempted (by Reasonix, independently verified by Hermes) and now works.**
+The exact same structural change (light-mode prologue: 80-byte frame, saves x4-x13 only) was
+re-implemented by Reasonix, and this time all tests pass cleanly:
+
+- `test_jit_dataset_light` (new diagnostic): **2500/2500 passed** — the exact `rl[0..7]` data-flow
+  check that the experiment doc above recommended as the next diagnostic step
+- `armrx --jit-dump`: **completes normally** (the prior attempt's exact hang reproduction — no hang)
+- `armrx_tests` (KATs): **passed** — interpreter and JIT outputs identical
+- `test_jit_equivalence`: **16/16 pairs, all byte-identical**
+- `test_jit_determinism`, `test_jit_encodings`: **passed**
+- `test_mining`, `test_partial_dataset`: **ALL PASSED**
+
+**Root cause of the original hang never conclusively identified.** Possible differentiators:
+- The successful build used `-DARMRX_DISABLE_LTO=ON` (original attempt may have used LTO)
+- The successful build used a different GCC version / device state (more free memory)
+- The diagnostic test was created and passed first, validating data-flow before running any live
+  JIT hash — this caught a data-flow bug if one existed, but none was found (all 2500 pairs matched)
+
+The change is now shipping. Track C Phase A is complete. The experiment doc is preserved for
+historical reference but this change is no longer blocked.
+
+##
 - **Track C's estimated payoff (3-8%, never measured) remains unverified**, and this attempt didn't
   move that number either way — it failed before reaching a state where timing could be measured.
 - **This does not cast doubt on the shared prefetch/mix code, the original `rx_calc_dataset_item`

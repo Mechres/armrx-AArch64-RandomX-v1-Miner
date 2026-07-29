@@ -67,6 +67,17 @@ extern "C" {
 	void randomx_calc_dataset_item_aarch64_store_result();
 	void randomx_calc_dataset_item_aarch64_end();
 
+	// Track C Phase A: light-mode-only reduced-register-preservation entry
+	// (master-plan-20260727.md Track C). Uses the same shared prefetch/mix/
+	// store code as the original but with a smaller 80-byte frame and
+	// preserves only x4-x13 (not x0-x13). Only reached via
+	// generateSuperscalarHash()'s memcpy -- never via a live `bl` in the
+	// statically-linked binary (the original function above is left
+	// completely untouched for the dead-code fast-mode path).
+	void randomx_calc_dataset_item_aarch64_light();
+	void randomx_calc_dataset_item_aarch64_light_store_result();
+	void randomx_calc_dataset_item_aarch64_light_end();
+
 	// Track D1: 2-way interleaved dataset-item derivation (new, separate
 	// entry point -- see the register-contract comment at its definition
 	// in jit_compiler_a64_static.S). Not used by generateSuperscalarHash()

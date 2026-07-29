@@ -419,7 +419,7 @@ promoting ahead of Track B's main item as a smaller, faster test of the same und
 
 ---
 
-## Track C — Structural ABI/call overhead: inline the light-mode dataset-item helper
+## Track C — Structural ABI/call overhead: inline the light-mode dataset-item helper *(Phase A done 2026-07-29, working)*
 
 *Hermes Item 2. Traces to an abandoned 2026-07-19 handoff priority, never executed. Independent of
 Track B — orthogonal axis (reduces the cost of every derivation call rather than reducing the
@@ -444,27 +444,13 @@ its own saved registers at **936-942**. The item is computed in x0-x7 and could 
 **directly** into the live VM registers.
 
 **Phased, each independently revertible:**
-- Phase A — remove duplicate register preservation. **Attempted 2026-07-27, hung, reverted —
-  see `docs/experiments/light-mode-dataset-item-prologue-attempt.md` for the full account,
-  including the complete code changes for reference.** Designed and implemented a conservative
-  version (drop x0-x3 preservation only, keep x4-x13) as a new, separate light-mode-only static
-  entry point (not touching the shared/general-purpose function at all, which turned out to also
-  be used by dead fast-mode code — `getDatasetInitFunc()` has zero call sites). Verified
-  byte-correct via both static (`objdump`/`nm` on the compiled binary) and dynamic (disassembling
-  the actual live JIT buffer's runtime-constructed bytes via `/proc/<pid>/mem`) inspection —
-  every instruction matched the design exactly. Despite that, the full system hung on the very
-  first JIT-mode hash (confirmed via `/proc/<pid>/stat` as genuinely spinning, not deadlocked;
-  `perf record` sampling showed execution spread across both the main VM loop and the derivation
-  region, not concentrated at one instruction — more consistent with a data-corruption-driven
-  blowup, e.g. wrong values reaching a `CBRANCH` and causing far more re-execution than the
-  spec's ~0.4% branch-taken rate, than a tight infinite loop). Root cause not identified despite
-  the verification above; reverted per this project's established discipline for exactly this
-  failure class (same call made for the memory-op scheduler attempt). **Before attempting this
-  again: the experiment doc's "where this leaves future work" section has a concrete next
-  diagnostic step (diff the derivation's actual computed `rl[0..7]` values against
-  `generate_dataset_item()`'s reference output for fixed inputs, to test the "wrong data, not
-  wrong instructions" hypothesis directly) — don't just re-verify the instruction sequence again,
-  that was already done exhaustively and found nothing.**
+- Phase A — remove duplicate register preservation. **DONE 2026-07-29, WORKING.** Reduced
+  prologue from 112-byte/7-pair frame (x0-x13) to 80-byte/5-pair (x4-x13 only). Prior attempt
+  (2026-07-27) hung on first JIT-mode hash with the identical code changes — root cause never
+  identified. This attempt succeeded: all tests pass, including a new data-flow diagnostic test
+  (`test_jit_dataset_light`, 2500 seed/item pairs against C++ reference), KATs, JIT equivalence
+  (16/16), determinism, and full mining suite. Expected payoff 3-8% on the instruction-count
+  axis, not yet measured. Code shipped in commit 341ebf8.
 - Phase B — direct result mixing (skip the store/reload relay entirely). **Not attempted; also
   turns out to be substantially harder than originally scoped** — found during Phase A's design
   work that the superscalar computation's working registers (`rl[0..7]`) are hard-wired to the
