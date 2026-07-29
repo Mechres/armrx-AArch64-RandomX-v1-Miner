@@ -1,30 +1,25 @@
 # Track B Gate B/C: Partial Dataset Memory-Contention Test — Plan for the Next Agent
 
-**STATUS AS OF 2026-07-29: GATE B PASSED.** JIT crash (x17 clobber in `_end_hybrid`) fixed
-and verified:
-- `--dataset-mb=1 --seconds=5` runs cleanly with 109 hashes (was: immediate segfault)
-- `test_partial_dataset` passes (16.41s)
-- `test_jit_dataset_2way` passes (352.15s, 20 seeds, exhaustive differential)
-- Full `ctest` suite green
-- Non-hybrid mode unaffected
+**STATUS AS OF 2026-07-29: GATES A+B DONE.** JIT crash fixed and verified, memory-contention
+measurement delivered a decisive negative result (−31% at 8 workers).
+Code stays in tree gated behind `--dataset-mb=N` (default 0) as reference.
+Gate C (multi-hour stability) also remains but is now optional (Track B not shipping).
 
-Gate B (memory-contention measurement) has NOT been run yet — the 8-worker `perf stat`
-comparison at a representative `--dataset-mb` value still needs doing. TLB check and
-Gate C (multi-hour MemAvailable stability) also remain.
+## Measurement result (2026-07-29)
 
-## Status this plan assumes
+**Gate B: CLEARLY NEGATIVE on this hardware.** 8-worker interleaved comparison
+(baseline → cooldown → hybrid → cooldown, 1 process each, `pgrep`-verified clean):
 
-Track B (hybrid partial dataset: cache a `B`-byte prefix of the fast-mode dataset,
-hit it directly instead of deriving on the fly for any item within the cached
-range) is the highest-expected-value item in the current backlog (+16-32%
-*estimated*, not yet measured). Gate A (init cost) is done: a 512 MiB fill takes
-~187s (~3.1 min) total (`cache_init_ms≈8000` + `fill_ms≈179393`), confirmed
-genuinely 8-core-parallel once fill worker threads are explicitly pinned. Gate B
-(memory contention under real 8-worker load) has not been measured — that's this
-plan's job. Full background: `docs/plans/20260727/master-plan-20260727.md`,
-Track B section (`## Track B`).
+| Config | 8-worker H/s | vs baseline |
+|--------|-------------|-------------|
+| Baseline | 24.68 H/s | — |
+| Hybrid 256 MiB | 17.04 H/s | **−31%** |
 
-No code for this exists yet. You are building it, not retrying a prior attempt.
+1-worker: identical 3.83 H/s both ways (mem-contention only shows at scale).
+Result confirmed across 3 independent runs (16.92, 17.04, 17.06 H/s).
+**Track B does not ship to production on this device.** Code stays in tree,
+gated by `--dataset-mb=N` (zero cost when off), as reference for future
+targets with better memory-bandwidth/compute ratio.
 
 ## Why Gate B is the whole risk of this item
 

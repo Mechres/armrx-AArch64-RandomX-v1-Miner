@@ -9,10 +9,10 @@
 > [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6), and
 > [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) (Phase 7).
 
-> **Current status (2026-07-29):** Track B Gate B (hybrid partial dataset JIT crash) fixed and
-> verified — `--dataset-mb=N` now works without crashing, `test_partial_dataset` and
-> `test_jit_dataset_2way` (20 seeds, exhaustive differential) both pass. Phases 1–13 remain
-> fully resolved. **All *new* open performance work is tracked in
+> **Current status (2026-07-29):** Track B Gates A+B (hybrid partial dataset) done — JIT crash fixed,
+> verified correct, and measured: **−31% at 8 workers on this device, not adopted for production.**
+> Code stays gated (`--dataset-mb=N`, zero cost when off) as reference for future targets. Phases 1–13
+> remain fully resolved. **All *new* open performance work is tracked in
 > [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)**.
 > a synthesized, deduplicated, gated backlog (Tracks A-J) replacing four independent 2026-07-27
 > planning documents plus two carried-forward unstarted items from Phase 11's tracking doc. It

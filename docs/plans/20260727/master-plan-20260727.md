@@ -310,7 +310,7 @@ Everything downstream should be scored against these, not against intuition.
 
 ---
 
-## Track B — Do less work: hybrid partial dataset *(Gate B passed — JIT crash fixed, hybrid enabled and verified)*
+## Track B — Do less work: hybrid partial dataset *(Gates A+B done — measured −31%, not adopted for production; code stays gated for future)*
 
 *Opus Item 1 = Deepseek D2; Opus Item 2 / Deepseek B1 as follow-ons.*
 
@@ -387,11 +387,15 @@ KAT-verified. This item chooses between two proven computations; it invents noth
   `pthread_setaffinity_np(pthread_self(), ..., CPU_SET(i, ...))` at the top of each worker thread
   (mirroring `worker_loop()`'s own `AffinityMode::All` pattern) spread the 8 threads cleanly across
   `psr=0..7`, one each, confirmed live before trusting the timing result.
-- **Gate B — the memory-path caveat (real, not theoretical).** This device's known 8-worker
-  bottleneck is shared memory-path arbitration between the two L2 clusters. This item trades ALU
-  work for random DRAM traffic (~2.5M extra 64-byte reads/sec aggregate at 50% hit rate) — exactly
-  the contended resource. **A single-core `taskset` measurement will overstate the win; measure at
-  1 worker AND 8 workers, and let the 8-worker number decide.**
+- **Gate B — the memory-path caveat (real, not theoretical). DONE, 2026-07-29 — CLEARLY NEGATIVE.** This
+  device's known 8-worker bottleneck is shared memory-path arbitration between the two L2 clusters.
+  This item trades ALU work for random DRAM traffic (~2.5M extra 64-byte reads/sec aggregate at 50%
+  hit rate) — exactly the contended resource. **Interleaved measurement (baseline → cooldown → hybrid,
+  1 process each, `pgrep`-verified clean): baseline 24.68 H/s vs hybrid 256 MiB 17.04 H/s (−31%).**
+  1-worker: identical 3.83 H/s both ways (contention only appears at 8-worker scale). Result
+  confirmed across 3 independent runs (16.92, 17.04, 17.06 H/s). Track B does not ship to production
+  on this hardware. Code stays in tree, gated by `--dataset-mb=N` (zero cost when off, default 0),
+  as reference for future targets with better memory-bandwidth/compute ratio.
 - **Gate C — memory pressure.** No swap on this device. Size conservatively; watch for OOM-killer
   activity over a multi-hour run; re-check `MemAvailable` while mining, not idle.
 - **TLB.** 768 MiB of random access needs THP or this could be page-walk-dominated. Verify via

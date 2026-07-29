@@ -128,11 +128,13 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
-*   **Hybrid partial dataset (Track B):** ✅ Landed — `--dataset-mb=N` caches a prefix of the
-    fast-mode dataset for direct JIT loads instead of on-the-fly derivation. JIT `_end_hybrid`
-    entry point with incremental background fill. Verified differential-correct (100% byte-
-    identical) across 20 seeds. Gate B (memory contention) pending — see `NEXT_STEPS.md` for
-    what remains before shipping to production mining.
+*   **Hybrid partial dataset (Track B):** ⚠️ Landed but **not adopted for production** — `--dataset-mb=N`
+    caches a prefix of the fast-mode dataset for direct JIT loads instead of on-the-fly derivation.
+    JIT `_end_hybrid` entry point with incremental background fill. Verified differential-correct
+    (100% byte-identical) across 20 seeds. Gate B (memory contention) measured **−31% at 8 workers**
+    on this device (baseline 24.68 → hybrid 17.04 H/s) — the extra DRAM traffic saturates the
+    two-cluster interconnect. Code stays in the tree gated behind `--dataset-mb=N` (default 0, zero
+    cost when off) as reference for future targets with better memory bandwidth.
 
 ---
 

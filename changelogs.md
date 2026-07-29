@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-07-29 — Track B Gate B measurement: decisive negative result (−31%), code stays gated
+
+### Measured
+- **Gate B (memory-contention measurement)**: 8-worker interleaved comparison, clean
+  `pgrep`-verified, 1 process each with cooldown between runs.
+- Baseline: **24.68 H/s** (consistent across 3 runs: 25.39, 24.94, 24.92 H/s)
+- Hybrid 256 MiB: **17.04 H/s** (consistent across 3 runs: 16.92, 17.04, 17.06 H/s)
+- **Δ: −31%** — the extra DRAM traffic from the hybrid JIT hit path saturates the
+  two-cluster interconnect under 8-worker contention.
+- 1-worker: identical 3.83 H/s both ways (memory contention only appears at full scale).
+- Track B does **not** ship to production on this hardware.
+
+### Decision
+Code stays in the tree, gated by `--dataset-mb=N` (default 0, zero cost when off),
+as reference for future targets with better memory-bandwidth/compute ratio.
+
+### Docs updated
+- `NEXT_STEPS.md`: Gate B measurement marked DONE with result
+- `docs/plans/track-b-gate-b-plan-20260728.md`: Status updated, measurement result section
+- `docs/plans/20260727/master-plan-20260727.md`: Track B header and Gate B bullet updated
+- `README.md`: Hybrid partial dataset status changed to ⚠️ not adopted for production
+- `ROADMAP.md`: Current status callout updated
+
 ## 2026-07-29 — Track B Gate B: hybrid partial dataset JIT crash fixed (x17 clobber); enabled and verified
 
 ### Fixed (3 bugs, all in `src/jit_compiler_a64_static.S`)
