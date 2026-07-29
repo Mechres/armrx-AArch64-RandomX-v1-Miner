@@ -160,7 +160,14 @@ namespace armrx {
 		}
 
 		void emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* code, uint32_t& codePos);
+		// tmp_reg parameterized so the superscalar dataset-derivation path
+		// uses a caller-saved register (x13) instead of the default x20,
+		// which is callee-saved.  The default x20 is fine for the main VM
+		// program (which saves/restores callee-saved registers itself),
+		// but the derivation path is also called via C function pointer
+		// (CalcDatasetItemFunc) where x20 must be preserved per the ABI.
 		void emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint8_t* code, uint32_t& codePos);
+		void emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint32_t tmp_reg, uint8_t* code, uint32_t& codePos);
 
 		template<uint32_t tmp_reg>
 		void emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr, uint8_t* code, uint32_t& codePos);

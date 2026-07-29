@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-29 — Track D1 gate block fixed: emitAddImmediate x20 clobber in superscalar path
+
+### Fixed
+- **`include/armrx/jit_compiler_a64.hpp`**, **`src/jit_compiler_a64.cpp`**: `emitAddImmediate()` now has a 6-arg overload accepting an explicit scratch register. The original 4-arg version delegates with `tmp_reg=20` (preserving existing behaviour for the main VM program). The superscalar `IADD_C7`/`C8`/`C9` case now passes `x13` (caller-saved) instead of the default `x20`, which is callee-saved. At -O3 the compiler was using `x20` as a loop counter, so an `IADD_C7-9` with large immediate silently corrupted it, causing the benchmark's main loop to iterate ~2^64 times.
+
+### Verification
+- `bench_dataset_2way 1way 10` completes at -O3 with correct checksum (was: infinite hang)
+- `bench_dataset_2way 2way 10` still passes
+- `test_jit_dataset_2way` passes (exhaustive differential, 20 seeds)
+- `test_mining` passes (all tests)
+- D1 gate measurement unblocked; see `docs/experiments/track-d1-bench-1way-hang-status.md`
+
 ## 2026-07-28 — Track B closed: concept validated, implementation reverted after two JIT failures
 
 Track B hybrid partial dataset is **paused** — the concept was validated (~9-10%

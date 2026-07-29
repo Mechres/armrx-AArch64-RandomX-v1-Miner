@@ -1,43 +1,58 @@
-# Track D1 gate tool: bench_dataset_2way 1-way mode hang — night-shift status (2026-07-28/29)
+# Track D1 gate tool: bench_dataset_2way 1-way mode hang — CLOSED
 
-**Status: open.** The D1 *implementation* is unaffected (ctest 16/16 green, incl. the
-exhaustive 2-way differential test). What hangs is the *gate benchmark harness*'s
-1-way baseline mode, which blocks running the L1I decision gate.
+**Status: closed (2026-07-29).** Root cause found and fixed. The 1-way
+benchmark now works at -O3. The D1 gate measurement (L1I refill rate
+comparison) is unblocked.
 
-## Facts established (Hermes ssh probes + an agy/opus debug session that hit its
-## print timeout before concluding; session transcript at /tmp/d1_bench_debug_result.log)
+## Root cause
 
-- `bench_dataset_2way 1way N` hangs (state R, full CPU, utime climbing — spinning,
-  not blocked) even at N=10, under `taskset -c 3` with isolcpus on. >10 min, no exit.
-- **`bench_dataset_2way 2way N` COMPLETES successfully** (EXIT 0, checksum printed)
-  on the same device, same build. The new 2-way path works; the *1-way baseline*
-  loop is what hangs.
-- An -O2 debug rebuild of the same source's 1-way path **works**. The hanging binary
-  is the CMake Release (-O3) build. agy was mid-way through an -O2 vs -O3
-  miscompilation/UB comparison when its session timed out.
-- `test_jit_dataset_2way` (ctest, passed in 193s) only exercises fn2way — it never
-  calls `getCalcDatasetItemFunc()` the way the bench's 1-way mode does, so ctest
-  green and bench hang are consistent.
-- perf sampling of the hung process shows execution in main + JIT regions + RNG —
-  consistent with the loop running with a wrong/looping callee, or a miscompiled
-  loop, not a deadlock.
+`JitCompilerA64::emitAddImmediate()` hardcoded x20 as its scratch register
+for the large-immediate (> ~16M) fallback path (line 1282 in the original).
+This is correct for the *main VM program*, whose JIT prologue/epilogue
+save/restore callee-saved registers x19-x28. However, the superscalar
+dataset-derivation path (`generateSuperscalarHash()`) emits code that runs
+inside `rx_calc_dataset_item`, a leaf function whose prologue only saves
+caller-saved registers (x0-x13). x20 is used there as scratch during
+the `IADD_C7`/`IADD_C8`/`IADD_C9` cases, silently corrupting the caller's
+x20.
 
-## Leading hypotheses (narrowed from the above)
-1. **-O3 miscompilation or UB in the bench harness's 1-way loop** (works at -O2,
-   hangs at -O3, same source). Candidate UB: none obvious in the 95-line file, but
-   the fn1way pointer-call pattern + strict-aliasing at -O3 deserves a look.
-2. **The bench's 1-way setup misuses the JitCompilerA64 API** in a way the test
-   never does — e.g. `getCalcDatasetItemFunc()` on an instance that only ran
-   `generateSuperscalarHash()`, if that function's contract expects more state
-   initialized. (The mining path constructs this differently.)
+At -O2, the compiler either didn't keep anything important in x20 across
+the call, or the larger -O2 code layout meant the IADD large-immediate path
+was never taken. At -O3, x20 was used as the loop counter, causing the
+benchmark's main loop to spin for 2^64 iterations whenever a superscalar
+program happened to contain an `IADD_C7-9` with a large immediate.
 
-## Next steps (for whichever agent resumes)
-- Diff the -O2-works / -O3-hangs binaries' disassembly of main()'s loop (the agy
-  transcript was in the middle of exactly this).
-- Check how production code obtains and calls the single-stream entry
-  (`getCalcDatasetItemFunc` usage in src/ vs the bench's usage).
-- If it's harness UB/miscompile: fix the bench, rerun; the gate protocol itself is
-  unchanged. If it's an API-contract misuse: fix the bench's setup to mirror
-  production usage.
-- Device left clean (no stray processes). isolcpus is ON — leave it on; the gate
-  runs under it anyway, and the 2way-completes datapoint was collected under it.
+The 2-way path (`JitDataset2Way`) was unaffected: it has its own
+`emitAddImmediate2Way()` that parameterizes the scratch register per-stream
+(x12/x16), both caller-saved.
+
+## Fix
+
+EmitAddImmediate now has a 6-arg overload that accepts an explicit scratch
+register. The original 4-arg signature delegates to the 6-arg with
+tmp_reg=20 (preserving existing behavior for the main VM program). The
+superscalar path's IADD_C7..9 case passes x13 (caller-saved) instead.
+
+Files changed:
+- `include/armrx/jit_compiler_a64.hpp` — declare 6-arg emitAddImmediate
+- `src/jit_compiler_a64.cpp` — add 4-arg wrapper, 6-arg implementation,
+  change superscalar IADD_C7-9 to use x13
+
+## Verification
+
+- `bench_dataset_2way 1way 10`: completes immediately at -O3, checksum=17499
+- `bench_dataset_2way 2way 10`: same checksum, still works
+
+## Next steps
+
+Run the actual L1I decision gate:
+```
+perf stat -e l1i_cache_refill taskset -c 3 ./bench_dataset_2way 1way N
+perf stat -e l1i_cache_refill taskset -c 3 ./bench_dataset_2way 2way N
+```
+with `isolcpus=1-7` active, reversed trial order, N large enough for
+stable `perf stat` (100K-1M).
+
+## Previous contents (for reference)
+
+> **Status: open.** The D1 implementation is unaffected (ctest 16/16 green...

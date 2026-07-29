@@ -1137,7 +1137,13 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 			case SuperscalarInstructionType::IADD_C7:
 			case SuperscalarInstructionType::IADD_C8:
 			case SuperscalarInstructionType::IADD_C9:
-				emitAddImmediate(dst, dst, instr.getImm32(), code, codePos);
+				// Use x13 as scratch (caller-saved, not in the
+				// superscalar register file x0-x7) instead of the
+				// default x20 which is callee-saved — this code is
+				// emitted inside rx_calc_dataset_item which is also
+				// called via C function pointer (CalcDatasetItemFunc),
+				// so x20 must be preserved per the ABI.
+				emitAddImmediate(dst, dst, instr.getImm32(), 13, code, codePos);
 				break;
 			case SuperscalarInstructionType::IXOR_C7:
 			case SuperscalarInstructionType::IXOR_C8:
@@ -1254,7 +1260,13 @@ void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*cod
 	codePos = k;
 }
 
+// 5-arg convenience wrapper (defaults to x20, the original hardcoded temp)
 void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
+{
+    emitAddImmediate(dst, src, imm, 20, code, codePos);
+}
+
+void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, uint32_t tmp_reg, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
 
@@ -1279,7 +1291,6 @@ void JitCompilerA64::emitAddImmediate(uint32_t dst, uint32_t src, uint32_t imm, 
 	}
 	else
 	{
-		constexpr uint32_t tmp_reg = 20;
 		emitMovImmediate(tmp_reg, imm, code, k);
 
 		// add dst, src, tmp_reg
