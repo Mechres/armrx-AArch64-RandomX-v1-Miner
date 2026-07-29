@@ -501,19 +501,12 @@ each, which is already verified). Interleaving two streams at emission time is "
 done by the compiler instead of hardware.
 
 **D1 — 2-way interleaved superscalar dataset-item derivation** *(Opus Item 3, do this first — cheapest, best-understood)*.
-**Handoff plan, ready for an independent agent:** `docs/plans/track-d1-superscalar-interleave-plan-20260728.md`.
-Both the current and next dataset-item address are already simultaneously live in the light-mode
-loop (`jit_compiler_a64_static.S:528-560`); RandomX's one-iteration lookahead exists precisely so
-implementations can do this. Emission is mechanically simple — emit each superscalar instruction
-twice, once per disjoint register set, **no hazard analysis at all** (categorically unlike the
-reverted memory-op scheduler: no reordering within a chain, so no new hazard class). Precedent
-already exists in-repo: `src/dataset.cpp:88-135` does the same 2-way interleave in C++/NEON for
-fast-mode init. Register budget: ~20 total for two streams, fits by extending the callee-saved set
-(x19-x28) in a new 2-way entry point. **Gate: code size roughly doubles (20,916 → ~42 KB) against a
-16 KiB L1 I-cache — measure `l1i_cache_refill` before/after; this is the most likely failure mode.**
-Correctness oracle is total and cheap (derivation is a pure function of item number; differential
-test against the existing 1-way path is exhaustive in practice). Interacts with Track B
-sub-additively — if Track B lands, there's less to interleave; re-estimate after.
+**🍅 CONCLUDED (2026-07-29): NEGATIVE.** See `docs/experiments/track-d1-bench-1way-hang-status.md`.
+The 2-way path causes ~66× more L1I refills (0.023% → 1.51% miss rate)
+with a −1.2% IPC regression on this Cortex-A53. The I-cache locality
+tradeoff is worse, not better, for interleaved emission here.
+**D3 is contraindicated** by this result — if D1 can't clear this bar,
+the much larger full-VM interleave won't either.
 
 **D2 — Cross-hash boundary-only pipelining** *(Sonnet-R2 E2, the fallback if D3's liveness check is
 bad)*. Overlap only the *tail* of hash N (AES finalization/result compression — short, fixed,
@@ -544,9 +537,12 @@ is "up to most of the main VM program's 20% cycle share," likely much less once 
 doubled memory-bandwidth-per-worker costs are counted (this could just move the bottleneck from ALU
 stalls to memory bandwidth, mirroring Track B's Gate B risk, self-inflicted instead of
 interconnect-inflicted). Effort: 1-2 weeks, the largest single item across the combined backlog.
-**Do not start before D1 is measured** — D1 tests the same underlying hypothesis (independent-stream
-interleaving pays off on this core) for a tenth of the cost, with a trivial oracle. If D1 doesn't
-pay off, D3 won't either.
+**D1 is now measured (2026-07-29): clean negative result.** The 2-way superscalar
+interleave causes ~66× more L1I refills (−1.2% IPC) — see
+`docs/experiments/track-d1-bench-1way-hang-status.md`. **D3 is contraindicated
+by this result.** If the cheap, simple superscalar interleave can't clear the
+L1I bar on this core, the much larger full-VM interleave (with additional
+register-spill cost) will not either.
 
 ---
 
@@ -820,10 +816,11 @@ Track B (partial dataset)              ── Gate A → Gate B (8-worker!) → 
 Track C (inline dataset-item helper)   ── Phase A → Phase B → (Phase C only if A/B show `bl` is next)
   │                                                                  │
   │                                                                  └─→ Track J's monolithic-JIT note
-Track D1 (cheap 2-way superscalar interleave) ── l1i_cache_refill gate
+Track D1 (cheap 2-way superscalar interleave) ── 🍅 CONCLUDED: NEGATIVE (66× more L1I refills, −1.2% IPC)
   │
-  ├─→ Track D2 (boundary pipelining, if D1 promising but D3's liveness check is bad)
-  └─→ Track D3 (full dual-nonce, only if D1 pays off AND item 4's liveness check clears)
+  └─→ D3 contraindicated by this result — see `docs/experiments/track-d1-bench-1way-hang-status.md`
+
+Track D2 (boundary pipelining)           ── depends on nothing above beyond accepting D1's result
 
 Track G (NEON T-table AES gather)      ── independent, start once flag scaffold exists
 Track I (worker/core-0 cost)           ── independent, operational, land anytime
@@ -859,9 +856,7 @@ Track E, F, H, J                       ── each gated as noted above; lowest 
    Do not resume this track without following that lead first. Phase B is *also* harder than
    originally scoped (needs a register remapping design, not just "skip the store") — see the
    Track C section above.
-4. **Track D1** — cheap, well-understood, tests the interleaving hypothesis for a tenth of Track D3's
-   cost. Doesn't depend on Track A item 4 (only D3 does, and D3's register-slack hope is now closed
-   anyway — see item 1 above).
+4. **Track D1 — 🍅 CONCLUDED: NEGATIVE** (2026-07-29, see above). The cheap 2-way superscalar interleave causes ~66× more L1I refills (−1.2% IPC) on this core — clean negative result.
 5. **Track G (NEON T-table AES)** — independent axis, can be developed in parallel with any of the
    above once a flag scaffold exists; targets the single largest named C++ cost (12.3% of cycles).
 6. **Track F, Track E, Track D2/D3, Track H, Track J** — in roughly that order, each strictly gated

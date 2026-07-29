@@ -5,12 +5,29 @@
 ### Fixed
 - **`include/armrx/jit_compiler_a64.hpp`**, **`src/jit_compiler_a64.cpp`**: `emitAddImmediate()` now has a 6-arg overload accepting an explicit scratch register. The original 4-arg version delegates with `tmp_reg=20` (preserving existing behaviour for the main VM program). The superscalar `IADD_C7`/`C8`/`C9` case now passes `x13` (caller-saved) instead of the default `x20`, which is callee-saved. At -O3 the compiler was using `x20` as a loop counter, so an `IADD_C7-9` with large immediate silently corrupted it, causing the benchmark's main loop to iterate ~2^64 times.
 
-### Verification
+### Verified (hang fix)
 - `bench_dataset_2way 1way 10` completes at -O3 with correct checksum (was: infinite hang)
 - `bench_dataset_2way 2way 10` still passes
 - `test_jit_dataset_2way` passes (exhaustive differential, 20 seeds)
 - `test_mining` passes (all tests)
-- D1 gate measurement unblocked; see `docs/experiments/track-d1-bench-1way-hang-status.md`
+
+## 2026-07-29 — Track D1 gate measurement: clean negative result
+
+### Measured
+- **L1I gate**: `perf stat -e l1i_cache_refill` on `bench_dataset_2way {1way,2way} 100000`,
+  `taskset -c 3`, isolcpus active, 6 runs total with reversed order. The 2-way path
+  causes **~66× more L1I refills** (0.023% → 1.51% miss rate) with a **−1.2% IPC**
+  regression. The D1 premise (2-way interleaving improves I-cache locality) is contradicted
+  on this Cortex-A53.
+- **Implication**: D3 (full dual-nonce interleave of the main VM program) is now also
+  contraindicated — if the cheap, simple superscalar interleave can't clear this bar,
+  the much larger full-VM version is extremely unlikely to.
+- 2-way path and its benchmark harness remain in-tree as a regression-protection tool
+  (the exhaustive differential KAT detects any future semantic divergence), but should
+  **not** be wired into production mining.
+- Full data and analysis: `docs/experiments/track-d1-bench-1way-hang-status.md`.
+- `docs/plans/track-d1-superscalar-interleave-plan-20260728.md` and master plan updated
+  to reflect concluded status.
 
 ## 2026-07-28 — Track B closed: concept validated, implementation reverted after two JIT failures
 

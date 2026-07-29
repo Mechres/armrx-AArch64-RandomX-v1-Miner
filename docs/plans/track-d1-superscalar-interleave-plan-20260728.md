@@ -1,22 +1,37 @@
-# Track D1: 2-Way Interleaved Superscalar Dataset-Item Derivation — Plan for the Next Agent
+# Track D1: 2-Way Interleaved Superscalar Dataset-Item Derivation — **CONCLUDED: NEGATIVE**
 
-## Status this plan assumes
+**Status: concluded (2026-07-29). Clean negative result — the 2-way path
+causes ~66× more L1I refills than the single-stream baseline on this
+Cortex-A53. Do not wire into production mining. D3 is also contraindicated.**
 
-Track D's shared insight: the main VM program's dependency chain is ~94%
-architecturally serial (Track A's diagnostics already established this — nothing
-within one hash's own chain can fill its own stalls), but two different nonces are
-already fully independent, with zero new hazard analysis needed *between* them
-(only within each, which the existing emitter scheduler already verifies). D1 is
-the cheapest, best-understood way to test whether exploiting that independence at
-emission time actually pays off on this core — full background in
-`docs/plans/20260727/master-plan-20260727.md`, `## Track D`, item D1.
+Full measurement data and analysis: `docs/experiments/track-d1-bench-1way-hang-status.md`.
 
-This is unimplemented — you are building new code, not retrying a prior attempt.
-**Do this before D2 or D3**: D1 tests the same underlying hypothesis
-(independent-stream interleaving pays off on this core) for roughly a tenth of
-D3's cost, with a trivial correctness oracle. If D1 doesn't pay off, D3 (full
-dual-nonce interleaving of the entire main VM program) will not either — don't let
-anyone skip ahead to D3 without a positive D1 result in hand.
+## Retrospective
+
+What happened: the 2-way JIT path was implemented (as `JitDataset2Way` in
+`src/jit_dataset_2way.cpp` + `src/jit_compiler_a64_static.S`), verified
+by exhaustive differential KAT (`test_jit_dataset_2way`, 40020 item
+derivations across 20 seeds), and benchmarked against the 1-way baseline
+to measure the L1I cache impact. The gate measurement showed a ~66×
+increase in `l1i_cache_refill` (0.023% → 1.51% miss rate) with a −1.2% IPC
+regression.
+
+The core insight was correct — two independent nonces are fully independent
+and interleaving them at emission time cannot create new hazards — but the
+I-cache locality tradeoff is worse, not better, on the in-order Cortex-A53
+with its 16 KB L1I. Each branch in the interleaved code causes the next
+stream's instructions to displace the previous stream's cache lines,
+creating an access-pattern problem that code-size reduction cannot fix.
+
+**This is a clean negative result that directly informs D3: if the cheap,
+simple superscalar interleave can't clear this bar, full dual-nonce
+interleave of the entire VM program (which is larger and even more
+branch-heavy) is extremely unlikely to.**
+
+## Original plan (retained for reference)
+
+The text below is the working plan as written before implementation.
+It is kept for traceability but should not be followed.
 
 ## What makes this categorically safer than the reverted memory-op scheduler attempt
 
