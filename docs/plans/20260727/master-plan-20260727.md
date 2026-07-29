@@ -444,25 +444,31 @@ its own saved registers at **936-942**. The item is computed in x0-x7 and could 
 **directly** into the live VM registers.
 
 **Phased, each independently revertible:**
-- Phase A — remove duplicate register preservation. **DONE 2026-07-29, WORKING.** Reduced
-  prologue from 112-byte/7-pair frame (x0-x13) to 80-byte/5-pair (x4-x13 only). Prior attempt
-  (2026-07-27) hung on first JIT-mode hash with the identical code changes — root cause never
-  identified. This attempt succeeded: all tests pass, including a new data-flow diagnostic test
-  (`test_jit_dataset_light`, 2500 seed/item pairs against C++ reference), KATs, JIT equivalence
-  (16/16), determinism, and full mining suite. Measured impact: **zero** — caller-frame
-  saving (4 instructions/call) is 0.05% of ~134M instructions/hash, lost in noise. Code
-  shipped in commit 341ebf8, but Phase B must target the callee frame or shared code.
-- Phase B — direct result mixing (skip the store/reload relay entirely). **Not attempted; also
-  turns out to be substantially harder than originally scoped** — found during Phase A's design
-  work that the superscalar computation's working registers (`rl[0..7]`) are hard-wired to the
-  same physical registers (x0-x7) as some of the caller's live VM state, so "leave the result in
-  registers for direct XOR" as originally described isn't mechanically possible without first
-  re-mapping the derivation's working-register set to genuinely free registers — a bigger,
-  separate design problem than Phase A turned out to be, not a natural follow-on once Phase A
-  works. Do not attempt this without a dedicated register-liveness analysis across the *exact*
-  call site first.
-- Phase C — only then consider inlining the `bl` away (this is what Track E's "monolithic JIT"
-  extends to). **Contingent on Phase A actually landing — currently blocked by Phase A's revert.**
+- Phase A — remove duplicate register preservation. **DONE 2026-07-29, MEASURED: ZERO IMPACT.**
+  Reduced prologue from 112-byte/7-pair frame (x0-x13) to 80-byte/5-pair (x4-x13 only). Prior
+  attempt (2026-07-27) hung on first JIT-mode hash — root cause never identified. This attempt
+  succeeded (all tests pass, 2500-pair data-flow diagnostic, KATs, JIT equivalence 16/16), but
+  8-worker interleaved benchmark showed Phase A 25.06 H/s vs baseline 25.08 H/s.
+  **Root cause of zero impact:** the caller-frame saving (4 instructions/call = 65,536/hash) is
+  0.05% of ~134M instructions/hash. Code stays (correct, zero cost, diagnostic has proven value),
+  but the real ABI cost lives in the callee frame (x4-x13 save/restore + shared prefetch/mix/store
+  code), which Phase A doesn't touch. Commit 341ebf8.
+- Phase B — skip the store/reload relay (direct result XOR). **Not attempted; closed 2026-07-29.**
+  Realistic ceiling estimated at **~0.5%** based on Phase A's measurement. The store/reload relay
+  is 8 memory instructions per call (4 `stp` + 4 `ldp` = 131,072/hash = ~0.1% of total
+  instructions), plus store-to-forwarding latency on the in-order A53 adds real but small cycle
+  cost. The register-conflict problem remains: `rl[0..7]` = x0-x7 overlap with the caller's live
+  VM state (x4-x7 = VM r4-r7), and the caller clobbers x0-x3 immediately after return. Two
+  mitigation paths, both expensive: (a) save x0-x3 to callee-saved regs at exit (adds 4 `mov` per
+  call, eating half the gain), or (b) duplicate the entire shared derivation code (~100+
+  instructions) with a different register allocation (x19-x26 instead of x0-x7) — extreme
+  correctness risk, no measurable shortcut to validation. **ROI assessment:** ~3-5 days of
+  high-risk assembly work for ≤0.5% ceiling is not worth pursuing on this hardware. Revisit only
+  if Track G and other higher-ceiling items all close negative.
+- Phase C — inline the `bl` away entirely. **Closed 2026-07-29.** Phase A showed the ABI overhead
+  is negligible (0.05% of instructions). Inlining the entire derivation would grow the JIT buffer
+  by ~1,600 instructions/hash (8 programs × ~200 instr.), worsening the 0.788% L1I miss rate.
+  Expected **net negative**, not a win. Do not pursue.
 
 **Why it's different from everything IPC-framing closed:** this attacks call/ABI overhead and
 redundant memory traffic, not instruction-level stalls — it reduces raw instruction count (the axis
@@ -474,10 +480,10 @@ here is a silent wrong hash. Mitigate with full JIT+interpreted KATs per phase a
 differential test comparing light-mode dataset-item results before/after across many deterministic
 indices. Treat each phase as a separate, individually-revertible landing.
 
-**Effort:** ~3-5 days phased. **Expected payoff:** hypothesized 3-8% (never measured, because never
-built) — potentially the largest single win in this entire combined backlog, on the axis that
-matters most per §0. **Gate:** if instruction count drops but hashrate regresses, that's a hidden
-hazard signal — stop and investigate, don't push through.
+**Effort:** ~3-5 days phased. **Expected payoff:** hypothesized 0.5% at best per measurement
+(Phase A measured zero impact; Phase B realistic ceiling ~0.5% with high risk). **Closed for this
+hardware — recommend Track G (NEON T-table AES) or Track I (core-0 cost) instead.**
+**Gate:** if instruction count drops but hashrate regresses, that's a hidden hazard signal.
 
 ---
 
