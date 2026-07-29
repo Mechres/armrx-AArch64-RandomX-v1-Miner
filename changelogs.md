@@ -1,5 +1,26 @@
 # Changelog
 
+## 2026-07-29 — Track B Gate B: hybrid partial dataset JIT crash fixed (x17 clobber); enabled and verified
+
+### Fixed (3 bugs, all in `src/jit_compiler_a64_static.S`)
+- **[Bug 1 — saved MemoryRegisters*** at wrong stack offset**: `_end_hybrid` entry loaded
+  MemoryRegisters* from `[sp, 136]`, but the prologue has a `str x0, [sp, -16]!` predecrement
+  that shifts all subsequent offsets by 16 bytes. Fixed `[sp, 136]` → `[sp, 152]`.
+- **[Bug 2 — x16 clobber]**: `_end_hybrid` used x16 as a temporary for bound-check and hit-path
+  pointer arithmetic, but x16 is a live register (scratchpad store address used by the main VM
+  loop's `stp q16, q17, [x16]`). Added `str x16, [sp, 96]` at entry, `ldr x16, [sp, 96]` at exit.
+- **[Bug 3 — x17 clobber]**: The hit path uses four `ldp x17, x0, [x16]` pairs to load a 64-byte
+  partial dataset item onto the stack, silently corrupting x17 (scratchpad write address used by
+  the main loop's `stp x4, x5, [x17, 0]`). Added `str x17, [sp, 104]` at entry,
+  `ldp x16, x17, [sp, 96]` at exit (combined with x16's reload into a single `ldp`).
+
+### Verified
+- `--dataset-mb=1 --seconds=5` runs to completion without segfault (was: immediate crash)
+- `test_partial_dataset` passes (16.41s)
+- `test_jit_dataset_2way` passes (352.15s — exhaustive differential, 20 seeds, all byte-identical)
+- Full `ctest` suite passes
+- Non-hybrid mode (`--mine` without `--dataset-mb`) unaffected (identical 109 hashes/5s)
+
 ## 2026-07-29 — Track D1 gate block fixed: emitAddImmediate x20 clobber in superscalar path
 
 ### Fixed

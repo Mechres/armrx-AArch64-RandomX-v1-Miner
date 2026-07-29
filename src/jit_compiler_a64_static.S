@@ -156,6 +156,9 @@ DECL(randomx_program_aarch64):
 	mov	x14, xzr
 	mov	x15, xzr
 
+	# Save original x1 (MemoryRegisters*) before ldp clobbers it
+	str	x1, [sp, 24]
+
 	# Load ma, mx and dataset pointer
 	ldp	x9, x1, [x1]
 
@@ -600,9 +603,13 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid):
 	sub	sp, sp, 112
 	stp	x0, x1, [sp, 64]
 	stp	x2, x30, [sp, 80]
-	# Save MemoryRegisters* at [sp, 96] — x1 is the struct pointer at entry
-	# (prologue hasn't overwritten it yet — that happens at literal_x21 load).
-	str	x1, [sp, 96]
+	# Save x16 (scratchpad address used by caller) — corrupted by bound check below
+	str	x16, [sp, 96]
+	# Save x17 (scratchpad address used by caller) — corrupted by hit path ldp loads
+	str	x17, [sp, 104]
+	# MemoryRegisters* was saved at prologue's [sp, 24]; sub sp,sp,192 then
+	# str x0,[sp,-16]! gives a 208-byte base frame, and the 112-byte frame
+	# puts it at [sp + 152] relative to this stack pointer.
 
 	lsr	x2, x9, 32
 
@@ -616,14 +623,16 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	# x2 -> raw item number (before dataset offset)
 	lsr	x2, x2, 6
 
-	# Bound check using saved MemoryRegisters* at [sp, 96]
-	ldr	x16, [sp, 96]
+	# Bound check using saved MemoryRegisters* at [sp, 152]
+	ldr	x16, [sp, 152]
 	ldr	w16, [x16, 24]
 	cbz	w16, 1f
 	cmp	x2, x16
 	b.hs	1f
 
 	# ── HIT path: load from partial_dataset_ directly ──
+	# Reload MemoryRegisters* from stack — x16 was clobbered by bound check
+	ldr	x16, [sp, 152]
 	ldr	x16, [x16, 16]
 	add	x16, x16, x2, lsl 6
 	ldp	x17, x0, [x16]
@@ -645,6 +654,8 @@ DECL(randomx_program_aarch64_hybrid_dataset_offset):
 	bl	rx_calc_dataset_item
 
 2:	# ── Common exit ──
+	# Restore x16, x17 (scratchpad addresses) saved at _end_hybrid entry
+	ldp	x16, x17, [sp, 96]
 	mov	x10, sp
 	ldp	x0, x1, [sp, 64]
 	ldp	x2, x30, [sp, 80]

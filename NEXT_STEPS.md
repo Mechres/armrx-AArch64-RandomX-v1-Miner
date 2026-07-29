@@ -1,8 +1,14 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-27
+**Updated:** 2026-07-29
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
+
+Track B Gates A-C progress:
+- **Gate A** (init cost) — **DONE 2026-07-27.** 512 MiB fill ≡ ~187s (8-core parallel, pinning fix applied).
+- **Gate B** (JIT implementation) — **DONE 2026-07-29.** Three bugs fixed in `_end_hybrid` (stack offset, x16 clobber, x17 clobber). `--dataset-mb=N` now works — `test_jit_dataset_2way` (20 seeds, exhaustive differential) and `test_partial_dataset` both pass. Full `ctest` suite green.
+- **Gate B** (memory-contention measurement) — **PENDING.** The 8-worker `perf stat` comparison at a representative `--dataset-mb` value still needs doing. This is the actual decision point for whether Track B ships to production.
+- **Gate C** (memory pressure) — **PENDING.** 2.8 GiB zram swap present on device; watch swap usage and `MemAvailable` over a multi-hour run. High swap usage would mean hybrid mode's extra memory allocation is competing with the dataset.
 
 Phases 1–13 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,
 `docs/archived/plan_phase6_completed.md`, `docs/archived/plan_phase7_completed.md`,

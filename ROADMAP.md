@@ -9,13 +9,11 @@
 > [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6), and
 > [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) (Phase 7).
 
-> **Current status (2026-07-27):** Phases 1–13 are all fully resolved — see `PLAN.md` for the
-> complete phase-by-phase account (Phase 8's `isolcpus`/`rcu_nocbs` deployment win, Phase 9's
-> scratchpad-locality gate closure, Phase 10's low-risk backlog closure, Phase 11's scheduler
-> window widening, Phase 12's burst-vs-sustained hashrate reconciliation, Phase 13's
-> worker-count-default fix and CPU temperature reporting are the highlights since the 2026-07-25
-> snapshot this callout used to describe). **All *new* open performance work is tracked in
-> [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)**,
+> **Current status (2026-07-29):** Track B Gate B (hybrid partial dataset JIT crash) fixed and
+> verified — `--dataset-mb=N` now works without crashing, `test_partial_dataset` and
+> `test_jit_dataset_2way` (20 seeds, exhaustive differential) both pass. Phases 1–13 remain
+> fully resolved. **All *new* open performance work is tracked in
+> [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)**.
 > a synthesized, deduplicated, gated backlog (Tracks A-J) replacing four independent 2026-07-27
 > planning documents plus two carried-forward unstarted items from Phase 11's tracking doc. It
 > found real untried structural axes — do less work (a hybrid partial dataset), do more

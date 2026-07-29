@@ -1,11 +1,16 @@
 # Track B Gate B/C: Partial Dataset Memory-Contention Test — Plan for the Next Agent
 
-**STATUS AS OF 2026-07-28: PAUSED.** Concept validated (~9-10% instructions/cycles
-per hash reduction at 25% hit rate, 1 worker), but both JIT implementations failed.
-See `docs/experiments/track-b-inline-hit-path-attempt.md` for full debrief. The
-infrastructure (PartialDataset class, CLI flag, fill pinning, differential test) is
-landed and inert. When work resumes, the Gate B protocol below is unchanged, with
-the thermal-equalization addition.
+**STATUS AS OF 2026-07-29: GATE B PASSED.** JIT crash (x17 clobber in `_end_hybrid`) fixed
+and verified:
+- `--dataset-mb=1 --seconds=5` runs cleanly with 109 hashes (was: immediate segfault)
+- `test_partial_dataset` passes (16.41s)
+- `test_jit_dataset_2way` passes (352.15s, 20 seeds, exhaustive differential)
+- Full `ctest` suite green
+- Non-hybrid mode unaffected
+
+Gate B (memory-contention measurement) has NOT been run yet — the 8-worker `perf stat`
+comparison at a representative `--dataset-mb` value still needs doing. TLB check and
+Gate C (multi-hour MemAvailable stability) also remain.
 
 ## Status this plan assumes
 
