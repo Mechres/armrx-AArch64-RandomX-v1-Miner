@@ -52,10 +52,28 @@ are structurally identical to the 2026-07-27 version. Possible differentiators:
 The conservative approach (drop x0-x3 only, keep x4-x13) is now shipping. The more aggressive
 version (also dropping x8-x11) can be attempted later if warranted.
 
-### Expected payoff
-Estimated 3-8% hashrate improvement (instruction-count axis, never verified — the prior attempt
-never reached a measurable state). Now that the code works, the next step is to measure actual
-performance impact.
+### Measured impact
+Despite the clean correctness (all tests pass), **no measurable hashrate improvement**.
+
+8-worker interleaved comparison (Phase A → cooldown → baseline → cooldown, 1 process each,
+`pgrep`-verified clean):
+
+| Metric | Baseline | Phase A | Δ |
+|--------|----------|---------|---|
+| Hashrate | 25.08 H/s | 25.06 H/s | −0.08% (= noise) |
+| Instructions/hash | 133,936,478 | 133,926,150 | −0.01% (= noise) |
+| IPC | 0.7226 | 0.7311 | +1.17% (= noise) |
+
+**Why the 3-8% estimate was wrong.** The original estimate assumed the whole ABI round-trip
+cost was in the caller frame (x0-x3 save/restore). In reality, the caller frame is only
+2 `stp`/`ldp` pairs = 4 instructions per call, saving **65,536 instructions per hash** —
+just **0.05%** of the ~134M instructions per hash. The real ABI cost is the callee frame
+(x4-x13 save/restore + shared prefetch/mix/store code), which Phase A doesn't touch.
+
+**Verdict: Phase A is correct but has zero measurable impact on this hardware.** The
+code stays (zero cost when compiled, cleaner structure, the diagnostic test catches
+future data-flow bugs), but the next performance improvement must target the callee frame
+or the shared code, not the caller frame.
 
 ## 2026-07-29 — Track B Gate B measurement: decisive negative result (−31%), code stays gated
 

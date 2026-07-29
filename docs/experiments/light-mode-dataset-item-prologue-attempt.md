@@ -400,6 +400,11 @@ re-implemented by Reasonix, and this time all tests pass cleanly:
 The change is now shipping. Track C Phase A is complete. The experiment doc is preserved for
 historical reference but this change is no longer blocked.
 
+**Measured hashrate impact: zero.** 8-worker interleaved benchmark showed Phase A at 25.06 H/s
+vs baseline at 25.08 H/s — identical within noise. The caller-frame saving (4 instructions/call)
+is 0.05% of total instructions/hash. The real ABI cost is in the callee frame (x4-x13 save/restore
++ shared code).
+
 ##
 - **Track C's estimated payoff (3-8%, never measured) remains unverified**, and this attempt didn't
   move that number either way — it failed before reaching a state where timing could be measured.

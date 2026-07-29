@@ -449,8 +449,9 @@ its own saved registers at **936-942**. The item is computed in x0-x7 and could 
   (2026-07-27) hung on first JIT-mode hash with the identical code changes — root cause never
   identified. This attempt succeeded: all tests pass, including a new data-flow diagnostic test
   (`test_jit_dataset_light`, 2500 seed/item pairs against C++ reference), KATs, JIT equivalence
-  (16/16), determinism, and full mining suite. Expected payoff 3-8% on the instruction-count
-  axis, not yet measured. Code shipped in commit 341ebf8.
+  (16/16), determinism, and full mining suite. Measured impact: **zero** — caller-frame
+  saving (4 instructions/call) is 0.05% of ~134M instructions/hash, lost in noise. Code
+  shipped in commit 341ebf8, but Phase B must target the callee frame or shared code.
 - Phase B — direct result mixing (skip the store/reload relay entirely). **Not attempted; also
   turns out to be substantially harder than originally scoped** — found during Phase A's design
   work that the superscalar computation's working registers (`rl[0..7]`) are hard-wired to the
