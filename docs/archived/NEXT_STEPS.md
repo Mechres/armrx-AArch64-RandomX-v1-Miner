@@ -1,6 +1,9 @@
 # Next Steps Task List
 
-**Updated:** 2026-07-29
+> **⚠️ ARCHIVED (2026-07-30).** All tracks completed or closed.
+> See [`RETROSPECTIVE.md`](../../RETROSPECTIVE.md) for the full project narrative.
+
+**Updated:** 2026-07-29 (archived)
 **HEAD:** see `git log` for current
 **Devbox:** 192.168.10.156
 

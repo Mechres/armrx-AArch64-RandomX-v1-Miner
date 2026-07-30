@@ -1,10 +1,12 @@
 # armrx — Status Tracker
 
 > **Status tracker for completed and remaining work.**
-> For the strategic master plan with ranked priorities, see [`PLAN.md`](PLAN.md) (current: Phase 13 shipped;
-> open backlog tracked in [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)).
+> For the full project retrospective covering all 210 commits and 10 performance tracks
+> (A–J), see [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
+> For the still-active strategic master plan, see
+> [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md).
 > For the chronological record, see [`changelogs.md`](changelogs.md).
-> For the full narrative behind everything already completed, see
+> For superseded phase narratives, see
 > [`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md) (Phases 1–5),
 > [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6), and
 > [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) (Phase 7).
@@ -228,7 +230,7 @@
 | Doc | Description |
 |-----|-------------|
 | [`docs/experiments/branchless-cbranch.md`](docs/experiments/branchless-cbranch.md) | CBRANCH misprediction analysis, imm19 bug root cause, BTB aliasing caveat |
-| [`docs/plans/peephole-jit-plan.md`](docs/plans/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
+| [`docs/archived/plans/peephole-jit-plan.md`](docs/archived/plans/peephole-jit-plan.md) | Detailed Phase 3 plan: frequency data, allocation spot-check, per-opcode audit, hashrate veto |
 | [`docs/archived/next_phase_v3.md`](docs/archived/next_phase_v3.md) | Archived next-phase improvement plan (v3) — superseded by PLAN.md |
 | [`docs/archived/next_phase_v2.md`](docs/archived/next_phase_v2.md) | Archived next-phase improvement plan (v2) |
 
@@ -347,9 +349,9 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/experiments/memory-op-scheduler-attempt.md`](docs/experiments/memory-op-scheduler-attempt.md) | Emitter scheduler extended to `*_M` opcodes, caused a real JIT/interpreter divergence, reverted (mechanism not identified), 2026-07-25 |
 | [`docs/experiments/isolcpus-rt-priority-win.md`](docs/experiments/isolcpus-rt-priority-win.md) | `isolcpus`/`rcu_nocbs` deployment tuning — real ~14% hashrate win, biggest in project history, 2026-07-25 |
 | [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) | Full narrative for every completed Phase 7 item, split out of `PLAN.md` 2026-07-25 |
-| [`docs/plans/performance-plan-20260725.md`](docs/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the main VM program's 2.2× IPC penalty — **closed 2026-07-26**, Step 1 result was small, closing Steps 2-3 unattempted |
+| [`docs/archived/plans/performance-plan-20260725.md`](docs/archived/plans/performance-plan-20260725.md) | Gated, evidence-first plan against the main VM program's 2.2× IPC penalty — **closed 2026-07-26**, Step 1 result was small, closing Steps 2-3 unattempted |
 | [`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md) | Step 1's result: forcing the scratchpad L1-resident only recovers +6.07% IPC — the penalty is mostly architectural, not memory-latency |
-| [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative backlog covering other regions (superscalar, C++ overhead, cross-cutting) — **worked to full closure 2026-07-26**, nothing unaddressed remains |
+| [`docs/archived/plans/experimental-performance-ideas-20260725.md`](docs/archived/plans/experimental-performance-ideas-20260725.md) | Speculative backlog covering other regions (superscalar, C++ overhead, cross-cutting) — **worked to full closure 2026-07-26**, nothing unaddressed remains |
 | [`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`](docs/experiments/superscalar-imul-rcp-preassignment-attempt.md) | Superscalar `IMUL_RCP` register pre-assignment — root-caused, closed for now (not permanently), 2026-07-26 |
 | [`docs/experiments/d2-hash-fill-pipeline.md`](docs/experiments/d2-hash-fill-pipeline.md) | Track D2 cross-hash pipelining — implemented, verified correct on host, not bench'd |
 | [`docs/plans/mid-high-risk-performance-ideas-20260726.md`](docs/plans/mid-high-risk-performance-ideas-20260726.md) | Tracking doc for correctness-risky performance work, opened after the low-risk backlog closed; ranked Tier 1-3 by evidence alignment |

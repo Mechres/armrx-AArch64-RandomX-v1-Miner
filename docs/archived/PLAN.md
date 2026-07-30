@@ -1,6 +1,11 @@
 # armrx — Master Update and Improvement Plan
 
-This document is the live master plan for the `armrx` RandomX AArch64 miner — the *open* work
+> **⚠️ ARCHIVED (2026-07-30).** All tracks A–J from the master plan are completed or closed.
+> See [`RETROSPECTIVE.md`](../../RETROSPECTIVE.md) for the full project narrative and
+> [`docs/plans/20260727/master-plan-20260727.md`](../../docs/plans/20260727/master-plan-20260727.md)
+> for the still-active strategic reference.
+
+This document is an archived historical record of what was once the live master plan. The open work
 only. It used to also carry the full narrative for every completed phase; that grew to 400+
 lines of 100%-done history sitting in front of the actually-open work, so it was split out
 2026-07-24 into **[`docs/archived/plan_completed_phases_1-5.md`](docs/archived/plan_completed_phases_1-5.md)**,

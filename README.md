@@ -144,17 +144,17 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
 
 | Doc | What it's for |
 |---|---|
-| [`PLAN.md`](PLAN.md) | Live master plan — genuinely open work only. Start here for "what's next." |
+| [`RETROSPECTIVE.md`](RETROSPECTIVE.md) | Full project retrospective — 210 commits, 18 days, 10 performance tracks. Start here. |
 | [`ROADMAP.md`](ROADMAP.md) | Status tracker — completed/remaining item tables, hardware baseline. |
-| [`NEXT_STEPS.md`](NEXT_STEPS.md) | Short-list actionable view of the current phase. |
+| [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
 | [`changelogs.md`](changelogs.md) | Chronological, dated record of every change and why it was made. |
 | [`docs/audits/`](docs/audits/) | Correctness, security, and performance audits (internal and third-party). |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
-| [`docs/plans/`](docs/plans/) | Forward-looking performance plans: [gated plan](docs/plans/performance-plan-20260725.md) and [speculative backlog](docs/plans/experimental-performance-ideas-20260725.md), if performance work resumes. |
+| [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. See RETROSPECTIVE.md for the summary. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
 | [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives ([Phases 1–5](docs/archived/plan_completed_phases_1-5.md), [Phase 6](docs/archived/plan_phase6_completed.md), [Phase 7](docs/archived/plan_phase7_completed.md)) and old plans. |
 
-`PLAN.md` used to carry the full narrative for every completed phase inline; once a phase's
-narrative grows past a few hundred lines it gets split into `docs/archived/`, keeping `PLAN.md`
-itself focused on what's actually still open. Read `PLAN.md` for what's open, the archives for
+`RETROSPECTIVE.md` carries the full narrative for every phase. The master plan at
+`docs/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
+Archived phase narratives are in `docs/archived/plan_completed_phases_1-5.md` (Phases 1–5),
 the full why-and-how behind everything already shipped.

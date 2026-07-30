@@ -130,10 +130,10 @@ disabled silently.
 
 ## Project docs & maintenance discipline
 
-- `NEXT_STEPS.md` — current prioritized todo list; check before starting new work.
-- `PLAN.md` / `ROADMAP.md` — longer-range plan and status tracking. Phases 1 through 8 are all
-  fully resolved (2026-07-25; Phases 1–5, 6, and 7 archived into `docs/archived/`, Phase 8's
-  result kept in `docs/experiments/isolcpus-rt-priority-win.md`). No genuinely open item remains.
+- `RETROSPECTIVE.md` — full project retrospective (210 commits, 18 days, 10 tracks). Start here.
+- `docs/plans/20260727/master-plan-20260727.md` — still-active strategic master plan.
+- `ROADMAP.md` — status tracker, completed/remaining items. Phases 1 through 8 are all
+  fully resolved.
 - **Performance context** — the device runs light mode (2 GiB RAM). armrx is at ~90% of XMRig
   per-cluster. `tools/jit_correlate.py`'s opcode-level cycle correlation (2026-07-25) found the main
   per-hash VM program region carries ~9% of dynamic instructions but ~20% of cycles — a ~2.2× IPC
@@ -143,8 +143,8 @@ disabled silently.
   project has tried has failed or regressed (CSEL, Newton-Raphson, NEON AES ×3, superscalar
   literal-pool relayout, `IMUL_RCP` literal-load elimination). The natural follow-on — extending the
   emitter scheduler to hide this region's memory-op stalls — was tried and reverted (see the
-  scheduler note above). See `docs/plans/performance-plan-20260725.md` (gated steps) and
-  `docs/plans/experimental-performance-ideas-20260725.md` (speculative backlog) for where the
+  scheduler note above). See `docs/archived/plans/performance-plan-20260725.md` (gated steps) and
+  `docs/archived/plans/experimental-performance-ideas-20260725.md` (speculative backlog) for where the
   evidence points if code-level performance work resumes.
 - **`isolcpus`/`rcu_nocbs` deployment win (2026-07-25)** — a real ~14% aggregate hashrate win
   (~28.4 vs. ~24.9 H/s, 8 workers), the biggest measured in this project's history, from adding
