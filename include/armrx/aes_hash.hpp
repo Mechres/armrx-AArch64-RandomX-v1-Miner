@@ -20,4 +20,16 @@ void hash_aes_1r_x4(std::span<const std::byte> input, AesState& hash);
 // Combines hash and fill operations on the scratchpad
 void hash_and_fill_aes_1r_x4(std::span<std::byte> scratchpad, AesState& hash, AesState& fill_state);
 
+/// Interleaved hash+fill across two different scratchpads (Track D2).
+/// Reads blocks from `hash_scratchpad` (current hash's data) and writes
+/// fill output to `fill_scratchpad` (next hash's scratchpad) in lockstep.
+/// Produces the same result as calling hash_aes_1r_x4 + fill_aes_1r_x4 separately.
+/// Both spans must be the same size and 64-byte aligned.
+void hash_and_fill_aes_interleaved_x4(
+    std::span<const std::byte> hash_scratchpad,
+    std::span<std::byte> fill_scratchpad,
+    AesState& hash_state,
+    AesState& fill_state
+);
+
 } // namespace armrx

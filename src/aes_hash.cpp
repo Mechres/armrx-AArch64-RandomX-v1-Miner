@@ -369,4 +369,143 @@ void hash_and_fill_aes_1r_x4(std::span<std::byte> scratchpad, AesState& hash, Ae
     write_block(hash, 3, hs3);
 }
 
+void hash_and_fill_aes_interleaved_x4(
+    std::span<const std::byte> hash_scratchpad,
+    std::span<std::byte> fill_scratchpad,
+    AesState& hash_state,
+    AesState& fill_state
+) {
+    ARMRX_ASSERT(hash_scratchpad.size() == fill_scratchpad.size(),
+                 "hash and fill scratchpads must be the same size");
+    ARMRX_ASSERT(hash_scratchpad.size() % 64 == 0,
+                 "scratchpad size must be multiple of 64");
+    AesBlock hs0 = hash_state_0;
+    AesBlock hs1 = hash_state_1;
+    AesBlock hs2 = hash_state_2;
+    AesBlock hs3 = hash_state_3;
+
+    AesBlock fs0 = read_block(fill_state, 0);
+    AesBlock fs1 = read_block(fill_state, 1);
+    AesBlock fs2 = read_block(fill_state, 2);
+    AesBlock fs3 = read_block(fill_state, 3);
+
+    for (std::size_t offset = 0; offset < hash_scratchpad.size(); offset += 64) {
+        AesBlock sp0 = read_block_from_span(hash_scratchpad, offset + 0);
+        AesBlock sp1 = read_block_from_span(hash_scratchpad, offset + 16);
+        AesBlock sp2 = read_block_from_span(hash_scratchpad, offset + 32);
+        AesBlock sp3 = read_block_from_span(hash_scratchpad, offset + 48);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(ARMRX_ENABLE_NEON_TTABLE_AES)
+        // Hash phase: s0=encrypt, s1=decrypt, s2=encrypt, s3=decrypt with input blocks as keys
+        hs0 = encrypt_transform(hs0);
+        hs1 = decrypt_transform(hs1);
+        hs2 = encrypt_transform(hs2);
+        hs3 = decrypt_transform(hs3);
+        {
+            const uint8x16_t k0 = vld1q_u8(reinterpret_cast<const uint8_t*>(sp0.data()));
+            const uint8x16_t k1 = vld1q_u8(reinterpret_cast<const uint8_t*>(sp1.data()));
+            const uint8x16_t k2 = vld1q_u8(reinterpret_cast<const uint8_t*>(sp2.data()));
+            const uint8x16_t k3 = vld1q_u8(reinterpret_cast<const uint8_t*>(sp3.data()));
+            uint8x16_t v0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs0.data())), k0);
+            uint8x16_t v1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs1.data())), k1);
+            uint8x16_t v2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs2.data())), k2);
+            uint8x16_t v3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs3.data())), k3);
+            vst1q_u8(reinterpret_cast<uint8_t*>(hs0.data()), v0);
+            vst1q_u8(reinterpret_cast<uint8_t*>(hs1.data()), v1);
+            vst1q_u8(reinterpret_cast<uint8_t*>(hs2.data()), v2);
+            vst1q_u8(reinterpret_cast<uint8_t*>(hs3.data()), v3);
+        }
+        // Fill phase: s0=decrypt, s1=encrypt, s2=decrypt, s3=encrypt with fixed keys
+        fs0 = decrypt_transform(fs0);
+        fs1 = encrypt_transform(fs1);
+        fs2 = decrypt_transform(fs2);
+        fs3 = encrypt_transform(fs3);
+        {
+            const uint8x16_t fk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(kAesGen1RKey0.data()));
+            const uint8x16_t fk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(kAesGen1RKey1.data()));
+            const uint8x16_t fk2 = vld1q_u8(reinterpret_cast<const uint8_t*>(kAesGen1RKey2.data()));
+            const uint8x16_t fk3 = vld1q_u8(reinterpret_cast<const uint8_t*>(kAesGen1RKey3.data()));
+            uint8x16_t v0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(fs0.data())), fk0);
+            uint8x16_t v1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(fs1.data())), fk1);
+            uint8x16_t v2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(fs2.data())), fk2);
+            uint8x16_t v3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(fs3.data())), fk3);
+            vst1q_u8(reinterpret_cast<uint8_t*>(fs0.data()), v0);
+            vst1q_u8(reinterpret_cast<uint8_t*>(fs1.data()), v1);
+            vst1q_u8(reinterpret_cast<uint8_t*>(fs2.data()), v2);
+            vst1q_u8(reinterpret_cast<uint8_t*>(fs3.data()), v3);
+        }
+#else
+        hs0 = aes_encrypt_round(hs0, sp0);
+        hs1 = aes_decrypt_round(hs1, sp1);
+        hs2 = aes_encrypt_round(hs2, sp2);
+        hs3 = aes_decrypt_round(hs3, sp3);
+
+        fs0 = aes_decrypt_round(fs0, kAesGen1RKey0);
+        fs1 = aes_encrypt_round(fs1, kAesGen1RKey1);
+        fs2 = aes_decrypt_round(fs2, kAesGen1RKey2);
+        fs3 = aes_encrypt_round(fs3, kAesGen1RKey3);
+#endif
+
+        write_block_to_span(fill_scratchpad, offset + 0, fs0);
+        write_block_to_span(fill_scratchpad, offset + 16, fs1);
+        write_block_to_span(fill_scratchpad, offset + 32, fs2);
+        write_block_to_span(fill_scratchpad, offset + 48, fs3);
+    }
+
+    write_block(fill_state, 0, fs0);
+    write_block(fill_state, 1, fs1);
+    write_block(fill_state, 2, fs2);
+    write_block(fill_state, 3, fs3);
+
+#if defined(__aarch64__) && defined(__ARM_NEON) && defined(ARMRX_ENABLE_NEON_TTABLE_AES)
+    // Finalization round 1
+    hs0 = encrypt_transform(hs0);
+    hs1 = decrypt_transform(hs1);
+    hs2 = encrypt_transform(hs2);
+    hs3 = decrypt_transform(hs3);
+    {
+        const uint8x16_t k0 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_0.data()));
+        uint8x16_t v0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs0.data())), k0);
+        uint8x16_t v1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs1.data())), k0);
+        uint8x16_t v2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs2.data())), k0);
+        uint8x16_t v3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs3.data())), k0);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs0.data()), v0);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs1.data()), v1);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs2.data()), v2);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs3.data()), v3);
+    }
+    // Finalization round 2
+    hs0 = encrypt_transform(hs0);
+    hs1 = decrypt_transform(hs1);
+    hs2 = encrypt_transform(hs2);
+    hs3 = decrypt_transform(hs3);
+    {
+        const uint8x16_t k1 = vld1q_u8(reinterpret_cast<const uint8_t*>(hash_xkey_1.data()));
+        uint8x16_t v0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs0.data())), k1);
+        uint8x16_t v1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs1.data())), k1);
+        uint8x16_t v2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs2.data())), k1);
+        uint8x16_t v3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(hs3.data())), k1);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs0.data()), v0);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs1.data()), v1);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs2.data()), v2);
+        vst1q_u8(reinterpret_cast<uint8_t*>(hs3.data()), v3);
+    }
+#else
+    hs0 = aes_encrypt_round(hs0, hash_xkey_0);
+    hs1 = aes_decrypt_round(hs1, hash_xkey_0);
+    hs2 = aes_encrypt_round(hs2, hash_xkey_0);
+    hs3 = aes_decrypt_round(hs3, hash_xkey_0);
+
+    hs0 = aes_encrypt_round(hs0, hash_xkey_1);
+    hs1 = aes_decrypt_round(hs1, hash_xkey_1);
+    hs2 = aes_encrypt_round(hs2, hash_xkey_1);
+    hs3 = aes_decrypt_round(hs3, hash_xkey_1);
+#endif
+
+    write_block(hash_state, 0, hs0);
+    write_block(hash_state, 1, hs1);
+    write_block(hash_state, 2, hs2);
+    write_block(hash_state, 3, hs3);
+}
+
 } // namespace armrx

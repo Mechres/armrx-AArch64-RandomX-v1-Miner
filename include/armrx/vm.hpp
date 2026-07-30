@@ -94,6 +94,15 @@ public:
     [[nodiscard]] const RegisterFile& get_register_file() const { return reg_; }
     [[nodiscard]] const std::byte* get_scratchpad() const { return scratchpad_data_; }
 
+    /// Replace the active scratchpad pointer/size. Used by the pipelined
+    /// hash path (Track D2) to switch between double-buffered scratchpads.
+    /// Frees the previously-owned (mmap'd) scratchpad. The new pointer must
+    /// be managed by the caller (the VM destructor does not free it).
+    void set_scratchpad(std::byte* ptr, std::size_t size);
+    [[nodiscard]] std::span<const std::byte> scratchpad_span() const {
+        return std::span<const std::byte>(scratchpad_data_, scratchpad_size_);
+    }
+
 #ifdef ARMRX_HAVE_JIT
     // Bench-only: re-invoke the JIT program compiled by the most recent run()
     // call against the current register/scratchpad state, without generating
@@ -220,6 +229,9 @@ private:
     // Registers
     RegisterFile reg_{};
 
+    // Track whether scratchpad_data_ is owned by this VM (mmap'd) or external
+    bool scratchpad_owned_ = true;
+
     // Compiled Bytecode & Program
     Program program_{};
     std::array<std::uint64_t, 16> entropy_{};
@@ -253,5 +265,22 @@ private:
 
 // Top-level public interface for hash calculations
 void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::size_t input_size, void* output);
+
+/// Pipelined hash: computes the current hash while simultaneously filling
+/// the next hash's scratchpad (Track D2 — cross-hash boundary pipelining).
+/// \param machine        VM instance (scratchpad set to *current* hash's data)
+/// \param input          current nonce's block template
+/// \param input_size     size of current input
+/// \param output         32-byte hash output for current nonce
+/// \param next_input     next nonce's block template
+/// \param next_input_size  size of next input
+/// \param next_scratchpad  2 MiB buffer to fill for next hash's VM execution
+/// \param next_seed_out   64-byte output: seed for first run() on next_scratchpad
+void randomx_calculate_hash_pipelined(
+    VirtualMachine* machine,
+    const void* input, std::size_t input_size, void* output,
+    const void* next_input, std::size_t next_input_size,
+    std::byte* next_scratchpad, void* next_seed_out
+);
 
 } // namespace armrx

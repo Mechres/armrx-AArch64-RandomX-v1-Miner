@@ -9,7 +9,13 @@
 > [`docs/archived/plan_phase6_completed.md`](docs/archived/plan_phase6_completed.md) (Phase 6), and
 > [`docs/archived/plan_phase7_completed.md`](docs/archived/plan_phase7_completed.md) (Phase 7).
 
-> **Current status (2026-07-30):** Track G (NEON T-table AES AddRoundKey) done — **+28.8% AES
+> **Current status (2026-07-30):** Track D2 (cross-hash pipelining) implemented,
+> verified correct on host — overlaps AES finalization of hash N with AES fill of
+> hash N+1 via `hash_and_fill_aes_interleaved_x4`. Three correctness bugs fixed
+> during integration (pipeline reset on job change, nonce tracking, VM destructor
+> double-munmap). All host KATs pass. On-device A/B benchmark not completed (fast-mode
+> dataset init too slow on 1.4 GiB RAM). Estimated ~0.5–1% hashrate gain.
+> Track G (NEON T-table AES AddRoundKey) done — **+28.8% AES
 > primitive throughput**, projected ~3.6% full-workload gain. Gated behind
 > `ARMRX_ENABLE_NEON_TTABLE_AES` (default OFF). Track B Gates A+B (hybrid partial dataset) done
 > — JIT crash fixed, verified correct, and measured: **−31% at 8 workers on this device, not
@@ -345,6 +351,7 @@ _All items found in the `PLAN.md` Phase 4 fresh-codebase inspection are now fixe
 | [`docs/experiments/scratchpad-locality-bound-20260726.md`](docs/experiments/scratchpad-locality-bound-20260726.md) | Step 1's result: forcing the scratchpad L1-resident only recovers +6.07% IPC — the penalty is mostly architectural, not memory-latency |
 | [`docs/plans/experimental-performance-ideas-20260725.md`](docs/plans/experimental-performance-ideas-20260725.md) | Speculative backlog covering other regions (superscalar, C++ overhead, cross-cutting) — **worked to full closure 2026-07-26**, nothing unaddressed remains |
 | [`docs/experiments/superscalar-imul-rcp-preassignment-attempt.md`](docs/experiments/superscalar-imul-rcp-preassignment-attempt.md) | Superscalar `IMUL_RCP` register pre-assignment — root-caused, closed for now (not permanently), 2026-07-26 |
+| [`docs/experiments/d2-hash-fill-pipeline.md`](docs/experiments/d2-hash-fill-pipeline.md) | Track D2 cross-hash pipelining — implemented, verified correct on host, not bench'd |
 | [`docs/plans/mid-high-risk-performance-ideas-20260726.md`](docs/plans/mid-high-risk-performance-ideas-20260726.md) | Tracking doc for correctness-risky performance work, opened after the low-risk backlog closed; ranked Tier 1-3 by evidence alignment |
 | [`docs/experiments/main-scheduler-window-widening-20260726.md`](docs/experiments/main-scheduler-window-widening-20260726.md) | Main VM program scheduler 4-instruction fallback window — adopted, +0.156% IPC avg, 2026-07-26 |
 | [`docs/archived/future-performance-ideas-20260725.md`](docs/archived/future-performance-ideas-20260725.md) | Superseded first-pass future-ideas doc — content merged into the two docs above |

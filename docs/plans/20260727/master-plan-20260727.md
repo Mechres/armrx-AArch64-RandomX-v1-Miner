@@ -506,7 +506,8 @@ tradeoff is worse, not better, for interleaved emission here.
 the much larger full-VM interleave won't either.
 
 **D2 — Cross-hash boundary-only pipelining** *(Sonnet-R2 E2, the fallback if D3's liveness check is
-bad)*. Overlap only the *tail* of hash N (AES finalization/result compression — short, fixed,
+bad)*. ✅ **IMPLEMENTED (2026-07-30)** — see `docs/experiments/d2-hash-fill-pipeline.md`.
+Overlap only the *tail* of hash N (AES finalization/result compression — short, fixed,
 low-register-pressure) with the *head* of hash N+1 (scratchpad fill from blake2b — also short,
 load/store-heavy, no VM register-file dependency). Much smaller ceiling than D3 (a few percent of
 the main-program region's cycle share) but much smaller register-pressure risk, since neither
@@ -845,7 +846,8 @@ Track D1 (cheap 2-way superscalar interleave) ── 🍅 CONCLUDED: NEGATIVE (6
   │
   └─→ D3 contraindicated by this result — see `docs/experiments/track-d1-bench-1way-hang-status.md`
 
-Track D2 (boundary pipelining)           ── depends on nothing above beyond accepting D1's result
+Track D2 (boundary pipelining)           ── 🟢 IMPLEMENTED (2026-07-30): correct on host,
+                                              not yet benchmarked on-device
 
 Track G (NEON T-table AES gather)      ── independent, start once flag scaffold exists
 Track I (worker/core-0 cost)           ── independent, operational, land anytime
@@ -884,7 +886,7 @@ Track E, F, H, J                       ── each gated as noted above; lowest 
 4. **Track D1 — 🍅 CONCLUDED: NEGATIVE** (2026-07-29, see above). The cheap 2-way superscalar interleave causes ~66× more L1I refills (−1.2% IPC) on this core — clean negative result.
 5. **Track G (NEON T-table AES)** — independent axis, can be developed in parallel with any of the
    above once a flag scaffold exists; targets the single largest named C++ cost (12.3% of cycles).
-6. **Track F, Track E, Track D2/D3, Track H, Track J** — in roughly that order, each strictly gated
+6. **Track F, Track E, Track D3, Track H, Track J** — in roughly that order, each strictly gated
    on its diagnostic prerequisite from Track A or on an earlier track's measured result. Track F
    specifically should stay deprioritized per item 1's result above unless new evidence surfaces.
 7. **Track I (core-0 cost)** — independent, operational, no dependency on anything above; land

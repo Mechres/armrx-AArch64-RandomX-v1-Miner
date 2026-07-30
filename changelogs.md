@@ -1,5 +1,106 @@
 # Changelog
 
+## 2026-07-30 — Track D2: Cross-hash boundary pipelining — implemented, verified, not yet benchmarked on-device
+
+### Context
+The AES finalization (hash_aes_1r_x4, reads scratchpad) and AES fill (fill_aes_1r_x4,
+writes scratchpad) are independent per-hash operations (~12.3% of cycles each) that
+ran sequentially with no data dependency. Track D2 overlaps hash N's AES finalization
+with hash N+1's AES fill to hide memory latency on this in-order Cortex-A53.
+
+### What was implemented
+Implementation by Reasonix (DeepSeek CLI) per the plan at
+`docs/plans/d2-pipelined-hash-fill-plan-20260730.md`. Three correctness bugs found
+during integration (see below); all fixed by Hermes.
+
+**Files changed** (6 files, +420/−22):
+- `include/armrx/aes_hash.hpp` (+12): Declare `hash_and_fill_aes_interleaved_x4`
+- `src/aes_hash.cpp` (+139): Implement — reads from hash_scratchpad (const), writes to
+  fill_scratchpad, both NEON and scalar T-table paths
+- `include/armrx/vm.hpp` (+29): Add `set_scratchpad` (munmaps old owned buffer,
+  takes external pointer), `scratchpad_span()`, `randomx_calculate_hash_pipelined`
+  declaration; add `bool scratchpad_owned_` tracking member
+- `src/vm.cpp` (+78): Implement `randomx_calculate_hash_pipelined` (Parts A–F) and
+  `set_scratchpad` method body
+- `src/mining_engine.cpp` (+127): Double-buffered 2 MiB scratchpads, primed pipeline,
+  alternating hash+fill / VM-execution phases; job-change pipeline reset, nonce tracking
+- `include/armrx/vm.hpp` (+1), `src/vm.cpp` (+1): Fix latent destructor bug — VM
+  destructor now only `munmap`s scratchpad if owned (not external buffer)
+
+### Bugs found and fixed
+
+1. **Pipeline state not reset on job change** — After `set_job()`, `pipelined_active`
+   stayed `true` with stale `block_input` buffer content. The next pipelined hash
+   would write wrong nonce bytes and produce incorrect output. Fixed by resetting
+   `pipelined_active`, `local_nonce`, and `current_nonce` at the job-change site.
+
+2. **Nonce tracking mismatch** — The pipelined path used `nonce` (the *next* nonce
+   after advancement) in the share callback instead of the actual nonce in `block_input`.
+   The prime path had a latent double-advancement bug where `block_input`'s nonce was
+   overwritten before both hash+fill and finalization steps. Fixed by adding
+   `current_nonce` tracking what's actually in `block_input` at each step.
+
+3. **VM destructor double-munmap** — The VM destructor unconditionally called `munmap`
+   on `scratchpad_data_`, but the pipelined mining engine replaced this pointer with
+   an externally-owned `new[]` buffer via `set_scratchpad()`. Fixed by adding
+   `bool scratchpad_owned_` (default `true`); `set_scratchpad()` sets it to `false`;
+   destructor only `munmap`s when owned.
+
+### Device OOM crash during build
+The initial on-device build ran with the default `-j` (8 parallel jobs) on the
+1.4 GiB RAM + 2.8 GiB zram device. Each GCC worker consumes ~200+ MiB during C++
+compilation, overwhelming the RAM budget and causing such severe swap thrashing
+that SSH connectivity was lost — required a **hard power reset** (pulling the plug).
+
+**Resolution:** Rebuilt with `-j2` (verified safe: peak swap usage 27 MiB of 2.8 GiB).
+Build completed cleanly in ~8 minutes. This OOM incident is now a documented constraint:
+**always use `-j2` or lower for on-device builds.**
+
+### Verification
+- Full host build: clean (x86_64)
+- `test_aes_hash` (host): all 4 passed, including fused vs separate-call parity
+- `test_mining` (host, 214s): ALL MINING TESTS PASSED SUCCESSFULLY — pipeline
+  path exercised by lifecycle, bad-nonce-recovery, dataset-reinit, and stop-race tests
+- `test_aes_hash` (device): passed
+- `test_mining` (device): **not completed** — the fast-mode dataset initialization
+  (2080 MiB) takes 3-5+ minutes per test case on 1.4 GiB RAM, and the full suite
+  attempts multiple dataset cycles. Killed after 15+ minutes still in first lifecycle
+  test's init phase. The host result is taken as authoritative for correctness.
+- On-device build with `-j2`: **clean** (no warnings or errors)
+- No JIT files or scratch_vm_study/ touched
+
+### Expected impact
+~0.5–1% hashrate. Not confirmed on-device — an A/B benchmark would require a
+dedicated microbenchmark for the interleaved function (avoiding full 2080 MiB dataset
+init) or modifying the test infrastructure to exercise the pipeline path in light mode.
+
+### Documentation
+- `docs/experiments/d2-hash-fill-pipeline.md` — full experiment writeup
+- `docs/plans/d2-pipelined-hash-fill-plan-20260730.md` — implementation brief
+- `docs/plans/20260727/master-plan-20260727.md` — Track D2 marked implemented
+- `ROADMAP.md` — status callout updated
+- `README.md` — D2 status entry added
+
+## 2026-07-30 — Track F3 premise test: NEON multiply latency vs scalar on Cortex-A53
+
+### Context
+Track F3 (NEON-multiply offload for IMUL_R/IMUL_RCP) gated on a measurement: does NEON
+`mul v.4s`/`umull v.2d` have competitive latency with scalar `mul`/`umulh` on Cortex-A53?
+IMUL_R (20.98%) + IMUL_RCP (14.30%) = >35% of cycles, the single largest sink.
+
+### Finding
+**NEON mul latency ≈ scalar mul latency** (both CPI ≈1.01 in RAW chain). NEON processes 2–4×
+the data per instruction. `umulh` is the outlier at CPI 1.51 (+2 cy/instr penalty vs `mul`).
+
+### Gate decision
+**PASS** — latency is not a blocker. However, the 64-bit vs 32-bit lane mismatch
+(no native 64-bit NEON multiply) means a lane-parallel transform must be designed
+before offload is possible. Closed as premise-confirmed.
+
+### Files
+- `tools/bench/mul_latency_bench.c` (rewritten: fix NEON asm, keep state in SIMD regs)
+- `docs/experiments/f3-neon-mul-latency-test.md` (full writeup)
+
 ## 2026-07-30 — Track G: NEON T-table AES AddRoundKey vectorization — **+28.8% AES primitive throughput**
 
 ### Context

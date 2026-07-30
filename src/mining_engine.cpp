@@ -2,6 +2,7 @@
 #include "armrx/cpu_features.hpp"
 #include "armrx/dataset.hpp"
 #include "armrx/randomx_config.hpp"
+#include "armrx/blake2b.hpp"
 #include <iostream>
 #include <cstring>
 #include <fstream>
@@ -376,6 +377,15 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 #endif
     VirtualMachine vm(flags);
 
+    // Track D2: double-buffered scratchpads for pipelined hash+fill
+    constexpr std::size_t kScratchpadSize = 2ULL * 1024 * 1024;
+    auto dual_scratchpad = std::make_unique<std::byte[]>(kScratchpadSize * 2);
+    std::byte* sp[2] = { dual_scratchpad.get(), dual_scratchpad.get() + kScratchpadSize };
+    int sp_fill = 0;
+    bool pipelined_active = false;
+    // Start VM with sp[0] as active scratchpad (replaces VM's own allocation)
+    vm.set_scratchpad(sp[0], kScratchpadSize);
+
     std::shared_ptr<Argon2dCache> active_cache;
     std::shared_ptr<MappedMemory> active_dataset;
     Job local_job;
@@ -388,6 +398,8 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
     std::vector<std::byte> block_input;
+    // Nonce tracked in block_input for pipelined mode
+    std::uint64_t current_nonce = 0;
 
     while (running_.load(std::memory_order_relaxed)) {
         // Live dataset (re)initialization: participate directly instead of
@@ -447,6 +459,14 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 // Copy block template to per-worker buffer (only on job change)
                 block_input = local_job.block_template;
 
+                // Reset pipelined state: the job change invalidates the current
+                // pipeline's buffer roles, nonce tracking, and block_input content.
+                // The next hash goes through the standard (prime) path, which
+                // correctly reinitializes the pipeline for the new job.
+                pipelined_active = false;
+                local_nonce = static_cast<std::uint64_t>(thread_id);
+                current_nonce = 0;
+
                 vm.set_cache(active_cache.get());
                 // Hybrid partial dataset: pass to VM if configured.
                 // Always pass even if current item_count_ is 0 — the JIT
@@ -473,33 +493,98 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         }
 
         // Partitioned nonce: each worker uses its own counter with stride = num_threads_
-        // No shared atomic needed — workers never overlap
-        std::uint64_t nonce = local_nonce;
-        local_nonce += num_threads_;
-
-        // Copy template to per-worker buffer (only actually reallocates on job change)
-        if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
-            ARMRX_LOG_ERROR << "Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
-                      << " size=" << local_job.nonce_size << " in job, deactivating";
-            // Deactivate and go back to the top of the loop (matching every
-            // other bad-state path above, e.g. the dataset-size-mismatch
-            // case) rather than returning — a `return` here would exit
-            // worker_loop() entirely and permanently kill this thread for
-            // the rest of the process's life over a single bad job, instead
-            // of just idling until job_generation_ advances to a new
-            // (hopefully valid) job.
-            active = false;
-            continue;
+        // No shared atomic needed — workers never overlap.
+        // In pipelined mode, block_input already has previous iteration's "next" nonce
+        // written into it. Only prime mode reads a fresh nonce from local_nonce.
+        std::uint64_t nonce;
+        if (!pipelined_active) {
+            nonce = local_nonce;
+            local_nonce += num_threads_;
+            if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
+                ARMRX_LOG_ERROR << "Worker " << thread_id << ": bad nonce offset=" << local_job.nonce_offset
+                          << " size=" << local_job.nonce_size << " in job, deactivating";
+                active = false;
+                continue;
+            }
+            // Track the nonce that's actually in block_input
+            current_nonce = nonce;
+        } else {
+            // Pipelined: block_input already has the current nonce from previous iteration.
+            // current_nonce was set in the previous iteration's advancement.
+            nonce = current_nonce;
         }
 
-        alignas(16) std::array<std::byte, 32> hash{};
-        randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
-        ++local_hashes;
+        // Copy template to per-worker buffer (only actually reallocates on job change)
+        // NOTE: In pipelined mode, this is a no-op — the template is already correct
+        // from the previous iteration. The nonce was written then.
 
-        if (meets_target(hash, local_job.target)) {
-            if (share_callback_) {
-                share_callback_(local_job, nonce, hash);
+        alignas(16) std::array<std::byte, 32> hash{};
+
+        if (!pipelined_active) {
+            // ── Prime: first hash ──
+            randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
+            ++local_hashes;
+
+            if (meets_target(hash, local_job.target)) {
+                if (share_callback_) {
+                    share_callback_(local_job, nonce, hash);
+                }
             }
+
+            // Advance to next nonce for first pipelined iteration,
+            // then let the next iteration's pipelined path handle it.
+            nonce = local_nonce;
+            local_nonce += num_threads_;
+            if (!update_nonce_in_template(block_input, nonce, local_job.nonce_offset, local_job.nonce_size)) {
+                active = false;
+                continue;
+            }
+            current_nonce = nonce;  // track what's in block_input
+
+            pipelined_active = true;
+            sp_fill = 1;  // first pipelined call: fill sp[1], VM stays on sp[0]
+        } else {
+            // ── Pipelined hash ──
+            // Pipeline structure:
+            //   Part A: blake2b(block_input) → fill VM's scratchpad → VM 8×
+            //   Parts B-D: blake2b(next_block) → AES hash VM's scratchpad + fill sp[sp_fill]
+            //   Part E: output hash for block_input's nonce
+            //   Part F: VM scratchpad = sp[sp_fill]
+            //
+            // After one pipelined call, VM is set up for the NEXT call's
+            // Part A on the other buffer — no additional VM run needed.
+
+            // Prepare next nonce's block template for the interleaved fill
+            std::uint64_t next_nonce = local_nonce;
+            local_nonce += num_threads_;
+            std::vector<std::byte> next_block = block_input;
+            if (!update_nonce_in_template(next_block, next_nonce, local_job.nonce_offset, local_job.nonce_size)) {
+                active = false;
+                continue;
+            }
+
+            alignas(16) std::array<std::byte, 64> next_seed{};
+            randomx_calculate_hash_pipelined(
+                &vm,
+                block_input.data(), block_input.size(), hash.data(),
+                next_block.data(), next_block.size(),
+                sp[sp_fill],
+                next_seed.data()
+            );
+            // After: VM scratchpad = sp[sp_fill] (filled from next_seed by Part D)
+            //        hash = output for block_input's nonce
+
+            ++local_hashes;
+            if (meets_target(hash, local_job.target)) {
+                if (share_callback_) {
+                    share_callback_(local_job, current_nonce, hash);
+                }
+            }
+
+            // Advance to next nonce and swap fill target
+            sp_fill = 1 - sp_fill;
+            block_input = std::move(next_block);
+            current_nonce = next_nonce;
         }
 
         // Flush local counter to shared atomic periodically

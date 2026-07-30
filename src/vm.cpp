@@ -158,11 +158,20 @@ VirtualMachine::VirtualMachine(std::uint32_t flags) : flags_(flags) {
 }
 
 VirtualMachine::~VirtualMachine() {
-    if (scratchpad_data_) {
+    if (scratchpad_data_ && scratchpad_owned_) {
         ::munmap(scratchpad_data_, scratchpad_size_);
         scratchpad_data_ = nullptr;
         scratchpad_size_ = 0;
     }
+}
+
+void VirtualMachine::set_scratchpad(std::byte* ptr, std::size_t size) {
+    if (scratchpad_data_ && scratchpad_owned_) {
+        ::munmap(scratchpad_data_, scratchpad_size_);
+    }
+    scratchpad_data_ = ptr;
+    scratchpad_size_ = size;
+    scratchpad_owned_ = false;
 }
 
 void VirtualMachine::set_cache(const Argon2dCache* cache) {
@@ -975,6 +984,73 @@ void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::siz
 
     machine->run(tempHash.data());
     machine->get_final_result(output);
+
+    std::fesetenv(&fpstate);
+}
+
+void randomx_calculate_hash_pipelined(
+    VirtualMachine* machine,
+    const void* input, std::size_t input_size, void* output,
+    const void* next_input, std::size_t next_input_size,
+    std::byte* next_scratchpad, void* next_seed_out
+) {
+    fenv_t fpstate;
+    std::fegetenv(&fpstate);
+
+    constexpr std::size_t scratchpad_size = 2ULL * 1024 * 1024;
+
+    // ── Part A: Compute current hash up to final VM run ──
+    // (fill scratchpad + 8× VM programs)
+    alignas(16) std::array<std::byte, 64> temp_hash{};
+    std::span<const std::byte> input_span(
+        reinterpret_cast<const std::byte*>(input), input_size);
+    blake2b(input_span, temp_hash.data(), 64);
+
+    machine->init_scratchpad(temp_hash.data());
+    machine->reset_rounding_mode();
+
+    alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
+    for (int chain = 0; chain < 7; ++chain) {
+        machine->run(temp_hash.data());
+        const auto& reg = machine->get_register_file();
+        std::memcpy(reg_bytes.data(), &reg, sizeof(reg));
+        blake2b(std::span<const std::byte>(reg_bytes), temp_hash.data(), 64);
+    }
+    machine->run(temp_hash.data());
+    // Now: scratchpad has VM execution results, reg_.a has initial AES hash state
+
+    // ── Part B: Prepare next hash's fill seed ──
+    alignas(16) std::array<std::byte, 64> next_seed{};
+    std::span<const std::byte> next_input_span(
+        reinterpret_cast<const std::byte*>(next_input), next_input_size);
+    blake2b(next_input_span, next_seed.data(), 64);
+
+    // Save seed for caller's run() sequence (fill modifies the AesState in place)
+    std::memcpy(next_seed_out, next_seed.data(), 64);
+
+    // ── Part C: Save hash state before interleave ──
+    RegisterFile current_reg = machine->get_register_file();
+    AesState hash_state;
+    static_assert(sizeof(current_reg.a) == sizeof(AesState),
+                  "RegisterFile.a must span exactly 64 bytes");
+    std::memcpy(hash_state.data(), &current_reg.a, sizeof(AesState));
+
+    // ── Part D: Interleaved AES hash + fill ──
+    hash_and_fill_aes_interleaved_x4(
+        machine->scratchpad_span(),
+        std::span<std::byte>(next_scratchpad, scratchpad_size),
+        hash_state, next_seed    // next_seed is consumed by fill
+    );
+
+    // ── Part E: Finalize current hash output ──
+    std::memcpy(&current_reg.a, hash_state.data(), sizeof(AesState));
+    alignas(16) std::array<std::byte, sizeof(RegisterFile)> final_reg_bytes{};
+    std::memcpy(final_reg_bytes.data(), &current_reg, sizeof(RegisterFile));
+    blake2b(std::span<const std::byte>(final_reg_bytes),
+            static_cast<std::byte*>(output), 32);
+
+    // ── Part F: Prepare VM for next hash's execution ──
+    machine->set_scratchpad(next_scratchpad, scratchpad_size);
 
     std::fesetenv(&fpstate);
 }
