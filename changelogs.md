@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-07-30 — Track G: NEON T-table AES AddRoundKey vectorization — **+28.8% AES primitive throughput**
+
+### Context
+`hash_aes_1r_x4`/`fill_aes_1r_x4` cost ~12.3% of all cycles — the single largest named
+C++ cost. The hardware AESE/AESD path is spec-incompatible (wrong AddRoundKey order) and
+the earlier `vtbl`/vector-permute NEON AES attempt measured **-19.4%** (tower-field SubBytes,
+flag-gated off). The untried approach: keep the scalar T-table algorithm untouched and only
+vectorize the AddRoundKey data-movement (load/load/XOR/store) via NEON intrinsics.
+
+### What was done
+Implementation by Reasonix (DeepSeek CLI), test-fix by Hermes, verified on-device.
+
+**Files changed** (4 files, +298):
+- `include/armrx/aes.hpp` (+61): New `encrypt_round_x4_neon` / `decrypt_round_x4_neon`
+  — same scalar `encrypt_transform`/`decrypt_transform`, NEON-batched AddRoundKey XOR.
+- `src/aes_hash.cpp` (+185): `fill_aes_1r_x4`, `hash_aes_1r_x4`, `hash_and_fill_aes_1r_x4`
+  gated on `ARMRX_ENABLE_NEON_TTABLE_AES` to call x4 NEON batch functions.
+- `CMakeLists.txt` (+6): New option `ARMRX_ENABLE_NEON_TTABLE_AES` (default OFF).
+- `tests/test_aes_neon.cpp` (+46): `test_neon_ttable_x4_round_parity` — 10,000 random trials.
+
+### Verification
+- All four AES microbenchmarks measured via `taskset -c 3 ./bench_armrx --micro-only` (2 MiB
+  scratchpad, 30×3 samples, σ ≤ 0.2%): **consistent +28.6% to +28.8%** across fill, hash,
+  fused, and separate paths. KAT hashes match baseline (639183aae1bf… / 300a0adb4760…).
+  Parity test: 10,000/10,000 encrypt and decrypt trials passed.
+
+### Projected full-workload impact
+~3.6% overall hashrate gain (12.3% of cycles × 28.8% speedup). Full-workload A/B not
+completed (device insufficient memory for fast mode).
+
+### Doc discipline
+- `docs/experiments/neon-ttable-aes.md` — full experiment writeup
+- `docs/plans/20260727/master-plan-20260727.md` — Track G entry updated to DONE
+
 ## 2026-07-29 — Track C Phase A: light-mode reduced-register-preservation dataset-item prologue — WORKING
 
 ### Context

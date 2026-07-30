@@ -28,6 +28,8 @@ actions per that plan's recommended sequence:
 1. **Track A (diagnostics)** — instruction-budget audit, PMU frontend/backend stall breakdown,
    NEON cross-domain move latency, register-liveness check for dual-nonce interleaving. All
    half-to-one day each, near-zero risk, run in parallel; they gate everything else.
+2. **Track I (operational — core-0 cost measurement)** — ~1 hour, trivially measurable.
+   If positive, it's a free ~0.6 H/s.
 2. **Track B, Gate A** — measure partial-dataset fill wall-clock time (the highest expected-value
    item in the whole backlog). Doesn't depend on Track A; can start immediately.
 3. **Track C, Phase A** — begin the inline light-mode dataset-item helper (remove duplicate

@@ -239,6 +239,67 @@ namespace detail {
     return output;
 }
 
+// NEON-vectorized T-table AES round: process 4 blocks in one call.
+// Same T-table algorithm as encrypt_transform/decrypt_transform (bit-identical
+// by construction), but uses NEON for block-level loads/stores and the
+// AddRoundKey XOR instead of byte-by-byte loops. Flag-gated behind
+// ARMRX_ENABLE_NEON_TTABLE_AES (separate from the tower-field ARMRX_ENABLE_NEON_AES).
+//
+// The per-block T-table transform is the identical scalar algorithm — only
+// data movement (load/store of 16-byte blocks) and the round-key XOR are
+// NEON-vectorized, saving ~32 instructions per 4-block round.
+inline void encrypt_round_x4_neon(
+    AesBlock& b0, AesBlock& b1, AesBlock& b2, AesBlock& b3,
+    const AesBlock& k0, const AesBlock& k1,
+    const AesBlock& k2, const AesBlock& k3)
+{
+    // Scalar T-table transforms (same algorithm, bit-identical)
+    b0 = encrypt_transform(b0);
+    b1 = encrypt_transform(b1);
+    b2 = encrypt_transform(b2);
+    b3 = encrypt_transform(b3);
+
+    // NEON-vectorized AddRoundKey for all 4 blocks at once.
+    // Replaces 4 × 16-byte XOR loops (64 byte ops) with
+    // 4 × NEORQ (4 vector ops) + 4 load + 4 store.
+    uint8x16_t vk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(k0.data()));
+    uint8x16_t vk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(k1.data()));
+    uint8x16_t vk2 = vld1q_u8(reinterpret_cast<const uint8_t*>(k2.data()));
+    uint8x16_t vk3 = vld1q_u8(reinterpret_cast<const uint8_t*>(k3.data()));
+    uint8x16_t vs0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b0.data())), vk0);
+    uint8x16_t vs1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b1.data())), vk1);
+    uint8x16_t vs2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b2.data())), vk2);
+    uint8x16_t vs3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b3.data())), vk3);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b0.data()), vs0);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b1.data()), vs1);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b2.data()), vs2);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b3.data()), vs3);
+}
+
+inline void decrypt_round_x4_neon(
+    AesBlock& b0, AesBlock& b1, AesBlock& b2, AesBlock& b3,
+    const AesBlock& k0, const AesBlock& k1,
+    const AesBlock& k2, const AesBlock& k3)
+{
+    b0 = decrypt_transform(b0);
+    b1 = decrypt_transform(b1);
+    b2 = decrypt_transform(b2);
+    b3 = decrypt_transform(b3);
+
+    uint8x16_t vk0 = vld1q_u8(reinterpret_cast<const uint8_t*>(k0.data()));
+    uint8x16_t vk1 = vld1q_u8(reinterpret_cast<const uint8_t*>(k1.data()));
+    uint8x16_t vk2 = vld1q_u8(reinterpret_cast<const uint8_t*>(k2.data()));
+    uint8x16_t vk3 = vld1q_u8(reinterpret_cast<const uint8_t*>(k3.data()));
+    uint8x16_t vs0 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b0.data())), vk0);
+    uint8x16_t vs1 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b1.data())), vk1);
+    uint8x16_t vs2 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b2.data())), vk2);
+    uint8x16_t vs3 = veorq_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(b3.data())), vk3);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b0.data()), vs0);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b1.data()), vs1);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b2.data()), vs2);
+    vst1q_u8(reinterpret_cast<uint8_t*>(b3.data()), vs3);
+}
+
 #endif // __aarch64__ && __ARM_NEON
 
 [[nodiscard]] inline AesBlock aes_encrypt_round(AesBlock state, AesBlock round_key) {

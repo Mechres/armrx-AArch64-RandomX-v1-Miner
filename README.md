@@ -128,6 +128,7 @@ Full progress, metrics comparisons, and future tasks are tracked in [ROADMAP.md]
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
+*   **NEON T-table AES AddRoundKey (Track G):** 🧪 **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%), projected ~3.6% full-workload gain. Gated behind `-DARMRX_ENABLE_NEON_TTABLE_AES=ON` (default OFF), experimental. See `docs/experiments/neon-ttable-aes.md`.
 *   **Hybrid partial dataset (Track B):** ⚠️ Landed but **not adopted for production** — `--dataset-mb=N`
     caches a prefix of the fast-mode dataset for direct JIT loads instead of on-the-fly derivation.
     JIT `_end_hybrid` entry point with incremental background fill. Verified differential-correct

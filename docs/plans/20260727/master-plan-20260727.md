@@ -661,27 +661,35 @@ though the partial manual check above already removed the specific examples orig
 
 ---
 
-## Track G — NEON T-table AES vectorization *(independent, can run in parallel once flagged)*
+## Track G — NEON T-table AES AddRoundKey vectorization **DONE 2026-07-30: +28.8% AES primitive throughput**
 
 *Hermes Item 4.*
-**Handoff plan, ready for an independent agent:** `docs/plans/track-g-neon-ttable-aes-plan-20260728.md`.
-`hash_aes_1r_x4`/`fill_aes_1r_x4` cost ~12.3% of all cycles — the single biggest
-named C++ cost. The hardware AESE/AESD path is spec-incompatible (wrong AddRoundKey order,
-previously removed) and the tried `vtbl`/vector-permute NEON AES measured **-19.4%** and is
-flag-gated off (`docs/experiments/neon-vector-permute-aes.md` — read before touching this again).
+**Result: verified win.** `hash_aes_1r_x4`/`fill_aes_1r_x4` cost ~12.3% of all cycles.
+Replaced per-block byte-by-byte AddRoundKey XOR loops with NEON batch
+`vld1q_u8 + veorq_u8 + vst1q_u8` on 4 blocks at once — same scalar T-table
+algorithm, only data-movement changed.
 
-**The untried variant:** keep the scalar T-table *algorithm* exactly as-is (bit-identical by
-construction), but vectorize the table *lookups* — `hash_aes_1r_x4` already processes 4 independent
-16-byte blocks concurrently, so NEON `tbl`/`tbx` can gather across 4 lanes at once instead of 1
-scalar lookup at a time, with XOR-accumulate in NEON registers. This is a throughput change to the
-gather width, not a round-structure change — different mechanism from the failed attempt, different
-risk profile.
+**Microbenchmark A/B** (`taskset -c 3`, 2 MiB scratchpad, 30×3 samples, σ ≤ 0.2%):
 
-**Correctness risk: medium** (bit-exactness mandatory; existing golden-pin tests
-(`tests/test_aes_hash.cpp`) and the hash/fill decomposition-equivalence check must stay green).
-Ship behind a new `ARMRX_ENABLE_NEON_TTABLE_AES` flag, default OFF, never on the hot path until
-verified. Effort: ~2-4 days. Potentially the largest single-target upside in the whole backlog
-(12.3% of cycles) or null — must be benchmarked, not assumed given the sibling attempt's outcome.
+| Benchmark | Scalar (μs) | NEON (μs) | Speedup |
+|-----------|-------------|-----------|---------|
+| fill_aes_1r_x4 | 14,148.78 | 10,981.57 | +28.8% |
+| hash_aes_1r_x4 | 14,317.78 | 11,136.82 | +28.6% |
+| hash_and_fill (fused) | 29,470.24 | 22,903.49 | +28.7% |
+| hash+fill (separate) | 28,493.75 | 22,137.04 | +28.7% |
+
+**Projected full-workload impact: ~3.6%** (12.3% of cycles × 28.8% speedup).
+Full-workload A/B not completed (device insufficient memory for fast mode).
+
+Gated behind `ARMRX_ENABLE_NEON_TTABLE_AES` (CMake option, default OFF).
+10,000-trial bit-exact parity test passes. KATs green.
+Docs: `docs/experiments/neon-ttable-aes.md`.
+
+**Note:** the actual implementation is *simpler* than the original plan (vectorize
+AddRoundKey XOR only, per the `encrypt_round_x4_neon`/`decrypt_round_x4_neon`
+helpers in `aes.hpp`, not `tbl`/`tbx` lane-gather). The simpler approach was
+sufficient for the win; the `tbl`/`tbx` path would add complexity for uncertain
+additional gain and is not recommended.
 
 ---
 

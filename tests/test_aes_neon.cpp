@@ -151,11 +151,57 @@ void test_edge_case_blocks() {
     std::cout << "[test_aes_neon] test_edge_case_blocks passed\n";
 }
 
+// Track G: NEON T-table x4 round functions — bit-identical parity against
+// the scalar single-block round functions called 4 times in sequence.
+void test_neon_ttable_x4_round_parity() {
+    std::mt19937 rng(0xBE11u); // fixed seed, distinct from the other test's
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+
+    constexpr int kTrials = 10000;
+    for (int t = 0; t < kTrials; ++t) {
+        // Four blocks, each with its own round key
+        armrx::AesBlock b0, b1, b2, b3;
+        armrx::AesBlock k0, k1, k2, k3;
+        for (auto& b : b0) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : b1) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : b2) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : b3) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : k0) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : k1) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : k2) b = static_cast<std::byte>(byte_dist(rng));
+        for (auto& b : k3) b = static_cast<std::byte>(byte_dist(rng));
+
+        // Scalar reference: 4 separate calls
+        armrx::AesBlock s0 = armrx::aes_encrypt_round(b0, k0);
+        armrx::AesBlock s1 = armrx::aes_encrypt_round(b1, k1);
+        armrx::AesBlock s2 = armrx::aes_encrypt_round(b2, k2);
+        armrx::AesBlock s3 = armrx::aes_encrypt_round(b3, k3);
+
+        // NEON T-table x4 path: call the round functions directly by name
+        armrx::AesBlock n0 = b0, n1 = b1, n2 = b2, n3 = b3;
+        armrx::encrypt_round_x4_neon(n0, n1, n2, n3, k0, k1, k2, k3);
+        assert(s0 == n0 && s1 == n1 && s2 == n2 && s3 == n3);
+
+        // Same for all-decrypt
+        armrx::AesBlock d0 = armrx::aes_decrypt_round(b0, k0);
+        armrx::AesBlock d1 = armrx::aes_decrypt_round(b1, k1);
+        armrx::AesBlock d2 = armrx::aes_decrypt_round(b2, k2);
+        armrx::AesBlock d3 = armrx::aes_decrypt_round(b3, k3);
+
+        armrx::AesBlock nd0 = b0, nd1 = b1, nd2 = b2, nd3 = b3;
+        armrx::decrypt_round_x4_neon(nd0, nd1, nd2, nd3, k0, k1, k2, k3);
+        assert(d0 == nd0 && d1 == nd1 && d2 == nd2 && d3 == nd3);
+    }
+    std::cout << "[test_aes_neon] test_neon_ttable_x4_round_parity passed ("
+              << kTrials << " trials, both directions)\n";
+}
+
 int main() {
     test_sub_bytes_matches_reference_sbox();
     test_inv_sub_bytes_matches_reference_inv_sbox();
     test_edge_case_blocks();
     test_full_round_parity_random_trials();
+    test_neon_ttable_x4_round_parity();
     std::cout << "ALL AES_NEON TESTS PASSED SUCCESSFULLY!\n";
     return 0;
 }
