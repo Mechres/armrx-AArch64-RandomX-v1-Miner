@@ -23,19 +23,14 @@ the complete phase-by-phase account.
 [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md)** —
 a synthesized, deduplicated, gated backlog (Tracks A-J) replacing the standalone
 `performance-plan-20260727.md` bullet this file used to point to below. Highest-value next
-actions per that plan's recommended sequence:
-
 1. **Track A (diagnostics)** — instruction-budget audit, PMU frontend/backend stall breakdown,
    NEON cross-domain move latency, register-liveness check for dual-nonce interleaving. All
-   half-to-one day each, near-zero risk, run in parallel; they gate everything else.
-2. **Track I (operational — core-0 cost measurement)** — ~1 hour, trivially measurable.
-   If positive, it's a free ~0.6 H/s.
-2. **Track B, Gate A** — measure partial-dataset fill wall-clock time (the highest expected-value
-   item in the whole backlog). Doesn't depend on Track A; can start immediately.
-3. **Track C, Phase A** — begin the inline light-mode dataset-item helper (remove duplicate
-   register preservation). Independent of Track B.
-4. **Track I** — worker/main-thread cost on core 0, independent and operational, land whenever
-   convenient.
+   done (2026-07-27). Verdict: per-opcode waste not the gap, back-end stalls dominate ~26:1,
+   NEON cross-domain moves cost same as same-domain, register liveness 100% at every point.
+2. **Track G (NEON T-table AES)** — done (2026-07-30), +28.8% AES primitive throughput.
+   Choose next from the remaining open tracks: D (dual-nonce interleaving), E (scheduler
+   refinement), F (instruction-count micro-opt, low-yield per A's findings),
+   H (alternative execution models).
 
 See the master plan for the full track list, gates, dependency graph, and the consolidated
 "do not repeat" list of everything already closed on evidence.

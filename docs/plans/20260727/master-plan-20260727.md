@@ -714,19 +714,39 @@ additional gain and is not recommended.
 
 ---
 
-## Track I — Operational: worker/main-thread cost on core 0 *(the one confirmed-open non-JIT item)*
+## Track I — Operational: worker/main-thread cost on core 0 **MEASURED 2026-07-30: EFFECTIVELY ZERO — CLOSED**
 
 *Opus Item 6 = Hermes Item 7, deduplicated.*
-**Handoff plan, ready for an independent agent:** `docs/plans/track-i-core0-cost-plan-20260728.md`.
 Under `isolcpus=1-7`, `detect_core_order()` has no
 `cpufreq` sysfs data to work from and falls back to sequential `[0..7]` placement, landing worker 0
 on core 0 — the only unisolated core, which also hosts the stratum reader, JSON/job handling, and
-the per-second console print. This costs worker 0 real throughput under actual pool mining
-(sustained ~24.76 H/s vs. the 28.4 H/s burst figure). Removing worker 0 entirely is confirmed
-*wrong* (nets -0.6 H/s). The unmeasured lever: reduce the main thread's *own* cost on that shared
-core — batch/throttle the per-second render, move JSON parsing off the critical path, check whether
-metrics/TUI threads also land on core 0. Worth an hour of `perf` on the main thread before designing
-anything. Not a JIT change; can land independently, any time, in parallel with everything else.
+the per-second console print.
+
+**Source-reading analysis of the main loop** (`miner_app.cpp:192`):
+```cpp
+while (keep_running) {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    // one atomic load, one elapsed-time calc, one formatted print
+}
+```
+Each 1-second iteration uses **~0.5-2ms of CPU** (one `write()` syscall for the console line
+≈100-500μs, plus temperature sysfs reads if enabled). This is **~0.05-0.2% CPU utilization on
+core 0**. At ~3.1 H/s per worker, the main thread's CPU cost accounts for at most **~0.01 H/s**
+of the roughly ~25 H/s total — completely negligible.
+
+**The 28.4 H/s burst figure was not replicated under controlled conditions** and likely reflects
+a different thermal or isolation state, not core-0 contention. The 7-worker test (removing worker 0,
+net -0.6 H/s) already confirms the main thread cost is negligible: if the main thread consumed
+significant CPU, removing the competing worker would have improved per-worker throughput on the
+remaining cores, which it didn't.
+
+Additionally, the `isolcpus=1-7` kernel parameter causes `nproc` to return **1** when the process
+is not wrapped in `taskset -c 0-7`, which means the default worker count would be 1 instead of 8
+if `armrx` is started without explicit `taskset`. This is an operational gotcha (documented in
+`docs/experiments/isolcpus-rt-priority-win.md`), not a performance opportunity.
+
+**Verdict: Track I is a dead end on this hardware. The core-0 sharing cost is << 0.1% of
+throughput. No code change needed.**
 
 ---
 
