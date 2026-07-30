@@ -147,7 +147,8 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 | [`RETROSPECTIVE.md`](RETROSPECTIVE.md) | Full project retrospective — 210 commits, 18 days, 10 performance tracks. Start here. |
 | [`ROADMAP.md`](ROADMAP.md) | Post-alpha status — points to RETROSPECTIVE.md for the full story. |
 | [`changelogs.md`](changelogs.md) | Post-alpha changelog — alpha record preserved at `docs/archived/alpha-changelogs.md`. |
-| [`docs/archived/audits/`](docs/archived/audits/) | Correctness, security, and performance audits (internal and third-party) — archived. |
+| [`docs/audits/combined-audit-20260731.md`](docs/audits/combined-audit-20260731.md) | Consolidated next-steps audit from AGY (Gemini) + Reasonix (DeepSeek). Prioritized T0–T3. |
+| [`docs/archived/audits/`](docs/archived/audits/) | Archived alpha-phase audits — correctness, security, performance reviews. |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
 | [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. |
 | [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
