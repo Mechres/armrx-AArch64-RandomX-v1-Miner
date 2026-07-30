@@ -128,7 +128,7 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
-*   **NEON T-table AES AddRoundKey (Track G):** 🧪 **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%), projected ~3.6% full-workload gain. Gated behind `-DARMRX_ENABLE_NEON_TTABLE_AES=ON` (default OFF), experimental. See `docs/experiments/neon-ttable-aes.md`.
+*   **NEON T-table AES AddRoundKey (Track G):** ✅ **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%), projected ~3.6% full-workload gain. Enabled by default since 2026-08-01. See `docs/experiments/neon-ttable-aes.md`.
 *   **Cross-hash boundary pipelining (Track D2):** 🧪 Overlaps AES finalization of hash N with AES fill of hash N+1 via interleaved read/write function. Implemented and verified correct on host (all mining KATs pass). On-device A/B benchmark not completed (fast-mode dataset init too slow on 1.4 GiB RAM). Estimated ~0.5–1% hashrate gain. See `docs/experiments/d2-hash-fill-pipeline.md`.
 *   **Hybrid partial dataset (Track B):** ⚠️ Landed but **not adopted for production** — `--dataset-mb=N`
     caches a prefix of the fast-mode dataset for direct JIT loads instead of on-the-fly derivation.

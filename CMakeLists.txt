@@ -20,7 +20,7 @@ option(ARMRX_BUILD_FUZZERS "Build libFuzzer harnesses (requires Clang; PLAN.md Â
 option(ARMRX_JIT_PROFILE "Enable per-hash JIT profiling (adds 3 clock_gettime syscalls per hash)" OFF)
 option(ARMRX_ENABLE_JIT_FAST_DIV_SQRT "Enable fast Newton-Raphson JIT FDIV and FSQRT" OFF)
 option(ARMRX_ENABLE_NEON_AES "Use NEON vector-permute AES instead of scalar T-table lookups (experimental, needs on-device hashrate verification -- see docs/neon-vector-permute-aes.md)" OFF)
-option(ARMRX_ENABLE_NEON_TTABLE_AES "Use NEON-vectorized T-table AES round functions for x4 hash/fill paths (experimental, see docs/plans/track-g-neon-ttable-aes-plan-20260728.md)" OFF)
+option(ARMRX_ENABLE_NEON_TTABLE_AES "Use NEON-vectorized T-table AES round functions for x4 hash/fill paths" ON)
 option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OFF)
 option(ARMRX_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ARMRX_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)

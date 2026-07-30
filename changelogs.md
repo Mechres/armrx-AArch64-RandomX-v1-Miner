@@ -4,5 +4,6 @@
 >
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
->
-> New entries go below this line.
+
+## 2026-08-01
+- **Track G — NEON T-table AES enabled by default:** Flipped `ARMRX_ENABLE_NEON_TTABLE_AES` from OFF to ON in CMakeLists.txt. Code already implemented and KAT-verified (10,000-trial parity test, +28.8% AES throughput microbenchmark). Projected ~3.6% hashrate gain. See `docs/audits/combined-audit-20260731.md` (T0-1). (`CMakeLists.txt`)
