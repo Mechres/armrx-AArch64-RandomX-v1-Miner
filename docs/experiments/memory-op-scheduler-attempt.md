@@ -67,7 +67,7 @@ Two hypotheses were checked and ruled out before the attempt was abandoned:
    `h_IMUL_R`, `h_IXOR_R`, `h_IROL_R`). This looked like the most promising lead. It doesn't hold
    up: this exact pattern (`emitMemLoad`'s x20 usage) was already reviewed by all three
    independent code reviews of the scheduler (Deepseek, Gemini, Hermes — see
-   `docs/audits/emitter-scheduler-review.md`, `jit_scheduler_code_review_gemini.md`,
+   `docs/archived/audits/emitter-scheduler-review.md`, `jit_scheduler_code_review_gemini.md`,
    `scheduler-review-2026-07-25.md`) and confirmed self-contained (write-then-immediately-read
    within one handler's own emission, regardless of swap position).
 

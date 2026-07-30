@@ -76,7 +76,7 @@ Each worker runs the RandomX VM (`src/vm.cpp`) which either:
   was never identified, reverted; see `docs/experiments/memory-op-scheduler-attempt.md` before
   attempting this again. Dedicated stress tests at `tests/test_jit_scheduler_stress.cpp` (450 pairs)
   and `tests/test_jit_superscalar_scheduler_stress.cpp` (200 pairs). Independently reviewed three
-  times (Deepseek, Gemini, Hermes — `docs/audits/emitter-scheduler-review.md`,
+  times (Deepseek, Gemini, Hermes — `docs/archived/audits/emitter-scheduler-review.md`,
   `jit_scheduler_code_review_gemini.md`, `scheduler-review-2026-07-25.md`). JIT code executes from a
   W^X-mapped buffer (`src/virtual_memory.c` / `jit_compiler_a64_static.S`).
 - **Interpreter fallback**: a portable C++ dispatch loop over the same bytecode, used whenever
@@ -132,8 +132,7 @@ disabled silently.
 
 - `RETROSPECTIVE.md` — full project retrospective (210 commits, 18 days, 10 tracks). Start here.
 - `docs/plans/20260727/master-plan-20260727.md` — still-active strategic master plan.
-- `ROADMAP.md` — status tracker, completed/remaining items. Phases 1 through 8 are all
-  fully resolved.
+- `ROADMAP.md` — post-alpha status, points to RETROSPECTIVE.md for the full story.
 - **Performance context** — the device runs light mode (2 GiB RAM). armrx is at ~90% of XMRig
   per-cluster. `tools/jit_correlate.py`'s opcode-level cycle correlation (2026-07-25) found the main
   per-hash VM program region carries ~9% of dynamic instructions but ~20% of cycles — a ~2.2× IPC
@@ -157,14 +156,14 @@ disabled silently.
   corrected false starts (a stale historical baseline mis-comparison and an overconfident
   thermal-throttling attribution), in `docs/experiments/isolcpus-rt-priority-win.md`.
 - `docs/` — organized into subdirectories:
-  - `docs/audits/` — correctness, security, performance audits (including this project's audit reports)
+  - `docs/archived/audits/` — correctness, security, performance audits (all alpha-phase, archived)
   - `docs/experiments/` — measured performance attempts, both wins and honest negative results
-  - `docs/plans/` — performance master plans and forward-looking proposals
+  - `docs/plans/20260727/` — master-plan-20260727.md is the still-active strategic reference
+  - `docs/archived/plans/` — all other performance plans, tracks A–J completed or closed
   - `docs/postmortems/` — detailed root-cause analyses for past bugs
-  - `docs/archived/` — superseded or historical material
+  - `docs/archived/` — superseded or historical material (alpha changelog, alpha roadmap, audits, completed-phase narratives)
 - After a code change that's deployed and verified (KATs green, build passes), keep the docs in sync:
   1. Add a dated entry to `changelogs.md` (filenames + what changed; one entry per logical change group).
   2. Update `README.md`'s status table if a feature was added/removed.
-  3. Move completed items in `ROADMAP.md` from "Remaining" to "Completed".
-  4. Update the relevant `docs/` reference if a design decision or plan changed.
-  5. Skip this for purely cosmetic changes or reverts of unshipped work.
+  3. Update relevant `docs/` reference if a design decision or plan changed.
+  4. Skip this for purely cosmetic changes or reverts of unshipped work.

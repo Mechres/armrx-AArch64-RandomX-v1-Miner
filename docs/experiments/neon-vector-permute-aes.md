@@ -2,7 +2,7 @@
 
 ## Problem
 
-The external performance audit (`docs/audits/performance-improvement-audit.md`) flagged
+The external performance audit (`docs/archived/audits/performance-improvement-audit.md`) flagged
 `include/armrx/aes.hpp`'s `encrypt_transform`/`decrypt_transform` — 100% scalar,
 byte-indexed T-table lookups — as untried NEON-vectorization territory,
 distinct from the previously-reverted *hardware* `AESE`/`AESD`/`AESMC`

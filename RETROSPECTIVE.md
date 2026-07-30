@@ -344,11 +344,11 @@ The reason is simple: on a single-developer project spanning 18 days with multip
 
 Every experiment, dead end, and adopted change is documented:
 
-- `changelogs.md` — chronological record, every change with rationale
-- `ROADMAP.md` — completed vs remaining item tables
+- `docs/archived/alpha-changelogs.md` — chronological record, every change with rationale
+- `docs/archived/alpha-roadmap.md` — completed vs remaining item tables
 - `docs/experiments/` — 12+ writeups of individual experiments, both wins and reverts
+- `docs/archived/audits/` — 5 independent code reviews (3 for the scheduler alone)
 - `docs/postmortems/` — root-cause analysis for critical bugs (AES T-table, dataset corruption, pool deadlock)
-- `docs/audits/` — 5 independent code reviews (3 for the scheduler alone)
 - `docs/plans/20260727/master-plan-20260727.md` — the final synthesis: 10 tracks, all either done or gated
 
 The project's honest record — every measured result, every reverted attempt, every wrong assumption corrected — is as much the output as the code itself.

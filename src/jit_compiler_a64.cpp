@@ -289,7 +289,7 @@ void JitCompilerA64::emitV2AesTweak(JitCompilerA64& jit, uint32_t flags, uint32_
 //    the Q/R (moving) positions of a swap eliminates the divergence a
 //    bisection isolated to one exact swap. This much is empirically
 //    solid and independently re-verified: three independent reviews
-//    (2026-07-25, docs/audits/{emitter-scheduler-review,
+//    (2026-07-25, docs/archived/audits/{emitter-scheduler-review},
 //    jit_scheduler_code_review_gemini,scheduler-review-2026-07-25}.md)
 //    all confirm no failure scenario exists in the shipped code with this
 //    exclusion in place.
@@ -604,7 +604,7 @@ InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
 	if (h == &JitCompilerA64::h_NOP) return InstructionType::NOP;
 
 	// Maintenance hazard flagged by independent review (2026-07-25,
-	// docs/audits/scheduler-review-2026-07-25.md #4): this if-chain and
+	// docs/archived/audits/scheduler-review-2026-07-25.md #4): this if-chain and
 	// engine[256] (built from instruction_weights.hpp's INST_HANDLE macro)
 	// are not mechanically linked. A future opcode wired into engine[] but
 	// not added above would previously fall through to `return NOP`,
@@ -1087,7 +1087,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	// MOVZ/MOVK path instead, which is what makes scheduleSuperscalarProgram()
 	// safe under reordering without needing to reason about pool-slot
 	// ordering for this opcode class (flagged by independent review,
-	// 2026-07-25, docs/audits/scheduler-review-2026-07-25.md #4). If this
+	// 2026-07-25, docs/archived/audits/scheduler-review-2026-07-25.md #4). If this
 	// ever regresses to 0, superscalar immediate loads would silently
 	// start using the shared pool and become order-sensitive under
 	// scheduling, the same class of bug as the main-path IMUL_RCP hazard.

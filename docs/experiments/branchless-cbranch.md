@@ -157,7 +157,7 @@ cause incorrect offsets in edge cases.
 
 ## Precise attribution (2026-07-22) — the "profile first" step, finally done
 
-Every prior session recommended this exact step (`docs/audits/audit-20260721-cross-reference.md`,
+Every prior session recommended this exact step (`docs/archived/audits/audit-20260721-cross-reference.md`,
 `docs/archived/next_phase.md`, `docs/plans/performance-next-agent-handoff.md` §22.6) but none had
 actually executed it — only aggregate `perf stat` counting existed, which gives a single
 branch-miss *count* with no attribution to *where* in the code the misses happen. This

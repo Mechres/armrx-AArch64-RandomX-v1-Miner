@@ -83,7 +83,7 @@ namespace armrx {
 		// (e.g. decoding a specific instruction's bytes via a JitDumpEntry's offset).
 		// Deliberately const-qualified and read-only, unlike the deleted getCode()
 		// accessor this project removed for handing out a raw mutable pointer to
-		// executable memory (docs/audits/WX_Alignment_and_LITTLE_Core_Profiling.md) — a
+		// executable memory (docs/archived/audits/WX_Alignment_and_LITTLE_Core_Profiling.md) — a
 		// const view adds no new write-to-executable-memory capability.
 		[[nodiscard]] std::span<const uint8_t> getCodeBytes() const { return {code, getCodeSize()}; }
 
