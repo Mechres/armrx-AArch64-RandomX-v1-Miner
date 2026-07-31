@@ -419,9 +419,9 @@ W0-1/W0-2 (docs sync)
 | 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **DONE — +1.68% H/s, −2.07% cyc, −4.93% instr (ON)** |
 | 5 | W0-1 | Stale-doc sync | Process | None | **Ready** |
 | 6 | W1-3 | Blake2b share close | ~0% | Low | **DONE — NEON path active (blake2b.cpp:71), scalar fallback dead on AArch64; share ≈0.5% (0.6M of 119M); no action** |
-| 7 | W2-1 | BOLT null-check | ~0% | Low | Ready if toolchain |
+| 7 | W2-1 | BOLT null-check | ~0% | Low | **DEFERRED — llvm-bolt not installed on host; expected null (BOLT cannot see runtime-generated JIT code; would only touch the ~9.5% C++ region). Toolchain absent.** |
 | 8 | W2-2 | N1 adjacency frequency | Gate | Low | **DONE — N1 CLOSED: superscalar body has 0% scratchpad LDR/STR (register-file ALU only; dataset thunks already ldp/stp); main-VM *_M/ISTORE never emit-adjacent + register-indexed (not #imm-fusable). No LDP/STP pass.** |
-| 9 | W2-3 | Stall taxonomy PMU | Diagnostic | Low | Optional |
+| 9 | W2-3 | Stall taxonomy PMU + superscalar gap root-cause | Diagnostic | Low | **DONE (partial) — thunk cost 2.76% of superscalar (ruled out); opcode body 5,224/call matched by static estimate; dominant cost = IADD_C*/IXOR_C* immediate materialization (~3 A64 each via MOVZ/MOVN+MOVK+ALU), ~86% of non-1-instr extras. Top proposal: pool-load imm materialization ~10% of total instr/hash. (Full PMU stall taxonomy not separately run — W1-4 perf already shows branch-miss 0.013%, cache-miss 0.65%: no stall headroom.)** |
 | 10 | W3-4 | NEON lane IMUL | 0–2% | High | **Closed — gate FAIL** |
 | 11 | W3-1 | Track C reopen | ≤0.5–1% | **Very high** | **Blocked on W1-1 + hang diagnostic** |
 | 12 | W3-2 | Address hoisting | 0.2–1% | **High** | Design + gates |
