@@ -21,9 +21,10 @@ test_jit_determinism, test_jit_encodings all pass, miner mines ~18 H/s with
 valid shares. **Known quirks:** (1) AUR cross-ar/ranlib HANG at 100% CPU on
 archive creation — toolchain file hard-pins host /usr/bin/ar/ranlib/nm via
 CMAKE_<LANG>_ARCHIVE_* rules (CMAKE_AR cache FORCE alone is shadowed by
-compiler detection); (2) test_jit_scheduler_stress /
-test_jit_superscalar_scheduler_stress need ~15-20 min on device (light-mode
-dataset-on-demand, NOT a hang — same as native); (3) no TLS pools (no aarch64
+compiler detection); (2) the scheduler stress tests are SLOW on device but
+PASS with cross binaries — both verified 2026-08-01: test_jit_scheduler_stress
+450 pairs and test_jit_superscalar_scheduler_stress 200 pairs, all
+byte-identical (~20 and ~35 min; light-mode dataset on demand); (3) no TLS pools (no aarch64
 OpenSSL), LTO off (ARMRX_DISABLE_LTO=ON, GCC 15/16+musl crash history).
 
 ### Devbox (AArch64 device)
