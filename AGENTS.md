@@ -13,14 +13,18 @@ cmake -S . -B build-cross -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64-musl.cm
 cmake --build build-cross -j$(nproc)
 scp build-cross/test_* build-cross/armrx mechres@192.168.10.156:/tmp/cross/
 ```
-~10× faster than device-native builds (~3 min vs ~40 min). Toolchain: musl.cc
-`aarch64-linux-musl-cross` (GCC 11.2.1) under `~/toolchains/`; run the cross tests on
-device from `/tmp/cross/`. **Limits:** (1) JIT runtime acceptance (test_jit_equivalence,
-test_jit_scheduler_stress, miner) MUST use device-native builds — GCC 11.2.1 has a
-seed-dependent JIT codegen hang; compile-check + non-JIT tests (KATs, AES, encodings,
-determinism) are fine. (2) No TLS pools (no aarch64 OpenSSL). (3) LTO auto-disabled
-(no plugin). AUR `aarch64-linux-musl-cross` (GCC 16) build may lift the JIT limit —
-verify before relying on it.
+~10× faster than device-native builds (~3 min vs ~40 min). Toolchain: AUR
+`aarch64-linux-musl-cross` (GCC 16.1.0 + musl 1.2.5, `paru -S`; drivers in
+/usr/bin/, sysroot /usr/aarch64-linux-musl/). Verified on device 2026-08-01:
+test_jit_equivalence 16/16 byte-identical, test_mining, test_aes_hash,
+test_jit_determinism, test_jit_encodings all pass, miner mines ~18 H/s with
+valid shares. **Known quirks:** (1) AUR cross-ar/ranlib HANG at 100% CPU on
+archive creation — toolchain file hard-pins host /usr/bin/ar/ranlib/nm via
+CMAKE_<LANG>_ARCHIVE_* rules (CMAKE_AR cache FORCE alone is shadowed by
+compiler detection); (2) test_jit_scheduler_stress /
+test_jit_superscalar_scheduler_stress need ~15-20 min on device (light-mode
+dataset-on-demand, NOT a hang — same as native); (3) no TLS pools (no aarch64
+OpenSSL), LTO off (ARMRX_DISABLE_LTO=ON, GCC 15/16+musl crash history).
 
 ### Devbox (AArch64 device)
 ```sh
