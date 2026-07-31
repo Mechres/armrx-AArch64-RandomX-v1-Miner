@@ -160,7 +160,7 @@ pure-latency recovery. A PMU drilldown is informative; a code fix is unlikely to
 
 | ID | Angle | Status after verification |
 |---|---|---|
-| N1 | `ldp`/`stp` fusion of adjacent scratchpad ops | **Open, speculative** — adjacency not statically obvious (`emitMemLoad` uses masked register+imm; RandomX addresses are data-dependent). Needs frequency study first. → W2-2 |
+| N1 | `ldp`/`stp` fusion of adjacent scratchpad ops | **CLOSED (2026-07-31)** — W2-2 static analysis: superscalar body has 0% scratchpad LDR/STR (register-file ALU only; dataset thunks already ldp/stp); main-VM `*_M`/`ISTORE` never emit-adjacent AND are register-indexed (not `#imm`-fusable). No LDP/STP pass possible. See `docs/experiments/w22-n1-adjacency-analysis.md`. |
 | N2 | Monolithic no-ABI register pinning | **Open, extreme risk/effort** — overlaps Track C moonshot; only if census proves frame overhead is the XMRig gap. → W3-3 |
 | N3 | Blake2b NEON check | **Mostly closed as "missing NEON"** — NEON path exists. Residual: measure Blake2b's share of the 119 M and whether scalar fallback ever runs on device. → W1-3 |
 | N4 | AArch32/Thumb-2 | **Deprioritize** — loses 64-bit GPRs RandomX needs; I-cache win speculative; front-end already <1% of cycles |
@@ -420,7 +420,7 @@ W0-1/W0-2 (docs sync)
 | 5 | W0-1 | Stale-doc sync | Process | None | **Ready** |
 | 6 | W1-3 | Blake2b share close | ~0% | Low | **DONE — NEON path active (blake2b.cpp:71), scalar fallback dead on AArch64; share ≈0.5% (0.6M of 119M); no action** |
 | 7 | W2-1 | BOLT null-check | ~0% | Low | Ready if toolchain |
-| 8 | W2-2 | N1 adjacency frequency | Gate | Low | **Ready** |
+| 8 | W2-2 | N1 adjacency frequency | Gate | Low | **DONE — N1 CLOSED: superscalar body has 0% scratchpad LDR/STR (register-file ALU only; dataset thunks already ldp/stp); main-VM *_M/ISTORE never emit-adjacent + register-indexed (not #imm-fusable). No LDP/STP pass.** |
 | 9 | W2-3 | Stall taxonomy PMU | Diagnostic | Low | Optional |
 | 10 | W3-4 | NEON lane IMUL | 0–2% | High | **Closed — gate FAIL** |
 | 11 | W3-1 | Track C reopen | ≤0.5–1% | **Very high** | **Blocked on W1-1 + hang diagnostic** |
