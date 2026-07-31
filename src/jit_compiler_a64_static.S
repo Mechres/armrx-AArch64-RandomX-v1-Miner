@@ -67,10 +67,6 @@
 	.global DECL(randomx_calc_dataset_item_aarch64_mix)
 	.global DECL(randomx_calc_dataset_item_aarch64_store_result)
 	.global DECL(randomx_calc_dataset_item_aarch64_end)
-	# Track C Phase A: light-mode-only reduced-register-preservation entry
-	.global DECL(randomx_calc_dataset_item_aarch64_light)
-	.global DECL(randomx_calc_dataset_item_aarch64_light_store_result)
-	.global DECL(randomx_calc_dataset_item_aarch64_light_end)
 	# Track D1: 2-way interleaved dataset-item derivation (new, separate
 	# entry point -- see the register-contract comment at its definition).
 	.global DECL(randomx_calc_dataset_item_aarch64_2way)
@@ -1002,88 +998,6 @@ superscalarAdd5: .quad 10536153434571861004
 superscalarAdd6: .quad 3398623926847679864
 superscalarAdd7: .quad 9549104520008361294
 
-# ── Light-mode-only prologue (Track C Phase A, master-plan-20260727.md) ──
-# Used exclusively by generateSuperscalarHash()'s memcpy for the per-hash
-# light-mode dataset-item derivation path -- never reached via a live `bl`
-# in the statically-linked binary (jit_compiler_a64.cpp redirects its copy
-# source pointers to this label instead of randomx_calc_dataset_item_aarch64;
-# the original symbol above, and randomx_init_dataset_aarch64's `bl` to it,
-# are both left completely untouched).
-#
-# Saves only x4-x13 (the light-mode call site's live state: x4/x5/x6/x7/
-# x12/x13 are the VM's r0-r5, and x8-x13 are read as this function's own
-# input parameters or used as its internal scratch across the loop) instead
-# of the original's x0-x13. x0/x1/x2/x3 are NOT preserved here: the light-
-# mode caller (randomx_program_aarch64_vm_instructions_end_light) already
-# reloads its own x0/x1/x2/x30 unconditionally from its own stack frame
-# immediately after the `bl` returns, and never uses x3 at all -- their
-# preservation in the original function exists only for the (dead-code)
-# fast-mode caller randomx_init_dataset_aarch64_main_loop, which is not
-# reachable from this entry point.
-#
-# Must end with `b rx_calc_dataset_item_prefetch` (the SAME shared target
-# the original prologue branches to) so its trailing branch instruction's
-# link-time-computed PC-relative offset remains valid once memcpy'd into a
-# JIT buffer -- this requires this block to sit textually adjacent to (i.e.
-# share the same end-of-copy-range boundary as) randomx_calc_dataset_item_
-# aarch64_prefetch below. Do not move this block away from that label.
-DECL(randomx_calc_dataset_item_aarch64_light):
-rx_calc_dataset_item_light:
-	sub	sp, sp, 80
-	stp	x4, x5, [sp]
-	stp	x6, x7, [sp, 16]
-	stp	x8, x9, [sp, 32]
-	stp	x10, x11, [sp, 48]
-	stp	x12, x13, [sp, 64]
-
-	ldr	x12, superscalarMul0_light
-
-	mov	x8, x0
-	mov	x9, x1
-	mov	x10, x2
-
-	# rl[0] = (itemNumber + 1) * superscalarMul0;
-	madd	x0, x2, x12, x12
-
-	# rl[1] = rl[0] ^ superscalarAdd1;
-	ldr	x12, superscalarAdd1_light
-	eor	x1, x0, x12
-
-	# rl[2] = rl[0] ^ superscalarAdd2;
-	ldr	x12, superscalarAdd2_light
-	eor	x2, x0, x12
-
-	# rl[3] = rl[0] ^ superscalarAdd3;
-	ldr	x12, superscalarAdd3_light
-	eor	x3, x0, x12
-
-	# rl[4] = rl[0] ^ superscalarAdd4;
-	ldr	x12, superscalarAdd4_light
-	eor	x4, x0, x12
-
-	# rl[5] = rl[0] ^ superscalarAdd5;
-	ldr	x12, superscalarAdd5_light
-	eor	x5, x0, x12
-
-	# rl[6] = rl[0] ^ superscalarAdd6;
-	ldr	x12, superscalarAdd6_light
-	eor	x6, x0, x12
-
-	# rl[7] = rl[0] ^ superscalarAdd7;
-	ldr	x12, superscalarAdd7_light
-	eor	x7, x0, x12
-
-	b	rx_calc_dataset_item_prefetch
-
-superscalarMul0_light: .quad 6364136223846793005
-superscalarAdd1_light: .quad 9298411001130361340
-superscalarAdd2_light: .quad 12065312585734608966
-superscalarAdd3_light: .quad 9306329213124626780
-superscalarAdd4_light: .quad 5281919268842080866
-superscalarAdd5_light: .quad 10536153434571861004
-superscalarAdd6_light: .quad 3398623926847679864
-superscalarAdd7_light: .quad 9549104520008361294
-
 # Prefetch -> SuperScalar hash -> Mix will be repeated N times
 
 DECL(randomx_calc_dataset_item_aarch64_prefetch):
@@ -1127,33 +1041,6 @@ DECL(randomx_calc_dataset_item_aarch64_store_result):
 	ret
 
 DECL(randomx_calc_dataset_item_aarch64_end):
-
-# Light-mode-only epilogue (Track C Phase A, pairs with
-# randomx_calc_dataset_item_aarch64_light above). Reached purely by
-# codePos-contiguous placement after generateSuperscalarHash()'s final
-# mix-loop iteration falls through -- unlike the prologue side, there is no
-# branch-offset-preservation constraint here, so this block's position in
-# the file is not load-bearing (kept adjacent to the original epilogue for
-# readability only). Stores the result identically to the original (x9 is
-# the output pointer in both variants), then restores only x4-x13 (matching
-# the light prologue's reduced save set) and deallocates an 80-byte frame
-# instead of 112.
-DECL(randomx_calc_dataset_item_aarch64_light_store_result):
-	stp	x0, x1, [x9]
-	stp	x2, x3, [x9, 16]
-	stp	x4, x5, [x9, 32]
-	stp	x6, x7, [x9, 48]
-
-	ldp	x4, x5, [sp]
-	ldp	x6, x7, [sp, 16]
-	ldp	x8, x9, [sp, 32]
-	ldp	x10, x11, [sp, 48]
-	ldp	x12, x13, [sp, 64]
-	add	sp, sp, 80
-
-	ret
-
-DECL(randomx_calc_dataset_item_aarch64_light_end):
 
 # ══════════════════════════════════════════════════════════════════════
 # Track D1 (docs/plans/track-d1-superscalar-interleave-plan-20260728.md):

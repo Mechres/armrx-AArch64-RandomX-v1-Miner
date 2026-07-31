@@ -115,15 +115,9 @@ static const size_t MainLoopBegin = ((uint8_t*)randomx_program_aarch64_main_loop
 static const size_t PrologueSize = ((uint8_t*)randomx_program_aarch64_vm_instructions) - ((uint8_t*)randomx_program_aarch64);
 static const size_t ImulRcpLiteralsEnd = ((uint8_t*)randomx_program_aarch64_imul_rcp_literals_end) - ((uint8_t*)randomx_program_aarch64);
 
-// Track C Phase A (master-plan-20260727.md): generateSuperscalarHash() now
-// copies its prologue/epilogue from the *_light static labels instead of the
-// original (still present, still used by the dead-code fast-mode path)
-// randomx_calc_dataset_item_aarch64 ones -- this sizing formula is updated to
-// match, so the buffer allocation reflects what actually gets written rather
-// than merely over-allocating (harmless either way, but this stays accurate).
 static const size_t CalcDatasetItemSize =
-	// Prologue (light variant)
-	((uint8_t*)randomx_calc_dataset_item_aarch64_prefetch - (uint8_t*)randomx_calc_dataset_item_aarch64_light) +
+	// Prologue
+	((uint8_t*)randomx_calc_dataset_item_aarch64_prefetch - (uint8_t*)randomx_calc_dataset_item_aarch64) +
 	// Main loop
 	RANDOMX_CACHE_ACCESSES * (
 		// Main loop prologue
@@ -133,8 +127,8 @@ static const size_t CalcDatasetItemSize =
 		// Main loop epilogue
 		((uint8_t*)randomx_calc_dataset_item_aarch64_store_result - (uint8_t*)randomx_calc_dataset_item_aarch64_mix) + 4
 	) +
-	// Epilogue (light variant)
-	((uint8_t*)randomx_calc_dataset_item_aarch64_light_end - (uint8_t*)randomx_calc_dataset_item_aarch64_light_store_result);
+	// Epilogue
+	((uint8_t*)randomx_calc_dataset_item_aarch64_end - (uint8_t*)randomx_calc_dataset_item_aarch64_store_result);
 
 constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
 
@@ -1067,15 +1061,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 {
 	uint32_t codePos = static_cast<uint32_t>(CodeSize);
 
-	// Track C Phase A: copy the reduced-preservation light-mode prologue
-	// (saves x4-x13 only) instead of the general-purpose one (saves x0-x13,
-	// still used unmodified by the dead-code fast-mode path). Safe because
-	// this whole function's output is only ever reached via light mode's
-	// own `bl rx_calc_dataset_item`, whose target resolves here via the
-	// existing, unmodified CodeSize-boundary mechanism -- see the comment
-	// on randomx_calc_dataset_item_aarch64_light in the .S file for why its
-	// end boundary must stay randomx_calc_dataset_item_aarch64_prefetch.
-	uint8_t* p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_light;
+	uint8_t* p1 = (uint8_t*)randomx_calc_dataset_item_aarch64;
 	uint8_t* p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_prefetch;
 	memcpy(code + codePos, p1, p2 - p1);
 	codePos += static_cast<uint32_t>(p2 - p1);
@@ -1201,13 +1187,8 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		emit32(ARMV8A::MOV_REG | 10 | (prog.address_register() << 16), code, codePos);
 	}
 
-	// Track C Phase A: light-mode epilogue (restores x4-x13, 80-byte frame)
-	// instead of the general-purpose one (restores x0-x13, 112-byte frame).
-	// Reached by plain codePos-contiguous fallthrough from the mix loop
-	// above, so unlike the prologue there is no branch-offset constraint on
-	// which epilogue variant is copied here.
-	p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_light_store_result;
-	p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_light_end;
+	p1 = (uint8_t*)randomx_calc_dataset_item_aarch64_store_result;
+	p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_end;
 	memcpy(code + codePos, p1, p2 - p1);
 	codePos += static_cast<uint32_t>(p2 - p1);
 
