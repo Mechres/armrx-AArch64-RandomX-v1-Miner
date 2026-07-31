@@ -54,4 +54,34 @@ unsigned int online_cpu_count() {
     return std::max(1U, std::thread::hardware_concurrency());
 }
 
+std::vector<unsigned int> isolated_cpu_list() {
+    std::vector<unsigned int> isolated;
+    std::ifstream file("/sys/devices/system/cpu/isolated");
+    std::string contents;
+    if (file && std::getline(file, contents) && !contents.empty()) {
+        std::stringstream ss(contents);
+        std::string token;
+        while (std::getline(ss, token, ',')) {
+            const auto dash = token.find('-');
+            try {
+                if (dash == std::string::npos) {
+                    isolated.push_back(std::stoul(token));
+                } else {
+                    const unsigned int lo = std::stoul(token.substr(0, dash));
+                    const unsigned int hi = std::stoul(token.substr(dash + 1));
+                    if (hi >= lo) {
+                        for (unsigned int i = lo; i <= hi; ++i) {
+                            isolated.push_back(i);
+                        }
+                    }
+                }
+            } catch (const std::exception&) {
+                isolated.clear();
+                break;
+            }
+        }
+    }
+    return isolated;
+}
+
 } // namespace armrx

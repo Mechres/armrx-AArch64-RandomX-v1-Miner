@@ -34,6 +34,10 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
     MinerOptions& o = result.options;
 
     o.workers = online_cpu_count();
+    auto isolated = isolated_cpu_list();
+    if (!isolated.empty()) {
+        o.workers = std::min<unsigned int>(o.workers, isolated.size());
+    }
 
     // Load config from file (CLI overrides below)
     std::string config_path;

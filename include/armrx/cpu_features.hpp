@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 namespace armrx {
 
 struct CpuFeatures {
@@ -20,5 +22,9 @@ struct CpuFeatures {
 // Falls back to hardware_concurrency() if the sysfs file is unavailable or
 // unparsable.
 [[nodiscard]] unsigned int online_cpu_count();
+
+// Returns the set of CPUs isolated via isolcpus kernel parameter.
+// Returns empty vector if isolcpus is not in use or sysfs is unavailable.
+std::vector<unsigned int> isolated_cpu_list();
 
 } // namespace armrx

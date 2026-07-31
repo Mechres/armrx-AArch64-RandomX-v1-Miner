@@ -20,6 +20,17 @@ devbox_logs          # read last build/test/bench log
 devbox_pgo_build     # full PGO: generate → train → use in one call
 ```
 
+**Device build command under `isolcpus` (devbox):**
+```sh
+# The devbox MCP auto-build wrapper ignores isolcpus and pins to core 0 only (slow).
+# Always use the explicit taskset form for on-device builds:
+ssh mechres@192.168.10.156 "cd ~/armrx/build && nohup taskset -c 1-7 cmake --build . -j2 > /tmp/build.log 2>&1 &"
+# -j2 is REQUIRED (1.4 GiB RAM + GCC LTO — -j7 swaps and can hard-lock the device).
+# taskset -c 1-7 beats -j2-on-core-0 by using the isolated cores.
+# Before building, check for stale processes:
+#   ps -eo pid,comm | grep -E 'armr[x]|cmak[e]|gmak[e]|cc1plu[s]' | grep -v grep
+```
+
 CMake requires `LANGUAGES C CXX ASM`. On AArch64: JIT + hardware AES/NEON auto-enabled. On x86_64: JIT excluded, interpreted VM only.
 
 Experimental flags (all default OFF, all verified but not adopted):

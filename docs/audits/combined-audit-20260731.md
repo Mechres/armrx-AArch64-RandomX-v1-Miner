@@ -21,12 +21,13 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 
 ### Tier 0 — Trivial, Highest Impact, No Risk
 
-#### T0-1. Enable Track G (NEON T-table AES) by Default
+#### T0-1. Enable Track G (NEON T-table AES) by Default — ✅ DONE (2026-08-01)
 - **What:** Flip `ARMRX_ENABLE_NEON_TTABLE_AES` from OFF to ON in `CMakeLists.txt`. Code already implemented, KAT-verified (10,000-trial parity), microbenchmarked at +28.8% AES throughput.
 - **Projected gain:** ~3.6% hashrate (12.3% of cycles × 28.8% speedup)
 - **Risk:** Essentially zero — transforms unchanged, only data-movement is NEON-vectorized.
 - **Effort:** 5 minutes. One line in `CMakeLists.txt`.
 - **Verification:** `devbox_build -DARMRX_ENABLE_NEON_TTABLE_AES=ON`, then `devbox_full` (sync→build→test→bench). Compare hashrate at `--warmup=60 --seconds=180`.
+- **Status:** Done. Flipped ON by default (commit 4888ba1); on-device `test_aes_hash` passed on Cortex-A53 (NEON path — host x86_64 only exercises scalar fallback).
 
 #### T0-2. Fix `hardware_concurrency()` Under `isolcpus`
 - **What:** When `isolcpus=1-7` is active, `std::thread::hardware_concurrency()` returns 1 (the unisolated core 0) under musl, silently dropping worker count from 8 to 1. Read `/sys/devices/system/cpu/online` instead.
@@ -73,12 +74,13 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 - **Effort:** 1-2 days.
 - **Files:** `src/jit_compiler_a64.cpp` — insert NOP/`AND xzr, xzr, xzr` padding in `emit32()` calls.
 
-#### T2-3. Worker/Core-0 Remapping Under `isolcpus`
+#### T2-3. Worker/Core-0 Remapping Under `isolcpus` — ✅ DONE (2026-08-01)
 - **What:** Read `/sys/devices/system/cpu/isolated` and exclude core 0 from worker pinning set. Under `isolcpus=1-7`, worker 0 maps to core 0 (unisolated) and contends with stratum/main thread, nullifying the isolcpus win in pool mining.
 - **Projected gain:** Recovers ~14% isolcpus win for pool mining.
 - **Risk:** Low-Medium. Losing worker 0 from isolated cores is better than worker 0 sharing core 0 with main thread.
 - **Effort:** 4-8 hours.
 - **Files:** `src/mining_engine.cpp:80-109` (core ordering), `src/mining_engine.cpp:333-351` (worker pinning).
+- **Status:** Implemented. `filter_to_isolated()` applied to ALL `detect_core_order()` return paths (hwloc + sysfs, including the cpufreq-less fallback that originally skipped the filter — verified bug: worker 0 on core 0, core 7 idle on MSM8929). Default worker count capped to isolated count. On-device verified: workers pinned 1-7, main thread core 0, core 7 in use.
 
 ---
 
@@ -133,16 +135,16 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 
 | # | Idea | Gain | Risk | Effort | Ready? |
 |---|------|------|------|--------|--------|
-| **1** | Enable Track G (T0-1) | **~3.6%** | Zero | 5 min | **Do now** |
-| **2** | Fix `hardware_concurrency()` (T0-2) | Prevents 87% loss | Low | 1 hr | **Do now** |
+| **1** | Enable Track G (T0-1) | **~3.6%** | Zero | 5 min | ✅ **Done** |
+| **2** | Fix `hardware_concurrency()` (T0-2) | Prevents 87% loss | Low | 1 hr | ✅ **Done** |
 | **3** | Benchmark D2 (T1-1) | ~0.5–1% | Low | 2-4 hr | Harness needed |
 | **4** | Clean perf stat path (T1-2) | Enables all work | Low | 4-8 hr | Prerequisite |
 | **5** | PRFM hints (T2-1) | ~0.1–0.5% | Low | 4-8 hr | Ready |
-| **6** | Worker/core-0 remapping (T2-3) | Recovers ~14% | Low-Med | 4-8 hr | Ready |
+| **6** | Worker/core-0 remapping (T2-3) | Recovers ~14% | Low-Med | 4-8 hr | ✅ **Done** |
 | **7** | Dual-issue alignment (T2-2) | ~0.1–0.5% | Low-Med | 1-2 days | Ready |
 | **8** | Track C retry (T3-1) | ~1–3% | **High** | Days-weeks | **Blocked** |
 | **9** | Load hoisting (T3-2) | ~0.2–1% | **High** | 2-4 days | **Design only** |
-| **10** | NEON mul analysis (T3-3) | ~0–2% | Analysis | 1-2 days | Gate check |
+| **10** | NEON mul analysis (T3-3) | ~0–2% | Analysis | 1-2 days | ✅ **Gate check done** |
 | **11** | Novel angles (N1–N8) | Varies | Varies | Varies | Investigate |
 
 ---

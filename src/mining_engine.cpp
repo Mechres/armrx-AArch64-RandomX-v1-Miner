@@ -21,6 +21,27 @@ namespace armrx {
 
 namespace {
 
+// Apply isolcpus awareness: keep only isolated cores in the worker pinning
+// order. Returns the filtered order, or the original if no isolation is
+// active / nothing matched.
+std::vector<unsigned int> filter_to_isolated(std::vector<unsigned int> order) {
+    auto isolated = isolated_cpu_list();
+    if (isolated.empty()) return order;
+    std::vector<unsigned int> filtered;
+    for (auto cpu : order) {
+        if (std::find(isolated.begin(), isolated.end(), cpu) != isolated.end())
+            filtered.push_back(cpu);
+    }
+    if (filtered.empty()) return order;  // isolation list present but disjoint — keep original
+    std::string iso_list;
+    for (size_t i = 0; i < filtered.size(); ++i) {
+        if (i > 0) iso_list += ", ";
+        iso_list += std::to_string(filtered[i]);
+    }
+    ARMRX_LOG_INFO << "isolcpus detected \u2014 workers pinned to isolated cores: " << iso_list;
+    return filtered;
+}
+
 #ifdef ARMRX_HAVE_HWLOC
 
 // hwloc-based core ordering: discovers topology and returns core IDs
@@ -37,7 +58,7 @@ std::vector<unsigned int> detect_core_order() {
         unsigned int n = online_cpu_count();
         std::vector<unsigned int> fallback(n);
         for (unsigned int i = 0; i < n; ++i) fallback[i] = i;
-        return fallback;
+        return filter_to_isolated(std::move(fallback));
     }
 
     int num_pus = hwloc_get_nbobjs_by_depth(topology, depth);
@@ -65,7 +86,7 @@ std::vector<unsigned int> detect_core_order() {
         // Fallback: sequential order
         std::vector<unsigned int> fallback(static_cast<std::size_t>(num_pus));
         for (int i = 0; i < num_pus; ++i) fallback[static_cast<std::size_t>(i)] = static_cast<unsigned int>(i);
-        return fallback;
+        return filter_to_isolated(std::move(fallback));
     }
 
     std::sort(freq_cores.begin(), freq_cores.end(),
@@ -74,7 +95,8 @@ std::vector<unsigned int> detect_core_order() {
     std::vector<unsigned int> order;
     order.reserve(freq_cores.size());
     for (const auto& fc : freq_cores) order.push_back(fc.second);
-    return order;
+
+    return filter_to_isolated(std::move(order));
 }
 
 #else // !ARMRX_HAVE_HWLOC
@@ -98,7 +120,7 @@ std::vector<unsigned int> detect_core_order() {
     if (freq_cores.empty()) {
         std::vector<unsigned int> fallback(num_cpus);
         for (unsigned int i = 0; i < num_cpus; ++i) fallback[i] = i;
-        return fallback;
+        return filter_to_isolated(std::move(fallback));
     }
 
     std::sort(freq_cores.begin(), freq_cores.end(),
@@ -107,7 +129,8 @@ std::vector<unsigned int> detect_core_order() {
     std::vector<unsigned int> order;
     order.reserve(freq_cores.size());
     for (const auto& fc : freq_cores) order.push_back(fc.second);
-    return order;
+
+    return filter_to_isolated(std::move(order));
 }
 
 #endif // ARMRX_HAVE_HWLOC
