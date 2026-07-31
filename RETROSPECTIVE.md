@@ -94,7 +94,9 @@ This is where everything got measured rigorously.
 
 **Discovery #1: the gap to XMRig is instruction count, not IPC.** armrx IPC (0.731) is *better* than XMRig (0.612). armrx stall rate (11.41%) is *lower* than XMRig (16.70%). But armrx emits **33.5% more instructions per hash** (132.93M vs 99.57M). Every performance idea scored against IPC/stall cycles had been measuring the wrong metric. This reframing came from comparing four independently-written performance plans against each other — one of them (Hermes) correctly identified the axis mismatch, which the other three had all missed.
 
-> **Correction (2026-08-01):** the 132.93M figure predates the `--perf-ready` harness and Track G. The clean steady-state total is **119.0M instr/hash** (IPC 0.740, `docs/experiments/t12-perf-ready-first-run.md`), narrowing the XMRig gap to ~+19.5% if XMRig's 99.57M is unchanged. Full reconciliation in `docs/audits/performance-audit-work-ideas-20260801.md` §1.
+> **Correction (2026-08-01):** the 132.93M figure predates the `--perf-ready` harness and Track G. The clean steady-state total is **119.0M instr/hash** (IPC 0.740, `docs/experiments/t12-perf-ready-first-run.md`), narrowing the XMRig gap to ~+19.5% if XMRig's 99.57M is unchanged.
+>
+> **Correction (2026-07-31, W1-4):** XMRig was re-baselined on the same device (light mode, 1 thread, 765 MHz, perf-stat totals only — no disassembly). Measured XMRig = **94.5M instr/hash, IPC 0.648, 5.05 H/s**. The audit's +19.5% hypothesis is **rejected**: the true instruction gap is **+25.9%**, but armrrx's superior IPC (0.731 vs 0.648) shrinks the cycles/hash gap to **+11.5%** and the raw H/s gap to only **−4.2%** (armrrx 4.84 vs XMRig 5.05 H/s). Net: the remaining lever vs XMRig is ~26% excess instructions/hash (dominant, ~80% in the superscalar body); there is no separate stall/scheduling deficit. The historical 99.57M XMRig figure was 5.1% above the device re-baseline (likely fast-mode/different-clock). See `docs/experiments/w14-xmrig-rebaseline.md`.
 
 **Discovery #2: the two-cluster topology.** XMRig runs on the same hardware showed armrx at ~90% per-cluster — a real but modest gap, not the "far behind" impression raw aggregate numbers gave. The 8 workers don't see symmetric cores: the two 4-core L2 clusters compete through an interconnect that costs cluster 1 roughly half its throughput under full contention. No code fix touches this.
 
@@ -238,11 +240,12 @@ This workflow evolved organically and was itself refined multiple times — nota
 | Largest overall perf win | +14% (isolcpus deployment, kernel config) |
 | Device | MSM8929/Snapdragon 415, 8× Cortex-A53, 2 GiB RAM |
 | Sustained hashrate (8 workers) | ~24.8 H/s |
-| Single-core hashrate | ~4.27 H/s |
-| armrx instructions/hash | 132.93M |
-| XMRig instructions/hash (same device) | 99.57M |
-| armrx IPC | 0.731 |
-| XMRig IPC | 0.612 |
+| Single-core hashrate | ~4.84 H/s (armrrx, Track G ON) / ~5.05 H/s (XMRig, W1-4) |
+| armrrx instructions/hash | 119.0M (clean, `--perf-ready`) |
+| XMRig instructions/hash (same device, W1-4) | 94.5M |
+| armrrx IPC | 0.731 |
+| XMRig IPC (W1-4) | 0.648 |
+| armrrx vs XMRig (instruction gap) | +25.9% instr/hash, −4.2% H/s (W1-4) |
 | armrx vs XMRig (cluster-normalized) | ~90% |
 | Independent code reviews completed | 5 (3 for the scheduler alone) |
 | Differential KAT pairs verified | 450 main-program + 200 superscalar |

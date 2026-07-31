@@ -46,9 +46,13 @@ it helped), scratchpad-locality chase, peephole coalescing, cpufreq/governor fix
 |---|---|---|
 | Historical armrx instr/hash | 132.93 M | Pre-`--perf-ready`, pre-Track-G-default; derived from sustained mining H/s |
 | Clean armrx instr/hash | **119.0 M** | Post-Track-G-ON, `--perf-ready` gated; **prefer this** |
-| Historical XMRig instr/hash | 99.57 M | Same-device light-mode, **not remeasured** against current armrx |
+| Historical XMRig instr/hash | 99.57 M | Pre-2026-07-31; **superseded** by W1-4 measured value below |
 | Old gap | +33.5% instr vs XMRig | Stale if Track G moved the total |
-| Implied gap if XMRig unchanged | **+19.5%** (119/99.57) | **Hypothesis only — re-baseline required** |
+| Implied gap if XMRig unchanged | **+19.5%** (119/99.57) | **Hypothesis — REJECTED by W1-4** (see below) |
+| **XMRig instr/hash (W1-4 measured, 2026-07-31)** | **94.5 M** | light, 1-thread, 765 MHz; IPC 0.648; **5.05 H/s** |
+| **Measured instr gap (armnx vs XMRig)** | **+25.9%** (119.0/94.5) | armnx emits 25.9% more instr/hash |
+| **Measured cycles/hash gap** | **+11.5%** | armnx IPC 0.731 vs XMRig 0.648 nearly closes it |
+| **Measured raw H/s gap @ 765 MHz** | **−4.2%** (armnx 4.84 vs XMRig 5.05) | NOT 19.5% — IPC differential offsets most of it |
 
 Delta 132.93 → 119.0 = **−13.9 M (−10.5%)**. Plausible contributors: Track G denser AES path,
 measurement methodology change, other post-2026-07-24 work. **Not attributed.**
@@ -160,7 +164,7 @@ pure-latency recovery. A PMU drilldown is informative; a code fix is unlikely to
 | N2 | Monolithic no-ABI register pinning | **Open, extreme risk/effort** — overlaps Track C moonshot; only if census proves frame overhead is the XMRig gap. → W3-3 |
 | N3 | Blake2b NEON check | **Mostly closed as "missing NEON"** — NEON path exists. Residual: measure Blake2b's share of the 119 M and whether scalar fallback ever runs on device. → W1-3 |
 | N4 | AArch32/Thumb-2 | **Deprioritize** — loses 64-bit GPRs RandomX needs; I-cache win speculative; front-end already <1% of cycles |
-| N5 | XMRig black-box binary instr census | **Open, legal-gated** — highest direct answer to the gap; clean-room counsel before any disassembly. Prefer self-census (W1-1) + same-device XMRig `perf stat` totals first (no disasm). → W1-4 |
+| N5 | XMRig black-box binary instr census | **Mostly answered WITHOUT disassembly (2026-07-31)** — W1-4 `perf stat` totals gave XMRig = 94.5 M instr/hash, IPC 0.648, 5.05 H/s; true gap +25.9% instr / −4.2% H/s. Full JIT-buffer disassembly remains legal-gated and **not required** for the current backlog (the instruction-gap lever is already scoped to the superscalar body). |
 | N6 | BOLT | **Still never run** — expected null (JIT dominates). Cheap close-the-question. → W2-1 |
 | N7 | Per-cluster cpufreq | **Closed** — no OPP / no policies |
 | N8 | Hybrid JIT/interpreter main VM | **Educational only** — contradicts 94% architectural finding |
@@ -235,15 +239,19 @@ Tiers follow the project's culture: **T0** trivial/docs, **T1** cheap measuremen
   compress symbols; if <0.5% cycles, close. Optional: force-compile without NEON and A/B
   (expect large init/hash regression only if Blake were hot — it shouldn't be).
 
-#### W1-4. Same-device XMRig `perf stat` re-baseline (no disassembly)
+#### W1-4. Same-device XMRig `perf stat` re-baseline (no disassembly) — **DONE (2026-07-31)**
 - **What:** Remeasure XMRig instructions/hash and H/s on the **same** device, isolcpus,
-  light mode, pinned core, long window — update the gap vs armrx 119.0 M / 4.83 H/s.
-- **ROI:** Recalibrates the "10–12% / 33.5%" narrative; may shrink or grow the target.
-- **Risk:** Legal — **totals and PMU only**, no `objdump` of XMRig JIT buffers (see N5).
-- **Effort:** half–1 day.
-- **Protocol:** Document job seed/template if possible; `perf stat -e cycles,instructions`
-  on steady-state mining; compute instr/hash = instructions / hashes_completed; compare to
-  armrx `--perf-ready`. Write experiment note. **Do not** proceed to N5 without counsel.
+  light mode, pinned core, long window — update the gap vs armnx 119.0 M / 4.83 H/s.
+- **ROI:** Recalibrates the "10–12% / 33.5% / +19.5%" narrative. **Result: the +19.5%
+  hypothesis is REJECTED.** Measured XMRig = 94.5 M instr/hash, IPC 0.648, 5.05 H/s.
+  armnx gap is **+25.9% instr/hash** but only **+11.5% cycles/hash** and **−4.2% raw H/s**
+  (armnx's superior IPC 0.731 offsets most of the instruction excess).
+- **Risk:** Legal — **totals and PMU only**, no `objdump` of XMRig JIT buffers (see N5). Honored.
+- **Effort:** ~half day (binary sourcing + schema + buffering pitfalls; see experiment note).
+- **Protocol:** `perf stat -e cycles,instructions` on steady-state benchmark; H/s from XMRig's
+  own speed line (piped → line-buffered). Evidence: `docs/experiments/w14-xmrig-rebaseline.md`.
+- **Conclusion:** Remaining headroom vs XMRig is **~26% excess instructions/hash** (dominant lever,
+  ~80% in superscalar body). No separate stall/scheduling deficit — armnx IPC already superior.
 
 #### W1-5. Track G full-workload E2E A/B — **DONE, CONFIRMED WIN (2026-08-01)**
 - **Result:** ON-OFF-ON-OFF `--perf-ready` A/B (md5-verified): ON is **+1.68% H/s,
@@ -407,7 +415,7 @@ W0-1/W0-2 (docs sync)
 |---|---|---|---|---|---|
 | 1 | W1-1 | Clean instruction census vs 119 M | Diagnostic ★ | Low | **DONE — 80.5% ss / 9.9% main-VM (IPC 0.405) / 9.5% AES+glue; 58.4M static superseded (live body 5,224 A64/call)** |
 | 2 | W1-2 | T3-3 IMUL magnitude gate | Gate only | Low | **DONE — FAIL** (0.003%; closed) |
-| 3 | W1-4 | XMRig total re-baseline | Recalibrates gap | Low+legal | **Ready** |
+| 3 | W1-4 | XMRig total re-baseline | Recalibrates gap | Low+legal | **DONE — XMRig 94.5M instr/hash, IPC 0.648, 5.05 H/s; +19.5% hypothesis REJECTED (true gap +25.9% instr / −4.2% H/s)** |
 | 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **DONE — +1.68% H/s, −2.07% cyc, −4.93% instr (ON)** |
 | 5 | W0-1 | Stale-doc sync | Process | None | **Ready** |
 | 6 | W1-3 | Blake2b share close | ~0% | Low | **Ready** |
