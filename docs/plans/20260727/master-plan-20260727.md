@@ -166,6 +166,12 @@ Everything downstream should be scored against these, not against intuition.
    hardware).** Neither was done here; the 132.93M figure should still be treated as the
    trustworthy total until one of these is done properly.
 
+   **Correction (2026-08-01):** option (a) was implemented — T1-2 added the `--perf-ready`
+   steady-state hook (`docs/experiments/t12-perf-ready-first-run.md`), closing the tooling
+   gap. The clean steady-state total is **119.0M instr/hash** (IPC 0.740); treat 132.93M as
+   historical (pre-harness, pre-Track-G). Reconciliation in
+   `docs/audits/performance-audit-work-ideas-20260801.md` §1.
+
    **Main-program side also done (2026-07-27), same `--jit-dump` output, self-aggregated** (the
    codebase only prints an automatic per-opcode summary for the superscalar table, not the main
    one, so this required a small offline script over the existing raw per-instruction rows — no
@@ -419,7 +425,7 @@ promoting ahead of Track B's main item as a smaller, faster test of the same und
 
 ---
 
-## Track C — Structural ABI/call overhead: inline the light-mode dataset-item helper *(Phase A done 2026-07-29, working)*
+## Track C — Structural ABI/call overhead: inline the light-mode dataset-item helper *(Phase A done 2026-07-29 (zero impact); re-applied 2026-07-30 and REVERTED — full-VM hang, 27e7c41; see `docs/experiments/light-mode-dataset-item-prologue-attempt.md`)*
 
 *Hermes Item 2. Traces to an abandoned 2026-07-19 handoff priority, never executed. Independent of
 Track B — orthogonal axis (reduces the cost of every derivation call rather than reducing the
@@ -680,10 +686,12 @@ algorithm, only data-movement changed.
 | hash+fill (separate) | 28,493.75 | 22,137.04 | +28.7% |
 
 **Projected full-workload impact: ~3.6%** (12.3% of cycles × 28.8% speedup).
-Full-workload A/B not completed (device insufficient memory for fast mode).
+Full-workload E2E A/B not completed as of 2026-07-30; tracked as W1-5 in
+`docs/audits/performance-audit-work-ideas-20260801.md` (light-mode `--perf-ready`
+protocol — no fast-mode memory needed).
 
-Gated behind `ARMRX_ENABLE_NEON_TTABLE_AES` (CMake option, default OFF).
-10,000-trial bit-exact parity test passes. KATs green.
+**Default ON since 2026-08-01 (commit 4888ba1)** — no longer experimental
+(audit item T0-1). 10,000-trial bit-exact parity test passes. KATs green.
 Docs: `docs/experiments/neon-ttable-aes.md`.
 
 **Note:** the actual implementation is *simpler* than the original plan (vectorize

@@ -1,5 +1,12 @@
 # Combined Audit — armrx Next Steps (2026-07-31)
 
+> **⚠️ SUPERSEDED (2026-08-01):** the live performance backlog now lives in
+> [`performance-audit-work-ideas-20260801.md`](performance-audit-work-ideas-20260801.md)
+> (fresh external audit; reconciled instruction totals, 14 status corrections D1–D14).
+> This document is retained as historical reference. Status corrections applied since:
+> T3-3 gate run = **FAIL** (`docs/experiments/t33-imul-magnitude-gate.md`), T3-1 ROI
+> reframed (see T3-1 section below).
+
 > **Generated from two independent audits:**
 > - AGY (Gemini 3.1 Pro High) — `agy -p` audit against the full codebase
 > - Reasonix (DeepSeek V4 Pro) — 125,973-token read-only codebase analysis
@@ -89,6 +96,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 #### T3-1. Track C Retry — Custom ABI for Dataset-Item Helper
 - **What:** Re-attempt inline dataset-item helper. Use custom register allocation so `rx_calc_dataset_item` XORs results directly into live VM registers instead of saving/restoring 14 GPRs and relaying 64 bytes through memory.
 - **Projected gain:** ~1–3% (16,384 calls/hash × eliminated frame overhead)
+- **Status (corrected 2026-08-01):** ROI overstates current evidence — master-plan Phase B/C closed at **≤0.5%** ceiling, Phase A measured ~zero when it ran, and the re-applied Phase A **hung again and was reverted** (27e7c41). Reframed as W3-1 in `performance-audit-work-ideas-20260801.md`; do not retry without the instruction census (W1-1) + the documented hang diagnostic.
 - **Risk:** **HIGH** — the first attempt hung on-device with unexplained divergence. The documented next diagnostic step (compare actual computed dataset-item values against reference) has never been run.
 - **Gate:** Must run the documented diagnostic first before any re-attempt. See `docs/experiments/light-mode-dataset-item-prologue-attempt.md`.
 - **File:** `src/jit_compiler_a64_static.S` (prologue/epilogue), `src/jit_compiler_a64.cpp`.
@@ -119,6 +127,8 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 
 **N3. Blake2b NEON Vectorization Check —** Verify `blake2b.cpp` is actually using NEON for 128-bit mixing rounds. Standard C++ Blake2b often underutilizes NEON registers.
 
+> **Status (2026-08-01):** already implemented — `src/blake2b.cpp` has a full AArch64 NEON compress path. Reframed to a share/density check (W1-3 in `performance-audit-work-ideas-20260801.md`).
+
 **N4. AArch32 (Thumb-2) Execution State —** If the kernel supports it, compiling in 32-bit ARM/Thumb-2 mode increases code density. Might improve L1I cache utilization on the memory-latency-bound main VM program. Loses expanded 64-bit register file.
 
 **N5. Black-Box Binary Analysis of XMRig —** Compile XMRig and run `objdump`/`perf annotate` on the *binary* to count AArch64 instructions emitted per RandomX construct, without reading source code. Could identify the 33.5% instruction gap's origin. Clean-room legality depends on jurisdiction — consultation recommended before attempting.
@@ -127,7 +137,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 
 **N6. BOLT Post-Link Optimization —** Binary layout optimization using real `perf record` profiles. Expected null because 84%+ of cycles run from JIT buffers, not the static binary. Worth a quick try only to close the question (~1 day, no correctness risk).
 
-**N7. Per-Cluster Frequency/Governor Tuning —** If `cpufreq` sysfs were available, pin slow cluster (cores 4-7) to higher minimum frequency. Not possible on this device (no `cpufreq` sysfs). Operational/deployment, not code.
+**N7. Per-Cluster Frequency/Governor Tuning —** If `cpufreq` sysfs were available, pin slow cluster (cores 4-7) to higher minimum frequency. Not possible on this device (verified 2026-08-01: `CONFIG_CPUFREQ_DT` is built but the device tree carries **no OPP table**, so no policies exist — not merely missing sysfs). Operational/deployment, not code.
 
 **N8. Hybrid JIT/Interpreter for Main VM Program Only —** Both auditors agree this contradicts evidence (94% ceiling says stall is dependency-chain depth, not something dispatch bubbles would fix). Kept as "educational, not actionable."
 

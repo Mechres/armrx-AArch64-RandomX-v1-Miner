@@ -12,6 +12,11 @@ Track B Gates A-C progress:
 - **Gate B** (JIT implementation) — **DONE 2026-07-29.** Three bugs fixed in `_end_hybrid` (stack offset, x16 clobber, x17 clobber). `--dataset-mb=N` now works — `test_jit_dataset_2way` (20 seeds, exhaustive differential) and `test_partial_dataset` both pass. Full `ctest` suite green.
 - **Gate B** (memory-contention measurement) — **DONE 2026-07-29: CLEARLY NEGATIVE.** 8-worker interleaved comparison (baseline → cooldown → hybrid → cooldown, 1 process each, clean `pgrep` verified): baseline **24.68 H/s** vs hybrid 256 MiB **17.04 H/s** (−31%). Result consistent across 3 runs (16.92, 17.04, 17.06 H/s). Perf counters confirm the regression is real: hybrid path's extra DRAM traffic saturates the two-cluster interconnect. Track B does not ship to production on this hardware; the code stays gated (`--dataset-mb=N`, zero cost when off) for future reference.
 - **Track C Phase A** (light-mode dataset-item register preservation) — **DONE 2026-07-29: MEASURED — ZERO IMPACT.** Reduced `rx_calc_dataset_item` prologue from 112-byte/7-pair frame (x0-x13) to 80-byte/5-pair (x4-x13 only). All tests pass cleanly including KATs, JIT equivalence, determinism. 8-worker interleaved benchmark: Phase A 25.06 H/s vs baseline 25.08 H/s — no measurable improvement. Root cause: caller-frame saving (4 instructions/call = 65,536 per hash) is 0.05% of ~134M instructions/hash. Code stays (correct, zero cost), but the next target must be the callee frame.
+
+> **Correction (2026-08-01):** the Phase A change was re-applied on 2026-07-30 (c7c1b5c) and
+> **hung the full-VM JIT** (100% CPU spin, zero hashes) — identical to the 2026-07-27 hang —
+> then reverted (27e7c41). "Code stays" is false; the tree does not contain it. See
+> `docs/experiments/light-mode-dataset-item-prologue-attempt.md`.
 - **Gate C** (memory pressure) — **PENDING.** 2.8 GiB zram swap present on device; watch swap usage and `MemAvailable` over a multi-hour run. High swap usage would mean hybrid mode's extra memory allocation is competing with the dataset.
 
 Phases 1–13 are all **fully resolved** — see `docs/archived/plan_completed_phases_1-5.md`,

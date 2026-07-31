@@ -54,7 +54,7 @@ ssh mechres@192.168.10.156 "cd ~/armrx/build && nohup taskset -c 1-3 cmake --bui
 
 CMake requires `LANGUAGES C CXX ASM`. On AArch64: JIT + hardware AES/NEON auto-enabled. On x86_64: JIT excluded, interpreted VM only.
 
-Experimental flags (all default OFF, all verified but not adopted):
+Experimental flags (all default OFF, all verified but not adopted — exception: `ARMRX_ENABLE_NEON_TTABLE_AES` (Track G) is **default ON** since 2026-08-01, +28.8% AES primitive throughput):
 - `ARMRX_PGO=GENERATE|USE` — profile-guided optimization (GCC only, LTO must be off; measured null on current code)
 - `ARMRX_ENABLE_NEON_AES=ON` — NEON vector-permute AES (~19.4% slower on Cortex-A53)
 - `ARMRX_ENABLE_JIT_FAST_DIV_SQRT=ON` — Newton-Raphson FDIV/FSQRT (−1.1% hashrate)

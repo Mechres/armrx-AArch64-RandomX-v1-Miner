@@ -94,6 +94,8 @@ This is where everything got measured rigorously.
 
 **Discovery #1: the gap to XMRig is instruction count, not IPC.** armrx IPC (0.731) is *better* than XMRig (0.612). armrx stall rate (11.41%) is *lower* than XMRig (16.70%). But armrx emits **33.5% more instructions per hash** (132.93M vs 99.57M). Every performance idea scored against IPC/stall cycles had been measuring the wrong metric. This reframing came from comparing four independently-written performance plans against each other — one of them (Hermes) correctly identified the axis mismatch, which the other three had all missed.
 
+> **Correction (2026-08-01):** the 132.93M figure predates the `--perf-ready` harness and Track G. The clean steady-state total is **119.0M instr/hash** (IPC 0.740, `docs/experiments/t12-perf-ready-first-run.md`), narrowing the XMRig gap to ~+19.5% if XMRig's 99.57M is unchanged. Full reconciliation in `docs/audits/performance-audit-work-ideas-20260801.md` §1.
+
 **Discovery #2: the two-cluster topology.** XMRig runs on the same hardware showed armrx at ~90% per-cluster — a real but modest gap, not the "far behind" impression raw aggregate numbers gave. The 8 workers don't see symmetric cores: the two 4-core L2 clusters compete through an interconnect that costs cluster 1 roughly half its throughput under full contention. No code fix touches this.
 
 **Discovery #3: the +14% win is operational, not a code change.** `isolcpus=1-7 rcu_nocbs=1-7` on the kernel boot cmdline gave a reproducible 28.4 H/s burst (corrected to ~24.8 H/s sustained). This was — and remains — the largest single measured win in the project's history, bigger than any code change.
@@ -135,11 +137,11 @@ Four independently-written performance plans (Claude Opus 5, Deepseek V4, Claude
 | **B** | Hybrid partial dataset (cache N MiB of 2 GiB dataset) | ✅ Implemented, **−31% at 8 workers** — interconnect saturates, not adopted for production. Code stays gated as reference. |
 | **C** | Inline dataset-item helper (skip ABI call overhead) | Phase A ✅ — zero impact (+0.02%, noise). Phase B closed: ~0.5% ceiling, high-risk, not worth it. |
 | **D1** | 2-way superscalar interleave | 🍅 Negative — 66× more L1I refills, −1.2% IPC |
-| **D2** | Cross-hash boundary pipelining | ✅ Implemented, correct on host, ~0.5–1% estimated. On-device A/B not completed. |
+| **D2** | Cross-hash boundary pipelining | ✅ Implemented, live in mining path; on-device A/B done 2026-08-01: interleaved −2.77% AES time, ~0.34% E2E (`docs/experiments/t11-d2-microbenchmark.md`) |
 | **D3** | Full dual-nonce JIT interleave | 🍅 Contraindicated by D1 + 100% register liveness finding |
 | **E** | Scheduler ceiling investigation | 🔻 Gated — back-end bound confirmed, no scheduler fix possible |
 | **F** | Instruction-count micro-opt | 🔻 Deprioritised — per-opcode audit found no waste anywhere |
-| **G** | NEON T-table AES AddRoundKey | ✅ **+28.8% AES primitive throughput**, projected ~3.6% full-workload. Gated behind flag (default OFF). |
+| **G** | NEON T-table AES AddRoundKey | ✅ **+28.8% AES primitive throughput**, projected ~3.6% full-workload. **Default ON since 2026-08-01 (commit 4888ba1)**. |
 | **H** | Alternative execution models | 🔻 Never started — highest risk, most speculative |
 | **I** | Core-0 stratum/worker contention | ✅ Closed — effectively zero (<0.1%) |
 | **J** | Cheap layout/padding tweaks | 🔻 Low priority |
@@ -153,7 +155,7 @@ Ranked by real measured impact:
 | # | Change | Type | Impact |
 |---|--------|------|--------|
 | 1 | `isolcpus=1-7 rcu_nocbs=1-7` | Kernel config (deployment) | **+14%** |
-| 2 | NEON T-table AES AddRoundKey (Track G) | Code | **+28.8% AES throughput** (~3.6% full workload, gated) |
+| 2 | NEON T-table AES AddRoundKey (Track G) | Code | **+28.8% AES throughput** (~3.6% full workload, default ON 2026-08-01) |
 | 3 | Emitter lookahead scheduler | Code | **+0.233% IPC** |
 | 4 | Scheduler window widening | Code | **+0.156% IPC** |
 | 5 | Prefetch removal | Code | **+0.885% IPC** |
