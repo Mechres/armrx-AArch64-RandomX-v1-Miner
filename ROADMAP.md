@@ -18,6 +18,7 @@
 (none — all implementable audit items shipped or closed; next items need the JIT-compiler files, which are gated to comments-only until lifted)
 
 ### Completed (post-alpha)
+- **W1-1 — region instruction census** (2026-08-01) — 118.96M attributed: superscalar 80.5% / main-VM 9.9% (IPC 0.405) / AES+glue 9.5%; static 58.4M superseded (live body 5,224 A64/call); sample-bias dead, under-count primary, 8% call-count residual — `docs/experiments/w11-instruction-census.md`
 - **T0-1 — Track G (NEON T-table AES) default ON** (2026-08-01) — commit 4888ba1; E2E A/B same day confirms +1.68% H/s, −2.07% cycles, −4.93% instr — `docs/experiments/track-g-e2e-ab.md`
 - **T0-2 — hardware_concurrency() footgun** (2026-07-31) — online_cpu_count() reads `/sys/devices/system/cpu/online`
 - **T2-3 — isolcpus-aware worker pinning** (2026-08-01) — workers pin to isolated cores on all `detect_core_order()` paths; default worker count capped to isolated count; on-device verified (workers 1-7, main 0)

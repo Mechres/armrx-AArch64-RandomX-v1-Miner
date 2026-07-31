@@ -405,7 +405,7 @@ W0-1/W0-2 (docs sync)
 
 | Rank | ID | Idea | Likely gain | Risk | Ready? |
 |---|---|---|---|---|---|
-| 1 | W1-1 | Clean instruction census vs 119 M | Diagnostic ★ | Low | **Ready** |
+| 1 | W1-1 | Clean instruction census vs 119 M | Diagnostic ★ | Low | **DONE — 80.5% ss / 9.9% main-VM (IPC 0.405) / 9.5% AES+glue; 58.4M static superseded (live body 5,224 A64/call)** |
 | 2 | W1-2 | T3-3 IMUL magnitude gate | Gate only | Low | **DONE — FAIL** (0.003%; closed) |
 | 3 | W1-4 | XMRig total re-baseline | Recalibrates gap | Low+legal | **Ready** |
 | 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **DONE — +1.68% H/s, −2.07% cyc, −4.93% instr (ON)** |
