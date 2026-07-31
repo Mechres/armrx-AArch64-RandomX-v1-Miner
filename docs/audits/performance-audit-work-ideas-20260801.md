@@ -418,7 +418,7 @@ W0-1/W0-2 (docs sync)
 | 3 | W1-4 | XMRig total re-baseline | Recalibrates gap | Low+legal | **DONE — XMRig 94.5M instr/hash, IPC 0.648, 5.05 H/s; +19.5% hypothesis REJECTED (true gap +25.9% instr / −4.2% H/s)** |
 | 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **DONE — +1.68% H/s, −2.07% cyc, −4.93% instr (ON)** |
 | 5 | W0-1 | Stale-doc sync | Process | None | **Ready** |
-| 6 | W1-3 | Blake2b share close | ~0% | Low | **Ready** |
+| 6 | W1-3 | Blake2b share close | ~0% | Low | **DONE — NEON path active (blake2b.cpp:71), scalar fallback dead on AArch64; share ≈0.5% (0.6M of 119M); no action** |
 | 7 | W2-1 | BOLT null-check | ~0% | Low | Ready if toolchain |
 | 8 | W2-2 | N1 adjacency frequency | Gate | Low | **Ready** |
 | 9 | W2-3 | Stall taxonomy PMU | Diagnostic | Low | Optional |
