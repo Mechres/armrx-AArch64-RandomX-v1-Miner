@@ -132,21 +132,36 @@ final emitter/generator state; the actual emission carries 250 IMUL_RCP
 a ~4,000-instruction RandomX-level program per item at ~1.3 A64 instr each,
 not the ~512-instruction/3,563-A64 shape the doc assumed).
 
-**Hypothesis C (call-count/buffer assumptions): MOSTLY DEAD, 8% residual
-open.** Static total 5,401 × documented 16,384 calls = 88.49 M vs measured
-95.77 M → implied **17,727 calls/hash** (8.2% over 16,384). Two candidate
-explanations, undistinguished here: (i) the real light-mode dataset-read
-count per hash is ~17.7 k, not 16,384; (ii) dynamic per-call execution
-exceeds static by ~8% (the straight-line emission makes this unlikely but
-not impossible to verify exactly). A direct call-count measurement was
-attempted (patch the superscalar `ret` in the live RWX buffer with a
-self-incrementing counter) and **blocked by a kernel/device I-cache
-coherence anomaly**: bytes written to executable memory (both via
-`/proc/<pid>/mem` and in-process with `__builtin___clear_cache`) are
-sometimes executed as different instructions (verified standalone: executed
-`adrp`/`add` encodings differed from the written words; SIGILL/SIGSEGV).
-Flagged here as a device measurement hazard for any future JIT-buffer
-instrumentation on this kernel (6.12.1-msm8916).
+**Hypothesis C (call-count/buffer assumptions): RESOLVED — the call count is
+EXACTLY 16,384/hash; the 8.2% gap is per-call static-count slack.** Source
+analysis (2026-08-01, post-census): the light-mode dataset read is a hard
+loop — 8 `run()` calls per hash (vm.cpp:982-990) × **2,048 loop iterations per
+call** (x3 = hardcoded `2048ULL`, vm.cpp:843; `subs x3, x3, 1; bne .Lmain_loop`,
+jit_compiler_a64_static.S:510-511) × one `bl rx_calc_dataset_item` per
+iteration (light path, .S:577) = **16,384 calls/hash, exact by construction**
+(2,048 = RANDOMX_PROGRAM_MAX_SIZE × kRandomXCacheAccesses, 256 × 8). The
+census's "implied 17,727 calls" was 95.77M ÷ 5,401 — an artifact of an
+under-measured static divisor: the true per-call dynamic cost is **~5,845 A64**
+(95.77M ÷ 16,384, +8.2% over the 5,401 counted from the 23,588-B live read;
+implied true emission extent ~25.5 KB — literal-pool identification slack).
+The budget then closes exactly: 16,384 × (719.6 main-VM + 5,845.3 item) =
+107.56 M/hash = measured 95.77 M + 11.79 M; + AES ≈10.7 M + blake/glue ≈0.6 M
+≈ 118.96 M total. The documented "16,384×/hash" figure was correct all along;
+what the census actually demonstrated is that the *static per-call count*
+(5,401) is ~8% low, not that the call count is high. The direct call-count
+instrumentation attempt (blocked by the I-cache anomaly — see caveat 5) is
+no longer needed.
+
+> **Device hazard note (kept from the original C analysis):** the direct
+> call-count instrumentation attempt (patch the superscalar `ret` in the
+> live RWX buffer with a self-incrementing counter) was blocked by a
+> kernel/device **I-cache coherence anomaly**: bytes written to executable
+> memory (both via `/proc/<pid>/mem` and in-process with
+> `__builtin___clear_cache`) are sometimes executed as different instructions
+> (verified standalone: executed `adrp`/`add` encodings differed from the
+> written words; SIGILL/SIGSEGV). Any future JIT-buffer instrumentation on
+> this kernel (6.12.1-msm8916) should use kernel-side counting
+> (uprobes/perf) instead of memory patching.
 
 ## Cycle-side findings
 
@@ -177,8 +192,10 @@ instrumentation on this kernel (6.12.1-msm8916).
    wrapper from the template disassembly). No per-opcode sample attribution
    was possible; the 5,224 body figure is for this binary's own seed.
 2. The static 5,401/call × 16,384 = 88.49 M vs measured 95.77 M leaves an
-   8% residual attributed to the call-count question (see C above) — the
-   one open item; the region-level attribution is unaffected.
+   8.2% gap — **resolved (2026-08-01): the call count is exactly 16,384/hash
+   by construction (8 run() × 2,048-loop × 1 `bl` per iteration); the gap is
+   per-call static-count slack** (true dynamic ~5,845 A64/call — see the
+   Hypothesis C resolution above). The region-level attribution is unaffected.
 3. ~0.5% pre-gate contamination (poll) + post-loop prints land in buckets
    4/5 — negligible (2 poll + 1 flush samples of 101,556).
 4. Sampling overhead raised hash time ~1.4% in record passes (209 vs
