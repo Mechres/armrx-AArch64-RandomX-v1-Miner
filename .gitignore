@@ -26,4 +26,5 @@ AGENTS.md
 /build_debug_host
 /build_host
 /build-cross
+/build-cross-off
 HANDOFF_GEMINI.md
