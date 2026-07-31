@@ -60,10 +60,18 @@ full hash (light, JIT)                       207001.80 μs median      4.83 hash
 
 1. **IPC 0.740 is consistent with the retrospective's cluster-normalized 0.731**
    — the measurement methodology now matches, closing the master-plan 2.77× pitfall.
-2. **Core ran at 765 MHz, not 1.1 GHz** — single-thread load under the default
-   cpufreq governor. The same instruction count at max frequency would be
-   ~144 ms/hash (~6.9 H/s). For max-rate benchmarks, pin the governor to
-   `performance` first (`cpupower frequency-set -g performance`).
+2. **Core ran at 765 MHz — that is the device's FIXED clock.** Correction to
+   the earlier "governor" claim: MSM8929 on this postmarketOS kernel has NO
+   cpufreq support — `CONFIG_CPUFREQ_DT=y` is built in, but the device tree
+   contains no CPU OPP table (`operating-points-v2` absent from all cpu nodes),
+   so no cpufreq policies exist and `scaling_governor` does not exist under
+   `/sys/devices/system/cpu/cpu*/`. The CPU is fixed at the firmware-set
+   frequency (perf-derived 765 MHz; not thermal — 36°C idle, 48-50°C under
+   load, far below A53 throttle). ~1.1 GHz is NOT achievable on this kernel
+   without a DT/kernel change (add MSM8929 OPP table + reflash) — out of scope.
+   This number (207 ms/hash @ 765 MHz) is therefore the device's true
+   steady-state single-core figure, and the 7-worker ~18 H/s mining rate is
+   consistent with it (3 fast + 4 weak-cluster cores, ~50% throughput).
 3. First clean **light-mode, single-core** steady-state number on MSM8929.
    The earlier "248 ms/hash" figure predates this methodology (and the JIT hang).
 4. Cross-built (GCC 16) binary — identical results expected from device-native
