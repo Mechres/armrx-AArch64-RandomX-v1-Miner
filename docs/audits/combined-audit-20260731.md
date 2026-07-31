@@ -141,7 +141,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 | **4** | Clean perf stat path (T1-2) | Enables all work | Low | 4-8 hr | ✅ **Done** (device-verified 2026-08-01 — see `docs/experiments/t12-perf-ready-first-run.md`) |
 | **5** | PRFM hints (T2-1) | ~0.1–0.5% | Low | 4-8 hr | ❌ **Closed — regression** (device A/B 2026-08-01: +0.26–0.50% cycles, +0.47% instructions, l1d unchanged — no prefetch effect on in-order A53; corroborates 2026-07-24 fill-loop removal, see `docs/experiments/t21-prfm-hints.md`) |
 | **6** | Worker/core-0 remapping (T2-3) | Recovers ~14% | Low-Med | 4-8 hr | ✅ **Done** |
-| **7** | Dual-issue alignment (T2-2) | ~0.1–0.5% | Low-Med | 1-2 days | Ready |
+| **7** | Dual-issue alignment (T2-2) | ~0.1–0.5% | Low-Med | 1-2 days | ❌ **Closed — regression** (device A/B 2026-08-01: cycles +0.13/+0.20%, instructions +0.47% NOP overhead, IPC +0.3% — alignment *worked* but net negative; see `docs/experiments/t22-dual-issue-alignment.md`) |
 | **8** | Track C retry (T3-1) | ~1–3% | **High** | Days-weeks | **Blocked** |
 | **9** | Load hoisting (T3-2) | ~0.2–1% | **High** | 2-4 days | **Design only** |
 | **10** | NEON mul analysis (T3-3) | ~0–2% | Analysis | 1-2 days | ✅ **Gate check done** |
