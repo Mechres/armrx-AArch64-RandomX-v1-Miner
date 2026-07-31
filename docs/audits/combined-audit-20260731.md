@@ -137,7 +137,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 |---|------|------|------|--------|--------|
 | **1** | Enable Track G (T0-1) | **~3.6%** | Zero | 5 min | ✅ **Done** |
 | **2** | Fix `hardware_concurrency()` (T0-2) | Prevents 87% loss | Low | 1 hr | ✅ **Done** |
-| **3** | Benchmark D2 (T1-1) | ~0.5–1% | Low | 2-4 hr | Harness needed |
+| **3** | Benchmark D2 (T1-1) | ~0.5–1% | Low | 2-4 hr | ✅ **Done** (device A/B 2026-08-01 — `--bench-d2-pipeline`, −2.77% interleaved, ~0.34% E2E; see `docs/experiments/t11-d2-microbenchmark.md`) |
 | **4** | Clean perf stat path (T1-2) | Enables all work | Low | 4-8 hr | ✅ **Done** (device-verified 2026-08-01 — see `docs/experiments/t12-perf-ready-first-run.md`) |
 | **5** | PRFM hints (T2-1) | ~0.1–0.5% | Low | 4-8 hr | Ready |
 | **6** | Worker/core-0 remapping (T2-3) | Recovers ~14% | Low-Med | 4-8 hr | ✅ **Done** |

@@ -43,6 +43,7 @@
 #include <string>
 #include <numeric>
 #include <cstdint>
+#include <cstdlib>
 #include <cfenv>
 #include <poll.h>
 #include <unistd.h>
@@ -208,6 +209,125 @@ void bench_aes_primitives() {
         armrx::fill_aes_1r_x4(separate_fill_state, std::span<std::byte>(aes_buf_2mib));
     }, "separate-op", 1.0);
     print_result(r_separate);
+}
+
+// ============================================================================
+// D2: interleaved hash+fill AES pipeline (--bench-d2-pipeline)
+// ============================================================================
+
+// Microbenchmark for hash_and_fill_aes_interleaved_x4 (Track D2) in isolation
+// against the sequential pair hash_aes_1r_x4 + fill_aes_1r_x4 it replaces.
+// Gated by the combined audit (docs/audits/combined-audit-20260731.md, T1-1):
+// bench first, then (separately, not here) perf stat A/B. `d2_only` selects a
+// single variant for a clean perf-stat code path: the equivalence gate plus a
+// fixed 200-iteration loop with no per-iteration timing.
+void bench_d2_pipeline(const std::string& d2_only) {
+    print_header("D2. Interleaved hash+fill AES pipeline");
+
+    constexpr std::size_t kScratchpadBytes = armrx::kRandomXScratchpadBytes; // 2 MiB
+
+    // Two 2 MiB scratchpads, 64-byte aligned (posix_memalign works on glibc and musl).
+    void* hash_buf = nullptr;
+    void* fill_buf = nullptr;
+    if (::posix_memalign(&hash_buf, 64, kScratchpadBytes) != 0 ||
+        ::posix_memalign(&fill_buf, 64, kScratchpadBytes) != 0) {
+        std::cerr << "error: posix_memalign failed in bench_d2_pipeline()\n";
+        ::free(hash_buf);
+        ::free(fill_buf);
+        return;
+    }
+    auto* hash_sp = static_cast<std::byte*>(hash_buf);
+    auto* fill_sp = static_cast<std::byte*>(fill_buf);
+
+    // Deterministic initialization (fixed seed, reproducible across runs/builds).
+    std::mt19937_64 rng(0xDEADBEEF);
+    for (std::size_t i = 0; i < kScratchpadBytes; ++i) {
+        hash_sp[i] = static_cast<std::byte>(rng() & 0xffu);
+        fill_sp[i] = static_cast<std::byte>(rng() & 0xffu);
+    }
+    armrx::AesState hash_state{};
+    armrx::AesState fill_state{};
+    for (std::size_t i = 0; i < hash_state.size(); ++i) {
+        hash_state[i] = static_cast<std::byte>(rng() & 0xffu);
+        fill_state[i] = static_cast<std::byte>(rng() & 0xffu);
+    }
+
+    // Equivalence gate: run each variant once from identical fresh copies and
+    // require byte-identical (a) hash_state and (b) fill_scratchpad. Runs before
+    // timing in both modes (including the single-variant loop).
+    std::vector<std::byte> seq_hash_sp(hash_sp, hash_sp + kScratchpadBytes);
+    std::vector<std::byte> seq_fill_sp(fill_sp, fill_sp + kScratchpadBytes);
+    armrx::AesState seq_hash_state = hash_state;
+    armrx::AesState seq_fill_state = fill_state;
+    armrx::hash_aes_1r_x4(std::span<const std::byte>(seq_hash_sp), seq_hash_state);
+    armrx::fill_aes_1r_x4(seq_fill_state, std::span<std::byte>(seq_fill_sp));
+
+    std::vector<std::byte> intl_hash_sp(hash_sp, hash_sp + kScratchpadBytes);
+    std::vector<std::byte> intl_fill_sp(fill_sp, fill_sp + kScratchpadBytes);
+    armrx::AesState intl_hash_state = hash_state;
+    armrx::AesState intl_fill_state = fill_state;
+    armrx::hash_and_fill_aes_interleaved_x4(
+        std::span<const std::byte>(intl_hash_sp),
+        std::span<std::byte>(intl_fill_sp),
+        intl_hash_state, intl_fill_state);
+
+    const bool hash_state_match =
+        std::memcmp(seq_hash_state.data(), intl_hash_state.data(), seq_hash_state.size()) == 0;
+    const bool fill_sp_match =
+        std::memcmp(seq_fill_sp.data(), intl_fill_sp.data(), seq_fill_sp.size()) == 0;
+    if (!hash_state_match || !fill_sp_match) {
+        std::cout << "D2 equivalence: FAIL (hash_state "
+                  << (hash_state_match ? "OK" : "mismatch") << ", fill_scratchpad "
+                  << (fill_sp_match ? "OK" : "mismatch") << ")\n";
+        ::free(hash_buf);
+        ::free(fill_buf);
+        return;
+    }
+    std::cout << "D2 equivalence: PASS (sequential == interleaved)\n";
+
+    // Timed variants run on the aligned buffers directly; state and data evolve
+    // across iterations, exactly like the other AES micro-benchmarks above.
+    auto sequential_variant = [&] {
+        armrx::hash_aes_1r_x4(std::span<const std::byte>(hash_sp, kScratchpadBytes), hash_state);
+        armrx::fill_aes_1r_x4(fill_state, std::span<std::byte>(fill_sp, kScratchpadBytes));
+    };
+    auto interleaved_variant = [&] {
+        armrx::hash_and_fill_aes_interleaved_x4(
+            std::span<const std::byte>(hash_sp, kScratchpadBytes),
+            std::span<std::byte>(fill_sp, kScratchpadBytes),
+            hash_state, fill_state);
+    };
+
+    // Single-variant mode: no timing — one clean code path in a fixed loop so
+    // `perf stat` sees a long steady window of the chosen variant only.
+    if (!d2_only.empty()) {
+        constexpr unsigned kIterations = 200;
+        for (unsigned i = 0; i < kIterations; ++i) {
+            if (d2_only == "interleaved") interleaved_variant();
+            else sequential_variant();
+        }
+        std::cout << "D2_VARIANT=" << d2_only << " " << kIterations << " iterations done" << std::endl;
+        ::free(hash_buf);
+        ::free(fill_buf);
+        return;
+    }
+
+    auto r_seq = sample_benchmark("D2 sequential: hash_aes_1r_x4 + fill_aes_1r_x4", 30, 3,
+                                  sequential_variant, "op");
+    print_result(r_seq);
+    auto r_intl = sample_benchmark("D2 interleaved: hash_and_fill_aes_interleaved_x4", 30, 3,
+                                   interleaved_variant, "op");
+    print_result(r_intl);
+
+    double delta_pct = (r_seq.median_us > 0.0)
+        ? (r_intl.median_us - r_seq.median_us) / r_seq.median_us * 100.0
+        : 0.0;
+    std::cout << "D2 interleaved vs sequential: " << std::fixed << std::setprecision(2)
+              << std::showpos << delta_pct << "% " << std::noshowpos
+              << "(negative = interleaved faster)\n";
+
+    ::free(hash_buf);
+    ::free(fill_buf);
 }
 
 void bench_dataset_helpers() {
@@ -668,6 +788,8 @@ int main(int argc, char** argv) {
     bool scratchpad_real  = false;
     bool scratchpad_l1    = false;
     bool perf_ready       = false;
+    bool bench_d2_pipeline = false;
+    std::string d2_only;    // "--d2-only=" value: "sequential" or "interleaved"
     unsigned perf_ready_timeout = 300;
 
     for (int i = 1; i < argc; ++i) {
@@ -682,6 +804,14 @@ int main(int argc, char** argv) {
         else if (arg == "--argon2-only") { run_all = false; argon2_only = true; }
         else if (arg == "--scratchpad-real") { run_all = false; scratchpad_real = true; }
         else if (arg == "--scratchpad-l1") { run_all = false; scratchpad_l1 = true; }
+        else if (arg == "--bench-d2-pipeline") { run_all = false; bench_d2_pipeline = true; }
+        else if (arg.rfind("--d2-only=", 0) == 0) {
+            d2_only = arg.substr(std::strlen("--d2-only="));
+        }
+        else if (arg == "--d2-only") {
+            std::cerr << "error: --d2-only requires a value (--d2-only=sequential|interleaved)\n";
+            return 1;
+        }
         else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: bench_armrx [OPTIONS]\n"
                       << "Options:\n"
@@ -694,11 +824,27 @@ int main(int argc, char** argv) {
                       << "                       and --scratchpad-l1 under `perf stat -e cycles,instructions`\n"
                       << "                       and compare IPC -- see performance-plan-20260725.md Step 1)\n"
                       << "  --scratchpad-l1      Same experiment, scratchpad aliased to 16 KiB (L1-resident)\n"
+                      << "  --bench-d2-pipeline  Only run the D2 interleaved hash+fill AES pipeline benchmark\n"
+                      << "                       (hash_and_fill_aes_interleaved_x4 vs sequential pair)\n"
+                      << "  --d2-only=sequential|interleaved\n"
+                      << "                       Run only one D2 variant in a fixed 200-iteration loop,\n"
+                      << "                       no timing (perf-stat-friendly; requires --bench-d2-pipeline)\n"
                       << "  --perf-ready         Signal PERF_READY on stdout and block on stdin before full hash loop\n"
                       << "  --perf-ready-timeout=N Timeout for --perf-ready in seconds (default 300)\n"
                       << "  --help               Show this message\n";
             return 0;
         }
+    }
+
+    // --d2-only is only meaningful together with --bench-d2-pipeline.
+    if (!d2_only.empty() && !bench_d2_pipeline) {
+        std::cerr << "error: --d2-only requires --bench-d2-pipeline\n";
+        return 1;
+    }
+    if (!d2_only.empty() && d2_only != "sequential" && d2_only != "interleaved") {
+        std::cerr << "error: unknown --d2-only value '" << d2_only
+                  << "' (expected sequential|interleaved)\n";
+        return 1;
     }
 
     std::cout << "\n╔══════════════════════════════════════════════════════════╗\n"
@@ -806,6 +952,12 @@ int main(int argc, char** argv) {
                   << "  99th pctl: " << report_percentile(99)  << " μs\n"
                   << "  max:       " << report_percentile(100) << " μs\n"
                   << "  mean:      " << mean / 1000.0          << " μs\n";
+    }
+
+    // Flag-gated only -- deliberately NOT part of run_all, so the default
+    // benchmark output stays unchanged.
+    if (bench_d2_pipeline) {
+        ::bench_d2_pipeline(d2_only);
     }
 
 #ifdef ARMRX_HAVE_JIT

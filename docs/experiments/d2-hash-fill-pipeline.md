@@ -101,21 +101,18 @@ not obtained from `mmap`.
 **Fix:** Added `bool scratchpad_owned_` (default `true`). `set_scratchpad()` sets
 it to `false`. The destructor only `munmap`s when `scratchpad_owned_` is true.
 
-## Why not benchmarked on-device
+## Why not benchmarked on-device (resolved 2026-08-01 — T1-1)
 
-The mining KATs (`test_mining`) take ~3-5 minutes host-side in fast mode
-(2080 MiB dataset, tested via tmpfs). On the device (1.4 GiB RAM + zram), the
-dataset initialization alone takes 3-5 minutes per test case, and the full test
-suite attempts multiple fast-mode cycles (dataset reinit after seed change).
-The process was killed after 15+ minutes still in the first lifecycle test's
-initialization phase. An A/B benchmark would require:
-- Mining engine test infrastructure that exercises the pipeline path without
-  full dataset init (currently impossible — fast mode requires all 2080 MiB)
-- Or a dedicated microbenchmark for `hash_and_fill_aes_interleaved_x4` alone
-
-The host-side verification is strong: all KATs match, and `test_mining` (which
-exercises the full worker loop including the pipelined path, job changes, and
-share callbacks) passes completely on x86_64.
+The original blocker: mining KATs take 3-5 min host-side in fast mode; on the
+device the dataset init dominates and full lifecycle tests were killed after
+15+ min. The audit gate (T1-1) closed this with a **dedicated microbenchmark**
+instead: `bench_armrx --bench-d2-pipeline` tests
+`hash_and_fill_aes_interleaved_x4` alone against the sequential pair on two
+2 MiB scratchpads, with a byte-identical equivalence gate and a
+single-variant `--d2-only` mode for perf stat. Results: on-device
+(A53, NEON T-table, Track G) the interleaved path is **−2.77%** (IPC
+1.735 → 1.787, same instruction count) → ~0.34% end-to-end projection.
+See `docs/experiments/t11-d2-microbenchmark.md`.
 
 ## Estimated impact
 
