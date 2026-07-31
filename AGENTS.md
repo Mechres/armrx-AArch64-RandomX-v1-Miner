@@ -24,9 +24,10 @@ devbox_pgo_build     # full PGO: generate → train → use in one call
 ```sh
 # The devbox MCP auto-build wrapper ignores isolcpus and pins to core 0 only (slow).
 # Always use the explicit taskset form for on-device builds:
-ssh mechres@192.168.10.156 "cd ~/armrx/build && nohup taskset -c 1-7 cmake --build . -j2 > /tmp/build.log 2>&1 &"
+ssh mechres@192.168.10.156 "cd ~/armrx/build && nohup taskset -c 1-3 cmake --build . -j2 > /tmp/build.log 2>&1 &"
+# cores 1-3 = fast cluster minus housekeeping core 0. NEVER use 1-7: cores 4-7
+# are the weak cluster (~50% throughput) and -j2 can land both jobs there.
 # -j2 is REQUIRED (1.4 GiB RAM + GCC LTO — -j7 swaps and can hard-lock the device).
-# taskset -c 1-7 beats -j2-on-core-0 by using the isolated cores.
 # Before building, check for stale processes:
 #   ps -eo pid,comm | grep -E 'armr[x]|cmak[e]|gmak[e]|cc1plu[s]' | grep -v grep
 ```
