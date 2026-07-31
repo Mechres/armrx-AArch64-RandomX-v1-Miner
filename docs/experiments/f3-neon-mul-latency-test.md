@@ -52,4 +52,9 @@ The concrete mechanism remains unsolved: RandomX IMUL_R is a 64×64→64 operati
 
 ## Status
 
-**Closed as premise-confirmed.** Not actionable until a lane-parallel transform for 64-bit IMUL_R is designed.
+**Closed as premise-confirmed, then gate-FAILED (2026-08-01).** NEON multiply
+latency is competitive (premise confirmed), but the lane-parallel transform's
+gate check failed: only 0.003% of genuine IMUL_R executions have one operand
+≤ 2^32 (`docs/experiments/t33-imul-magnitude-gate.md`) — RandomX 64-bit operands
+are effectively full-width random. **No action without a concrete transform** is
+now "no action, period": the offload is falsified on runtime data distribution.

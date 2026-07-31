@@ -72,6 +72,18 @@ public:
     void set_cache(const Argon2dCache* cache);
     [[nodiscard]] bool set_dataset(std::span<const std::byte> dataset);
 
+    // T3-3 gate-check hook (docs/audits/combined-audit-20260731.md): called for
+    // every IMUL_R bytecode execution with the pre-multiply src/dst operand
+    // values. is_rcp is true when the instruction is an IMUL_RCP lowered to
+    // IMUL_R (ibc.isrc == &ibc.imm) — those carry a full-width reciprocal
+    // constant and must be excluded from genuine-IMUL_R analysis. The hook is
+    // pure observation: it must not mutate any VM state. Null (default) = no-op.
+    void setImulSampleCallback(void (*fn)(std::uint64_t src, std::uint64_t dst, bool is_rcp),
+                               void* ctx = nullptr) {
+        imul_sample_fn_ = fn;
+        imul_sample_ctx_ = ctx;
+    }
+
     /// Configure a partial dataset for hybrid light mode (Track B).
     /// When set, the JIT bound-checks item_number < *partial_dataset_item_count_ptr_
     /// before deciding whether to load directly (hit) vs. derive on the fly (miss).
@@ -238,6 +250,10 @@ private:
     std::uint32_t last_rounding_mode_ = 0xFF; // invalid sentinel; cached to avoid redundant fesetround
     std::array<InstructionByteCode, 256> bytecode_{};
     int register_usage_[8] = {-1};  // initializer is moot — compile_program std::fills all 8 before use
+
+    // T3-3 IMUL_R operand-magnitude sampling hook (null = disabled, no-op)
+    void (*imul_sample_fn_)(std::uint64_t, std::uint64_t, bool) = nullptr;
+    void* imul_sample_ctx_ = nullptr;
 
     // Scratchpad (2 MiB) — mmap-allocated with huge page hint
     std::byte* scratchpad_data_ = nullptr;

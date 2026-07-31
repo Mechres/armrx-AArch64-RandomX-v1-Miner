@@ -103,7 +103,8 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 #### T3-3. NEON Multiply Offload Analysis (Track F3 Follow-on)
 - **What:** Determine if RandomX IMUL_R (64×64→64) ops can be transformed into lane-parallel 32×32→32 NEON ops. F3 confirmed NEON MUL V.4S at ~1 CPI (same as scalar, 4× throughput) but `umull v.2d` (schoolbook 64-bit) was worse.
 - **Gate:** Opcode-frequency analysis first — extend `bench_opcodes` to report IMUL_R operand magnitudes. Only proceed if ≥30% of IMUL_R instances have one operand ≤ 2^32.
-- **Status (corrected 2026-08-01):** gate has NOT been run. The previous "✅ gate check done" mark (added in f5c60dd, a T2-3 commit) was erroneous — `bench_opcodes.cpp` has no magnitude reporting and no gate writeup exists. **Spec caveat:** IMUL_R operands are runtime register values (the instruction has no immediate), so the gate cannot be answered by static program-generation sampling — it requires instrumented execution (e.g. hooking `h_IMUL_R` to record src/dst values across many seeds/programs). IMUL_RCP, by contrast, has a static 32-bit divisor by construction — but its reciprocal constant is ~full-width, so the F3 schoolbook analysis already ruled that route out.
+- **Status (corrected 2026-08-01, then RUN 2026-08-01):** the previous "✅ gate check done" mark (added in f5c60dd, a T2-3 commit) was erroneous — `bench_opcodes.cpp` has no magnitude reporting and no gate writeup exists. **Spec caveat:** IMUL_R operands are runtime register values (the instruction has no immediate), so the gate cannot be answered by static program-generation sampling — it requires instrumented execution (e.g. hooking `h_IMUL_R` to record src/dst values across many seeds/programs). IMUL_RCP, by contrast, has a static 32-bit divisor by construction — but its reciprocal constant is ~full-width, so the F3 schoolbook analysis already ruled that route out.
+- **Gate RESULT (2026-08-01): FAIL** — instrumented sampler (`bench_imul_magnitudes`, interpreter hook in `src/vm.cpp`): 0.003% of 74.1M genuine IMUL_R executions have one operand ≤ 2^32 (gate ≥30%); both-operands 0.0003%; per-seed max 0.03%. RCP-lowered correctly excluded (pointer identity). **T3-3 closed; no NEON lane-pack design proceeds.** See `docs/experiments/t33-imul-magnitude-gate.md`.
 - **Effort:** 1-2 days analysis, no implementation until analysis passes gate.
 
 ---
@@ -145,7 +146,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 | **7** | Dual-issue alignment (T2-2) | ~0.1–0.5% | Low-Med | 1-2 days | ❌ **Closed — regression** (device A/B 2026-08-01: cycles +0.13/+0.20%, instructions +0.47% NOP overhead, IPC +0.3% — alignment *worked* but net negative; see `docs/experiments/t22-dual-issue-alignment.md`) |
 | **8** | Track C retry (T3-1) | ~1–3% | **High** | Days-weeks | **Blocked** |
 | **9** | Load hoisting (T3-2) | ~0.2–1% | **High** | 2-4 days | **Design only** |
-| **10** | NEON mul analysis (T3-3) | ~0–2% | Analysis | 1-2 days | ⚠️ **Gate NOT done — status corrected 2026-08-01** (the earlier "✅ gate check done", added in f5c60dd, was an error: bench_opcodes was never extended and no analysis writeup exists; gate requires instrumented IMUL_R operand-magnitude sampling — runtime values, not static program generation) |
+| **10** | NEON mul analysis (T3-3) | ~0–2% | Analysis | 1-2 days | ❌ **Closed — gate FAIL** (real gate run 2026-08-01: 0.003% of 74.1M genuine IMUL_R have one operand ≤ 2^32, gate 30% — lane-pack premise falsified; see `docs/experiments/t33-imul-magnitude-gate.md`) |
 | **11** | Novel angles (N1–N8) | Varies | Varies | Varies | Investigate |
 
 ---

@@ -605,9 +605,14 @@ void VirtualMachine::execute_bytecode() {
             case InstructionType::ISUB_M:
                 *ibc.idst -= load64(getScratchpadAddress(ibc, scratchpad));
                 break;
-            case InstructionType::IMUL_R:
-                *ibc.idst *= *ibc.isrc;
+            case InstructionType::IMUL_R: {
+                const std::uint64_t src_v = *ibc.isrc;
+                const std::uint64_t dst_v = *ibc.idst;
+                *ibc.idst = dst_v * src_v;
+                if (imul_sample_fn_ != nullptr)
+                    imul_sample_fn_(src_v, dst_v, ibc.isrc == &ibc.imm);
                 break;
+            }
             case InstructionType::IMUL_M:
                 *ibc.idst *= load64(getScratchpadAddress(ibc, scratchpad));
                 break;

@@ -333,6 +333,11 @@ if(ARMRX_BUILD_TESTS)
     add_executable(bench_dataset_2way tests/bench_dataset_2way.cpp)
     target_link_libraries(bench_dataset_2way PRIVATE armrx_core)
     endif()
+
+    # IMUL_R operand-magnitude sampler (T3-3 gate check) — interpreter-only, host-runnable
+    add_executable(bench_imul_magnitudes tests/bench_imul_magnitudes.cpp)
+    target_link_libraries(bench_imul_magnitudes PRIVATE armrx_core)
+    add_test(NAME bench_imul_magnitudes COMMAND bench_imul_magnitudes 8 20)
 endif()
 
 # LibFuzzer harness for armrx::json (PLAN.md §3.1). Opt-in and Clang-only —
