@@ -18,6 +18,8 @@
  * Run under perf stat for per-region PMU counters:
  *   perf stat ./build/bench_armrx --attribution-only
  *   perf stat ./build/bench_armrx --full-hash-only
+ *   perf stat -p $(pgrep ...) via tools/perf_ready_bench.sh (clean steady-state capture)
+ *   Run: ./build/bench_armrx --full-hash-only --perf-ready  (see tools/perf_ready_bench.sh)
  */
 
 #include "armrx/argon2.hpp"
@@ -42,6 +44,8 @@
 #include <numeric>
 #include <cstdint>
 #include <cfenv>
+#include <poll.h>
+#include <unistd.h>
 
 #ifdef ARMRX_HAVE_JIT
 #include <sys/mman.h>
@@ -663,11 +667,17 @@ int main(int argc, char** argv) {
     bool argon2_only      = false;
     bool scratchpad_real  = false;
     bool scratchpad_l1    = false;
+    bool perf_ready       = false;
+    unsigned perf_ready_timeout = 300;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
         if (arg == "--attribution-only") { run_all = false; attribution_only = true; }
         else if (arg == "--full-hash-only") { run_all = false; full_hash_only = true; }
+        else if (arg == "--perf-ready") { perf_ready = true; }
+        else if (arg.rfind("--perf-ready-timeout=", 0) == 0) {
+            perf_ready_timeout = static_cast<unsigned>(std::stoul(arg.substr(21)));
+        }
         else if (arg == "--micro-only") { run_all = false; micro_only = true; }
         else if (arg == "--argon2-only") { run_all = false; argon2_only = true; }
         else if (arg == "--scratchpad-real") { run_all = false; scratchpad_real = true; }
@@ -684,6 +694,8 @@ int main(int argc, char** argv) {
                       << "                       and --scratchpad-l1 under `perf stat -e cycles,instructions`\n"
                       << "                       and compare IPC -- see performance-plan-20260725.md Step 1)\n"
                       << "  --scratchpad-l1      Same experiment, scratchpad aliased to 16 KiB (L1-resident)\n"
+                      << "  --perf-ready         Signal PERF_READY on stdout and block on stdin before full hash loop\n"
+                      << "  --perf-ready-timeout=N Timeout for --perf-ready in seconds (default 300)\n"
                       << "  --help               Show this message\n";
             return 0;
         }
@@ -732,6 +744,25 @@ int main(int argc, char** argv) {
             block_template[39] = static_cast<std::byte>(w);
             armrx::randomx_calculate_hash(&vm, block_template.data(),
                                            block_template.size(), hash_out.data());
+        }
+
+        // T1-2: clean perf-stat hook — signal readiness after all one-time setup
+        // (cache init, JIT compile, warmup) and gate the measured region on a
+        // wrapper-provided stdin line so `perf stat -p <pid>` can attach exactly
+        // at steady state (master-plan 2.77x measurement-methodology pitfall).
+        if (perf_ready) {
+            if (!full_hash_only) {
+                std::cerr << "error: --perf-ready requires --full-hash-only\n";
+                return 1;
+            }
+            std::cout << "PERF_READY" << std::endl;   // endl flushes
+            // Wait for wrapper go-ahead (or timeout / EOF).
+            struct pollfd pfd{ STDIN_FILENO, POLLIN, 0 };
+            const int pr = ::poll(&pfd, 1, static_cast<int>(perf_ready_timeout) * 1000);
+            if (pr > 0 && (pfd.revents & POLLIN)) {
+                std::string line;
+                std::getline(std::cin, line);   // consume the go line; EOF proceeds
+            }
         }
 
         // Steady-state: 500 hashes collecting individual samples
