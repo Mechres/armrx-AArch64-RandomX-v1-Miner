@@ -7,6 +7,21 @@ cmake --build build -j
 ctest --test-dir build --output-on-failure
 ```
 
+### Cross-compile (host → device) — fast iteration
+```sh
+cmake -S . -B build-cross -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64-musl.cmake
+cmake --build build-cross -j$(nproc)
+scp build-cross/test_* build-cross/armrx mechres@192.168.10.156:/tmp/cross/
+```
+~10× faster than device-native builds (~3 min vs ~40 min). Toolchain: musl.cc
+`aarch64-linux-musl-cross` (GCC 11.2.1) under `~/toolchains/`; run the cross tests on
+device from `/tmp/cross/`. **Limits:** (1) JIT runtime acceptance (test_jit_equivalence,
+test_jit_scheduler_stress, miner) MUST use device-native builds — GCC 11.2.1 has a
+seed-dependent JIT codegen hang; compile-check + non-JIT tests (KATs, AES, encodings,
+determinism) are fine. (2) No TLS pools (no aarch64 OpenSSL). (3) LTO auto-disabled
+(no plugin). AUR `aarch64-linux-musl-cross` (GCC 16) build may lift the JIT limit —
+verify before relying on it.
+
 ### Devbox (AArch64 device)
 ```sh
 devbox_status        # verify connectivity

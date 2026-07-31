@@ -415,6 +415,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     bool active = false;
 
     std::uint64_t local_hashes = 0;
+    auto last_flush_time = std::chrono::steady_clock::now();
     std::uint64_t local_gen = 0;
     std::uint64_t local_dataset_init_gen = 0;
     // Per-worker nonce: each worker gets thread_id + k * num_threads_
@@ -612,10 +613,13 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
         // Flush local counter to shared atomic periodically
         constexpr std::uint64_t flush_interval = 64U;
-        if (local_hashes >= flush_interval) {
+        const auto now = std::chrono::steady_clock::now();
+        if (local_hashes >= flush_interval ||
+            (local_hashes > 0 && std::chrono::duration<double>(now - last_flush_time).count() >= 1.0)) {
             total_hashes_.fetch_add(local_hashes, std::memory_order_relaxed);
             worker_hashes_[thread_id].value.fetch_add(local_hashes, std::memory_order_relaxed);
             local_hashes = 0;
+            last_flush_time = now;
 
 #ifdef ARMRX_JIT_PROFILE
             total_jit_compile_time_ns_.fetch_add(vm.get_jit_compile_time_ns(), std::memory_order_relaxed);
