@@ -245,15 +245,15 @@ Tiers follow the project's culture: **T0** trivial/docs, **T1** cheap measuremen
   on steady-state mining; compute instr/hash = instructions / hashes_completed; compare to
   armrx `--perf-ready`. Write experiment note. **Do not** proceed to N5 without counsel.
 
-#### W1-5. Track G full-workload A/B (never measured E2E)
-- **What:** `neon-ttable-aes.md` projected ~3.6% from 12.3%×28.8% but states **no full-workload
-  A/B**. Default is now ON — still worth a one-time OFF vs ON hashrate confirmation.
-- **Expected:** ~2–4% if cycle share held; could be less if Track G already shrank AES's share.
-- **Risk:** Low (flag flip).
-- **Effort:** half day device.
-- **Protocol:** Two cross builds (ON/OFF), `taskset`-pinned `--perf-ready` or 180s mine,
-  reversed order, thermal settle; report ΔH/s, Δinstr/hash, ΔIPC. Doc under
+#### W1-5. Track G full-workload E2E A/B — **DONE, CONFIRMED WIN (2026-08-01)**
+- **Result:** ON-OFF-ON-OFF `--perf-ready` A/B (md5-verified): ON is **+1.68% H/s,
+  −2.07% cycles, −4.93% instructions** vs OFF. Measured E2E is below the ~3.6%
+  projection (back-solved AES cycle share now ~7.2%, ~halved by D2 interleave)
+  but the default-ON decision is validated. Writeup:
   `docs/experiments/track-g-e2e-ab.md`.
+- Secondary: ON = 118.96M instr/hash vs OFF = 124.8M — Track G contributes
+  **−5.8M instr/hash** to the 132.93M → 119.0M drop (§1 hypothesis confirmed;
+  feed into W1-1).
 
 ---
 
@@ -408,7 +408,7 @@ W0-1/W0-2 (docs sync)
 | 1 | W1-1 | Clean instruction census vs 119 M | Diagnostic ★ | Low | **Ready** |
 | 2 | W1-2 | T3-3 IMUL magnitude gate | Gate only | Low | **DONE — FAIL** (0.003%; closed) |
 | 3 | W1-4 | XMRig total re-baseline | Recalibrates gap | Low+legal | **Ready** |
-| 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **Ready** |
+| 4 | W1-5 | Track G E2E A/B | Confirm ~2–4% | Low | **DONE — +1.68% H/s, −2.07% cyc, −4.93% instr (ON)** |
 | 5 | W0-1 | Stale-doc sync | Process | None | **Ready** |
 | 6 | W1-3 | Blake2b share close | ~0% | Low | **Ready** |
 | 7 | W2-1 | BOLT null-check | ~0% | Low | Ready if toolchain |

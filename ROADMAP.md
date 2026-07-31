@@ -18,7 +18,7 @@
 (none — all implementable audit items shipped or closed; next items need the JIT-compiler files, which are gated to comments-only until lifted)
 
 ### Completed (post-alpha)
-- **T0-1 — Track G (NEON T-table AES) default ON** (2026-08-01) — commit 4888ba1
+- **T0-1 — Track G (NEON T-table AES) default ON** (2026-08-01) — commit 4888ba1; E2E A/B same day confirms +1.68% H/s, −2.07% cycles, −4.93% instr — `docs/experiments/track-g-e2e-ab.md`
 - **T0-2 — hardware_concurrency() footgun** (2026-07-31) — online_cpu_count() reads `/sys/devices/system/cpu/online`
 - **T2-3 — isolcpus-aware worker pinning** (2026-08-01) — workers pin to isolated cores on all `detect_core_order()` paths; default worker count capped to isolated count; on-device verified (workers 1-7, main 0)
 - **T1-2 — clean perf stat path** (2026-08-01) — `--perf-ready` hook + wrapper, device-verified: first clean steady-state run (IPC 0.740, 119M instr/hash @ fixed 765 MHz) — `docs/experiments/t12-perf-ready-first-run.md`

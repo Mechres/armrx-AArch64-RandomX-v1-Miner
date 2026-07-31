@@ -128,7 +128,7 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
-*   **NEON T-table AES AddRoundKey (Track G):** ✅ **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%), projected ~3.6% full-workload gain. Enabled by default since 2026-08-01. See `docs/experiments/neon-ttable-aes.md`.
+*   **NEON T-table AES AddRoundKey (Track G):** ✅ **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%); E2E A/B (2026-08-01): **+1.68% H/s, −2.07% cycles, −4.93% instructions**. Enabled by default since 2026-08-01. See `docs/experiments/neon-ttable-aes.md`, `docs/experiments/track-g-e2e-ab.md`.
 *   **isolcpus-aware worker pinning (audit T2-3):** ✅ Workers pin exclusively to isolated cores when `isolcpus=` is active — on all `detect_core_order()` paths including the cpufreq-less fallback. Default worker count caps to isolated-core count. On-device verified: 7 workers on cores 1-7, main/housekeeping thread on core 0, no contention. Recovers the ~14% isolcpus win for pool mining. Since 2026-08-01.
 *   **Cross-hash boundary pipelining (Track D2):** ✅ Overlaps AES finalization of hash N with AES fill of hash N+1 via interleaved read/write function. Verified correct (mining KATs) and live in the mining path; on-device A/B (2026-08-01): interleaved −2.77% AES time (IPC 1.735→1.787), ~0.34% E2E. See `docs/experiments/t11-d2-microbenchmark.md`.
 *   **Hybrid partial dataset (Track B):** ⚠️ Landed but **not adopted for production** — `--dataset-mb=N`
