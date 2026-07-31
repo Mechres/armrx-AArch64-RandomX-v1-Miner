@@ -398,7 +398,10 @@ DECL(randomx_program_aarch64_update_spMix1):
 	# item 10): measured a small but real *regression* from these three prfm hints on
 	# this Cortex-A53 (perf stat, interleaved A/B, ~0.885% fewer instructions/wall-time
 	# with them present, confirmed low-noise; wall-clock hashrate agreed at ~0.4%).
-	# Do not re-add without a fresh measurement -- see changelogs.md for the full account.
+	# Fresh measurement 2026-08-01 (T2-1): inline main-VM PRFM PLDL1KEEP hints (one
+	# per scratchpad LDR) also regressed -- +0.26-0.50% cycles, +0.47% instructions,
+	# l1d_cache_refill unchanged (no prefetch effect). Do not re-add in ANY form.
+	# See docs/experiments/t21-prfm-hints.md.
 	# prfm	pldl1keep, [x19]
 	# prfm	pldl1strm, [x20]
 	# prfm	pldl1keep, [x20, 32]

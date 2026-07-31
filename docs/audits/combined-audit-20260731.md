@@ -139,7 +139,7 @@ The codebase is **unusually well-characterized**. armrx achieves *better* IPC th
 | **2** | Fix `hardware_concurrency()` (T0-2) | Prevents 87% loss | Low | 1 hr | ✅ **Done** |
 | **3** | Benchmark D2 (T1-1) | ~0.5–1% | Low | 2-4 hr | ✅ **Done** (device A/B 2026-08-01 — `--bench-d2-pipeline`, −2.77% interleaved, ~0.34% E2E; see `docs/experiments/t11-d2-microbenchmark.md`) |
 | **4** | Clean perf stat path (T1-2) | Enables all work | Low | 4-8 hr | ✅ **Done** (device-verified 2026-08-01 — see `docs/experiments/t12-perf-ready-first-run.md`) |
-| **5** | PRFM hints (T2-1) | ~0.1–0.5% | Low | 4-8 hr | Ready |
+| **5** | PRFM hints (T2-1) | ~0.1–0.5% | Low | 4-8 hr | ❌ **Closed — regression** (device A/B 2026-08-01: +0.26–0.50% cycles, +0.47% instructions, l1d unchanged — no prefetch effect on in-order A53; corroborates 2026-07-24 fill-loop removal, see `docs/experiments/t21-prfm-hints.md`) |
 | **6** | Worker/core-0 remapping (T2-3) | Recovers ~14% | Low-Med | 4-8 hr | ✅ **Done** |
 | **7** | Dual-issue alignment (T2-2) | ~0.1–0.5% | Low-Med | 1-2 days | Ready |
 | **8** | Track C retry (T3-1) | ~1–3% | **High** | Days-weeks | **Blocked** |
