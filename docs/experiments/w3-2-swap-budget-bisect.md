@@ -68,33 +68,49 @@ bisect budget=100000 (effectively unlimited): 16 (seed, input) pairs checked, al
 scheduler bisect: all swap-budget settings produce interpreter-identical hashes
 ```
 
-All four settings pass → the instrumentation is correct and safe.
+All four settings pass → the instrumentation is correct and safe **for the main-VM path**.
 
-## How to run the actual W3-2 bisection (next step, when a coder is available)
+## Bisection executed (2026-08-01) — divergence CONFIRMED, W3-2 closed
 
-The hook enables isolating the memory-op divergence:
-1. Re-enable the memory-op scheduler extension (mark `*_M` opcodes `is_long_latency = true` in
-   `computeFootprint`, exactly as `memory-op-scheduler-attempt.md` described) — **this is the
-   speculative change that previously diverged**.
-2. Build, then run `test_scheduler_bisect` with `ARMRX_MAX_SWAPS` swept from `0` upward
-   (e.g. `0,1,2,3,...` or binary search). At the budget value `K` where the test first FAILS, the
-   divergence is caused by the `(K+1)`-th swap the scheduler would have performed.
-3. Dump that program's `computeMainEmitOrder` at budget `K` vs `K+1`, diff the two order vectors →
-   the exact offending swap pair. Inspect `hasHazard`/footprint for that pair to identify the missing
-   hazard (the postmortem's leading hypothesis was `emitMemLoad`'s shared `x20` scratch in the
-   `src==dst` path, though that was reviewed-and-cleared for the ALU opcodes; a `*_M` occupying the
-   `P` (anchor) position may expose a different path).
-4. Only after the mechanism is understood should a *narrowed* W3-2 change (e.g. integer `*_M` only, or
-   exclude swaps adjacent to any CBRANCH domain) be attempted — and it must pass `test_jit_equivalence`
-   + `test_jit_dataset_2way` + `test_scheduler_bisect` before any perf A/B.
+The speculative `*_M` `is_long_latency` change (exactly as `memory-op-scheduler-attempt.md`
+described) was re-applied to `computeFootprint()` and the scheduler stress suite run on device:
+
+- `tests/test_scheduler_bisect.cpp` was extended with a `--budget=N` single-budget mode so an
+  external sweep controls `ARMRX_MAX_SWAPS` per invocation (the default 4-setting loop otherwise
+  clobbers the env). A 13-point sweep (unset + 0..8 + 16/32/64) was run: **all PASS** — the main-VM
+  `scheduleProgram` path is correct under the `*_M` change at every budget.
+- The proper stress gates then caught the divergence the 16-pair equivalence check (and the main-VM-only
+  sweep) missed:
+  - `test_jit_scheduler_stress` (450 pairs): **FAIL** `seed="jit_scheduler_stress_seed_0" input="scheduler stress input 0_59"`
+  - `test_jit_superscalar_scheduler_stress` (200 pairs): **FAIL** `seed="superscalar_sched_stress_seed_4" input="superscalar stress input 4_1"`
+
+**Conclusion:** the memory-op scheduler extension is unsafe — it reproduces the historical
+JIT/interpreter divergence **deterministically under stress coverage** (the earlier attempt's
+16-pair equivalence gate was insufficient; this time the 200/450-pair stress tests isolated it).
+The divergence manifests in BOTH scheduler paths (main-VM and superscalar); the superscalar path
+was caught first. The `ARMRX_MAX_SWAPS` hook only gates `scheduleProgram` (main-VM) — it does NOT
+gate `scheduleSuperscalarProgram`, so to pinpoint the *exact* offending swap in the superscalar
+path the hook would need to be extended there too (not done; the divergence is already conclusive
+enough to close the track).
+
+The speculative `*_M` change was **reverted** (tree back to the committed instrument + the
+`--budget` test enhancement). The bisection instrument (hook + bisect test + `--budget` mode)
+stays — it is now proven useful: it cleanly separated "main-VM path safe" from "stress suite
+diverges," which is exactly the diagnostic the postmortem called for.
 
 ## Status
 
-- Instrumentation: **done, verified** (this doc).
-- W3-2 actual optimization: **still blocked** — pending the bisection above, which this harness now
-  makes possible. The 0.2–1% ROI remains unconfirmed; the ~2.2× IPC penalty on the main-VM region
-  (`memory-op-scheduler-attempt.md`) is the real, quantified lead, but its safe fix is unknown until
-  the divergence mechanism is isolated.
+- Instrumentation: **done, verified, and proven useful** (main-VM sweep clean; stress suite
+  isolated the divergence). `--budget=N` single-budget mode added to `test_scheduler_bisect`.
+- W3-2 (address hoisting / memory-op scheduling extension): **CLOSED — confirmed unsafe.** The
+  `*_M` `is_long_latency` change reproduces a deterministic JIT/interpreter divergence under the
+  200/450-pair scheduler stress tests. Do not re-enable without first understanding the missing
+  hazard (likely in `scheduleSuperscalarProgram`'s hazard model for `*_M` occupying the anchor/`P`
+  position; the main-VM `hasHazard` memory-memory rule was reviewed-clear for ALU ops but a `*_M`
+  in the anchor slot may expose a different path). Fourth-to-last remaining high-risk track, now
+  resolved as a dead end with evidence.
+- The ~2.2× IPC penalty on the main-VM region remains a real, quantified lead, but its safe fix is
+  now confirmed to NOT be the memory-op scheduler extension.
 
 ## Note on coders
 

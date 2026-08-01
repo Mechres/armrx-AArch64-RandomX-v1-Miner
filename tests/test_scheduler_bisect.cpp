@@ -84,7 +84,32 @@ bool run_budget(const char* budget_setting, int& out_pairs) {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+	// Optional single-budget mode for the bisection driver:
+	//   test_scheduler_bisect --budget=unset   (full scheduler, memory-op scheduling on)
+	//   test_scheduler_bisect --budget=0       (no swaps)
+	//   test_scheduler_bisect --budget=12      (exactly 12 swaps then original order)
+	// When --budget is given, ONLY that one setting is run (so an external sweep can
+	// control ARMRX_MAX_SWAPS per invocation). Without --budget, the default 4-setting
+	// regression guard runs.
+	const char* single = nullptr;
+	for (int i = 1; i < argc; ++i) {
+		std::string a = argv[i];
+		if (a.rfind("--budget=", 0) == 0) single = a.c_str() + 9;
+	}
+
+	if (single) {
+		int pairs = 0;
+		const bool ok = run_budget(single, pairs);
+		if (ok) {
+			std::cout << "bisect budget=" << single << ": " << pairs
+			          << " (seed, input) pairs checked, all byte-identical\n";
+			return 0;
+		}
+		std::cerr << "FAILED: budget=" << single << " diverged from the interpreter\n";
+		return 1;
+	}
+
 	struct Setting { const char* value; const char* label; };
 	const Setting settings[] = {
 		{nullptr,   "unset (full scheduler)"},
