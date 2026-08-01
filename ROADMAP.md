@@ -31,14 +31,4 @@
 
 ### Next Up
 1. T3 items — design-first, gated (Track C retry blocked on diagnostic)
-2. **Perf-optimization pursuit: CLOSED on evidence (2026-08-01).** W1-4 re-baseline
-   (commit `ca9d868`) showed armrx +26.6% instr / −11% IPC vs the upstream reference JIT
-   (no catastrophe; gap is modest, instruction-dominated). The imm-materialization lever is
-   exhausted: W3 literal-pool regressed (−16% to −20% H/s, cache thrash), W3-2 memory-op
-   scheduling diverged (deterministic stress failure), and register-hoist is infeasible
-   (~714 distinct random 32-bit imm ≫ ~18 free registers; spilling = same regression,
-   `docs/experiments/w3-register-hoist-analysis.md`). The remaining gap is a structural
-   AArch64/in-order-A53 ceiling — armrx is already ~90% of XMRig with *better* IPC. No
-   viable instruction-reduction or IPC lever remains for the superscalar/main-VM body.
-   (The `ARMRX_MAX_SWAPS` bisect instrument + `bench_armrx`/`bench_opcodes` harnesses stay
-   as reusable diagnostic infra.)
+2. **Perf-optimization pursuit: NOT closed — valid technique found, needs dedicated-region rewrite.** W1-4 re-baseline (commit `ca9d868`) showed armrx +26.6% instr / −11% IPC vs the upstream reference JIT (no catastrophe; gap is modest, instruction-dominated). Register-hoist rejected as infeasible (random imm ≫ registers, `w3-register-hoist-analysis.md`). BUT W4 found the reference's **dense NEON vector-lane literal-pool** for C* immediates achieves 104.8M/1.54 on this exact silicon — armrx's `emitMovImmediate` already has this path but is pinned off in `generateSuperscalarHash` (line 1105) to avoid a shared-region collision (`ImulRcpLiteralsEnd` is used by BOTH main VM + superscalar). Naive un-pin FAILED `test_jit_equivalence` (deterministic mismatch, reverted). **The fix is real but requires a DEDICATED superscalar literal region** (separate NEON regs + static.S reservation) — phase-2-class rewrite, not a one-liner. Tracked in `docs/briefs/brief-w4-cpool.md`. This is the active optimization lead.
