@@ -33,6 +33,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include "configuration.h"
 #include "instruction_weights.hpp"
 #include <atomic>
+#include <cstdlib>
+#include <string>
 
 // Verify the JIT code buffer layout: the .fill directive in static.S reserves
 // RANDOMX_PROGRAM_MAX_SIZE * 32 * 4 bytes (12288 AArch64 instruction slots).
@@ -611,7 +613,24 @@ InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
 	return InstructionType::CFROUND;
 }
 
+// W3-2 bisection diagnostic: when ARMRX_MAX_SWAPS is set to a non-negative integer, the
+// scheduler performs at most that many reordering swaps across the whole program and leaves the
+// rest in original order. Used ONLY to binary-search which swap first causes a JIT/interpreter
+// divergence. No effect when the env var is unset (default -1 = unlimited, unchanged behavior).
+// Re-read on every call (not cached) so a bisection driver can sweep budgets within one process.
+static std::atomic<int64_t> g_swap_budget{-1};
+static void armrx_init_swap_budget_once() {
+	const char* e = std::getenv("ARMRX_MAX_SWAPS");
+	if (e) {
+		try { g_swap_budget.store(static_cast<int64_t>(std::stoll(e))); }
+		catch (...) { g_swap_budget.store(-1); }
+	} else {
+		g_swap_budget.store(-1);
+	}
+}
+
 std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t size) const {
+	armrx_init_swap_budget_once();
 	std::vector<InstrFootprint> fp(size);
 	for (uint32_t i = 0; i < size; ++i) {
 		const Instruction& instr = program(i);
@@ -677,11 +696,14 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 		    hasHazard(fp[i], fp[i + 1]) &&
 		    !hasHazard(fp[i], fp[i + 2]) &&
 		    !hasHazard(fp[i + 1], fp[i + 2])) {
-			order.push_back(i);
-			order.push_back(i + 2);
-			order.push_back(i + 1);
-			i += 3;
-			continue;
+			if (g_swap_budget.load() != 0) {
+				order.push_back(i);
+				order.push_back(i + 2);
+				order.push_back(i + 1);
+				i += 3;
+				if (g_swap_budget.load() > 0) g_swap_budget.fetch_sub(1);
+				continue;
+			}
 		}
 
 		const bool r2_src_eq_dst = i + 3 < size && program(i + 3).src == program(i + 3).dst;
@@ -693,12 +715,15 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 		    !hasHazard(fp[i], fp[i + 3]) &&
 		    !hasHazard(fp[i + 1], fp[i + 3]) &&
 		    !hasHazard(fp[i + 2], fp[i + 3])) {
-			order.push_back(i);
-			order.push_back(i + 3);
-			order.push_back(i + 1);
-			order.push_back(i + 2);
-			i += 4;
-			continue;
+			if (g_swap_budget.load() != 0) {
+				order.push_back(i);
+				order.push_back(i + 3);
+				order.push_back(i + 1);
+				order.push_back(i + 2);
+				i += 4;
+				if (g_swap_budget.load() > 0) g_swap_budget.fetch_sub(1);
+				continue;
+			}
 		}
 
 		order.push_back(i);

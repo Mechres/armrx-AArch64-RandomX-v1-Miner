@@ -105,6 +105,13 @@ namespace armrx {
 		std::vector<uint32_t> computeSuperscalarEmitOrder(const SuperscalarProgram& program) const {
 			return scheduleSuperscalarProgram(program);
 		}
+
+		// W3-2 bisection diagnostic accessor: returns the main-program emit order with the
+		// ARMRX_MAX_SWAPS budget applied (see g_swap_budget in jit_compiler_a64.cpp). Purely
+		// additive; does not change scheduleProgram() or any existing call site.
+		std::vector<uint32_t> computeMainEmitOrder(Program& program, uint32_t size) const {
+			return scheduleProgram(program, size);
+		}
 	private:
 		bool rwx_ = false;
 		void emitPrologueMix(Program& program, uint32_t& codePos);

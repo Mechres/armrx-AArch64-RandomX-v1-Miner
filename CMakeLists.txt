@@ -280,6 +280,14 @@ if(ARMRX_BUILD_TESTS)
     # so a future CBRANCH regression fails fast instead of hanging forever.
     set_tests_properties(test_jit_equivalence PROPERTIES TIMEOUT 600)
 
+    # W3-2 bisection harness: regression guard for the ARMRX_MAX_SWAPS swap-budget
+    # hook. Verifies the emitted order stays a valid permutation (JIT == interpreter)
+    # across multiple swap budgets. AArch64-only (depends on the JIT scheduler).
+    add_executable(test_scheduler_bisect tests/test_scheduler_bisect.cpp)
+    target_link_libraries(test_scheduler_bisect PRIVATE armrx_core)
+    add_test(NAME test_scheduler_bisect COMMAND test_scheduler_bisect)
+    set_tests_properties(test_scheduler_bisect PROPERTIES TIMEOUT 600)
+
     # Large-N differential stress test for the emitter lookahead scheduler
     # (PLAN.md Phase 6 item 12/L1) — see the test file's own header comment
     # for why 16 fixed seeds aren't enough coverage for this specific change.
