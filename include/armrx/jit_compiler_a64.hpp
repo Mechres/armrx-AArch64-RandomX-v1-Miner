@@ -151,6 +151,19 @@ namespace armrx {
 		uint8_t* code;
 		uint32_t literalPos;
 		uint32_t num32bitLiterals;
+		// W4 phase-2 (docs/briefs/brief-w4-phase2.md): superscalar C* immediates
+		// pool into a DENSE INLINE literal block inside the dataset-item function
+		// (mirrors IMUL_RCP's proven PC-relative LDR_LITERAL geometry, NOT a
+		// vector at the main-program base which causes a CodeSize base mismatch).
+		// cpoolBase_ == 0  => main-VM mode (use ImulRcpLiteralsEnd/num32bitLiterals,
+		// as before). cpoolBase_ != 0 => superscalar mode: write C* constants into
+		// the inline block at that code offset and emit LDR_LITERAL from it.
+		uint32_t cpoolBase_ = 0;
+		uint32_t cpoolSlot_ = 0;
+		// W4 phase-2: running literal pointer for the inline C* pool, stepped by
+		// 8 bytes/slot to match IMUL_RCP's emit64 pool convention (the LDR
+		// (literal) target is pool_start + N*8, NOT N*4).
+		uint32_t cpoolLiteralPos_ = 0;
 
 		randomx_flags flags;
 
@@ -167,6 +180,10 @@ namespace armrx {
 		}
 
 		void emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* code, uint32_t& codePos);
+		// W4 phase-2: dedicated C* immediate loader (pools into the inline
+		// superscalar block via cpoolBase_/cpoolSlot_). Called only by the
+		// superscalar IADD_C*/IXOR_C* sites, never by emitMovImmediate.
+		void emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* code, uint32_t& codePos);
 		// tmp_reg parameterized so the superscalar dataset-derivation path
 		// uses a caller-saved register (x13) instead of the default x20,
 		// which is callee-saved.  The default x20 is fine for the main VM

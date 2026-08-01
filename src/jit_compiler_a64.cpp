@@ -134,6 +134,12 @@ static const size_t CalcDatasetItemSize =
 
 constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
 
+// W4 phase-2: slots in the per-program inline C* literal pool inside the
+// dataset-item function (see generateSuperscalarHash). 128 covers the
+// observed large-C* count per program (87-90) with ~4.6-sigma margin;
+// ops beyond the cap use the MOVZ/MOVN+MOVK fallback.
+static constexpr uint32_t SuperscalarCpoolSlots = 128;
+
 template<typename T> static constexpr size_t Log2(T value) { return (value > 1) ? (Log2(value / 2) + 1) : 0; }
 
 // Computed once here instead of at each of its 3 call sites below — same
@@ -821,6 +827,10 @@ void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos)
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
 	uint32_t codePos;
+	// W4 phase-2: ensure main-VM mode (C* pooling only active in the
+	// superscalar path via cpoolBase_). Byte-identical behavior to baseline.
+	cpoolBase_ = 0;
+	cpoolSlot_ = 0;
 	emitPrologueMix(program, codePos);
 
 	// Update spMix2
@@ -985,7 +995,7 @@ void JitCompilerA64::dumpJitCode() const {
 
 	// Print raw hex, 16 bytes per line
 	const uint32_t total_bytes = jit_dump_.back().offset + jit_dump_.back().size;
-	std::cout << "\n--- Raw bytes ---\n";
+	std::cout << "\n--- Raw bytes (MAIN VM region) ---\n";
 	for (uint32_t i = 0; i < total_bytes; i += 16) {
 		std::cout << std::hex << std::setw(6) << std::setfill('0') << i << ": ";
 		for (uint32_t j = i; j < i + 16 && j < total_bytes; ++j) {
@@ -994,7 +1004,6 @@ void JitCompilerA64::dumpJitCode() const {
 		}
 		std::cout << std::dec << '\n';
 	}
-
 	// Print boundary table
 	std::cout << "\n--- Opcode boundary table ---\n";
 	std::cout << "  #  | opcode_id | name        | offset  | size\n";
@@ -1129,6 +1138,26 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 				emit64(reciprocalCache[instr.getImm32()], code, codePos);
 		}
 
+		// W4 phase-2: dense INLINE C* literal pool (mirrors IMUL_RCP's proven
+		// PC-relative LDR_LITERAL geometry — the pool lives inside this
+		// dataset-item function so addressing is base-correct). Reserve
+		// SuperscalarCpoolSlots slots (8 bytes each via emit64);
+		// emitCpoolImmediate writes each C* constant here and emits
+		// LDR_LITERAL from it. The B below jumps over both pools.
+		// 2026-08-01 measurement (jit_equiv seed_0, all 8 programs): every
+		// program carries 87-90 poolable large-C* ops (mean 87.9), so 128
+		// slots covers the observed distribution at ~+4.6 sigma (binomial
+		// p~0.195, n~450, std~8.4); excess falls back to MOVZ/MOVN+MOVK
+		// (correct, just 3-instr). Slots are jumped over, never executed
+		// -> zero i-cache cost, buffer budget fits (worst case ~7.7KB <
+		// 8192B inner-loop allowance).
+		const uint32_t cpool_pos = codePos;
+		for (uint32_t s = 0; s < SuperscalarCpoolSlots; ++s)
+			emit64(0, code, codePos);   // 8 bytes/slot, zeroed
+		cpoolBase_ = cpool_pos;
+		cpoolLiteralPos_ = cpool_pos;
+		cpoolSlot_ = 0;
+
 		// Jump over literal pool
 		uint32_t literal_pos = jmp_pos;
 		emit32(ARMV8A::B | ((codePos - jmp_pos) / 4), code, literal_pos);
@@ -1162,18 +1191,16 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 			case SuperscalarInstructionType::IADD_C7:
 			case SuperscalarInstructionType::IADD_C8:
 			case SuperscalarInstructionType::IADD_C9:
-				// Use x13 as scratch (caller-saved, not in the
-				// superscalar register file x0-x7) instead of the
-				// default x20 which is callee-saved — this code is
-				// emitted inside rx_calc_dataset_item which is also
-				// called via C function pointer (CalcDatasetItemFunc),
-				// so x20 must be preserved per the ABI.
-				emitAddImmediate(dst, dst, instr.getImm32(), 13, code, codePos);
+				// W4 phase-2: pool the constant into the inline superscalar block
+				// via emitCpoolImmediate (dedicated C* loader, not emitMovImmediate
+				// which memory ops still use). Then add dst,dst,tmp_reg.
+				emitCpoolImmediate(13, instr.getImm32(), code, codePos);
+				emit32(ARMV8A::ADD | dst | (dst << 5) | (13 << 16), code, codePos);
 				break;
 			case SuperscalarInstructionType::IXOR_C7:
 			case SuperscalarInstructionType::IXOR_C8:
 			case SuperscalarInstructionType::IXOR_C9:
-				emitMovImmediate(tmp_reg, instr.getImm32(), code, codePos);
+				emitCpoolImmediate(tmp_reg, instr.getImm32(), code, codePos);
 				emit32(ARMV8A::EOR | dst | (dst << 5) | (tmp_reg << 16), code, codePos);
 				break;
 			case SuperscalarInstructionType::IMULH_R:
@@ -1280,6 +1307,59 @@ void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*cod
 			// movk tmp_reg, imm32 (16 low bits)
 			emit32(ARMV8A::MOVK | dst | ((imm & 0xFFFF) << 5), code, k);
 		}
+	}
+
+	codePos = k;
+}
+
+// W4 phase-2 (docs/briefs/brief-w4-phase2.md): dedicated C* immediate loader that
+// pools constants into the DENSE INLINE block set up per-program in
+// generateSuperscalarHash (cpoolBase_/cpoolLiteralPos_). ONLY called by the
+// superscalar IADD_C*/IXOR_C* emission sites -- NOT by emitMovImmediate (which
+// memory ops and the main VM still use, unchanged). Geometry mirrors IMUL_RCP's
+// proven PC-relative LDR_LITERAL EXACTLY: the pool is reserved with emit64 (8-byte
+// slots) and the literal pointer is stepped by 8 per slot, so the LDR target is
+// pool_start + N*8 -- matching the hardware PC-relative convention.
+void JitCompilerA64::emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
+{
+	uint32_t k = codePos;
+
+	if (imm < (1 << 16))
+	{
+		emit32(ARMV8A::MOVZ | dst | (imm << 5), code, k);
+	}
+	else if (cpoolBase_ != 0 && cpoolSlot_ < SuperscalarCpoolSlots)
+	{
+		// Match emitMovImmediate's MOVN+MOVK result for negative values: LDR Xt
+		// loads all 64 bits of the pool entry as-is, so the entry itself must
+		// hold the sign-extended 64-bit constant.
+		const uint64_t value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(imm)));
+		memcpy(code + cpoolLiteralPos_, &value, sizeof(value));
+		// ldr dst, [PC + offset]  -- mirrors IMUL_RCP's PC-relative geometry
+		// EXACTLY (off = (slot_pos - k)/4, same as the main-VM IMUL_RCP site
+		// and the superscalar IMUL_RCP site above). A64 LDR (literal) computes
+		// target = k + off*4 (PC == address of the LDR instruction itself; the
+		// "PC+8" quirk is an A32/T32 artifact, NOT A64) -- verified empirically
+		// on the Cortex-A53 target 2026-08-01. The earlier "-8" form
+		// (target = k+8+off*4) made every pooled load hit litpos-8: the first
+		// C* op read pre-pool bytes and each later op read the PREVIOUS op's
+		// constant -> seed_0 hash mismatch. The runtime self-check that
+		// "validated" the -8 was circular (it computed the check target with
+		// the same formula under test, so it could never fail).
+		int32_t offset = static_cast<int32_t>(cpoolLiteralPos_ - k) / 4;
+		offset &= (1 << 19) - 1;
+		emit32(ARMV8A::LDR_LITERAL | dst | (offset << 5), code, k);
+		cpoolLiteralPos_ += 8;
+		++cpoolSlot_;
+	}
+	else
+	{
+		// fallback (pool full or not set): MOVZ/MOVN + MOVK, 3 instr
+		if (static_cast<int32_t>(imm) < 0)
+			emit32(ARMV8A::MOVN | dst | (1 << 21) | ((~imm >> 16) << 5), code, k);
+		else
+			emit32(ARMV8A::MOVZ | dst | (1 << 21) | ((imm >> 16) << 5), code, k);
+		emit32(ARMV8A::MOVK | dst | ((imm & 0xFFFF) << 5), code, k);
 	}
 
 	codePos = k;
