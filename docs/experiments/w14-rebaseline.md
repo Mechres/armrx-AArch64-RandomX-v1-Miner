@@ -62,11 +62,15 @@ confirms the lever is instruction *count* (imm-materialization), not memory subs
 
 ## Conclusion
 W1-4 closes the "is the gap real / is it IPC?" question: **real, modest, instruction-dominated.**
-The only untried lever remains **register-hoist** of `IADD_C*`/`IXOR_C*` constants (load once at
-prologue, single `add/EOR` per op — ~714 fewer instructions with zero memory traffic, unlike W3's
-cache-thrashing literal pool). That requires lifting the comments-only gate on the JIT generator.
-The current `ARMRX_MAX_SWAPS` bisect instrument is reusable safety infra for any future scheduler
-change.
+The only untried lever was **register-hoist** of `IADD_C*`/`IXOR_C*` constants — but
+`docs/experiments/w3-register-hoist-analysis.md` shows it is **infeasible**: ~714 C* ops each carry
+a distinct random 32-bit immediate (`instr.getImm32()`), and ~714 distinct constants ≫ the ~18
+free registers; hoisting would require spilling (= memory traffic = the same regression W3 hit).
+Combined with W3 (literal-pool regressed) and W3-2 (memory-op scheduling diverged), **all three
+immediate-materialization strategies are now exhausted.** The +26.6% instruction gap is
+**inherent to AArch64 random-32-bit-constant encoding on this in-order A53**, not a fixable
+inefficiency. The perf-optimization pursuit is **closed on evidence** — armrx is already at
+~90% of XMRig with *better* IPC; the remaining gap is a structural ISA/hardware ceiling.
 
 ## Files
 - `scratch_vm_study/upstream_rx/` — BSD reference used as baseline (built `randomx-benchmark`,

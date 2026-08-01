@@ -31,3 +31,14 @@
 
 ### Next Up
 1. T3 items — design-first, gated (Track C retry blocked on diagnostic)
+2. **Perf-optimization pursuit: CLOSED on evidence (2026-08-01).** W1-4 re-baseline
+   (commit `ca9d868`) showed armrx +26.6% instr / −11% IPC vs the upstream reference JIT
+   (no catastrophe; gap is modest, instruction-dominated). The imm-materialization lever is
+   exhausted: W3 literal-pool regressed (−16% to −20% H/s, cache thrash), W3-2 memory-op
+   scheduling diverged (deterministic stress failure), and register-hoist is infeasible
+   (~714 distinct random 32-bit imm ≫ ~18 free registers; spilling = same regression,
+   `docs/experiments/w3-register-hoist-analysis.md`). The remaining gap is a structural
+   AArch64/in-order-A53 ceiling — armrx is already ~90% of XMRig with *better* IPC. No
+   viable instruction-reduction or IPC lever remains for the superscalar/main-VM body.
+   (The `ARMRX_MAX_SWAPS` bisect instrument + `bench_armrx`/`bench_opcodes` harnesses stay
+   as reusable diagnostic infra.)
