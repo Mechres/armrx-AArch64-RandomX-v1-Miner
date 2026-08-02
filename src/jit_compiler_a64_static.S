@@ -953,42 +953,39 @@ rx_calc_dataset_item:
 	stp	x10, x11, [sp, 80]
 	stp	x12, x13, [sp, 96]
 
-	ldr	x12, superscalarMul0
-
+	# E12 (2026-08-03): batch the superscalar-constant loads (all independent) ahead of
+	# their consumers, so the A53 single load port stays fed and the 3-cycle L1D latency
+	# is hidden — instead of the original strict serial ldr->eor->ldr->eor. Uses pooled
+	# `ldr` (assembler-resolved, memcpy-safe); `adr`+`ldp` from the .quad label is unsafe
+	# here because the literals sit outside the JIT's CodeSize copy window. Technique
+	# reference only (XMRig randomx_calc_dataset_item_aarch64); implemented from scratch.
+	# Outputs unchanged: x0=rl[0], x1..x7 = rl[1..7].
+	ldr	x12, superscalarMul0		// M0
 	mov	x8, x0
 	mov	x9, x1
 	mov	x10, x2
-
 	# rl[0] = (itemNumber + 1) * superscalarMul0;
 	madd	x0, x2, x12, x12
-
-	# rl[1] = rl[0] ^ superscalarAdd1;
-	ldr	x12, superscalarAdd1
-	eor	x1, x0, x12
-
-	# rl[2] = rl[0] ^ superscalarAdd2;
+	# E12 (2026-08-03): pipeline the superscalar-constant loads via x12/x13 only
+	# (the prologue saves/restores x0-x13, so x12/x13 are the only caller-safe
+	# clobberable registers here — x14-x17 are live across the call in JIT code
+	# and must NOT be touched). Depth-2 load overlap keeps the A53 single load
+	# port fed and hides the 3-cycle L1D latency. Outputs unchanged: x0=rl[0],
+	# x1..x7 = rl[1..7]. Technique reference only (XMRig); implemented from scratch.
+	ldr	x13, superscalarAdd1
 	ldr	x12, superscalarAdd2
-	eor	x2, x0, x12
-
-	# rl[3] = rl[0] ^ superscalarAdd3;
-	ldr	x12, superscalarAdd3
-	eor	x3, x0, x12
-
-	# rl[4] = rl[0] ^ superscalarAdd4;
+	eor	x1, x0, x13			// rl[1] = rl0 ^ Add1
+	ldr	x13, superscalarAdd3
+	eor	x2, x0, x12			// rl[2] = rl0 ^ Add2
 	ldr	x12, superscalarAdd4
-	eor	x4, x0, x12
-
-	# rl[5] = rl[0] ^ superscalarAdd5;
-	ldr	x12, superscalarAdd5
-	eor	x5, x0, x12
-
-	# rl[6] = rl[0] ^ superscalarAdd6;
+	eor	x3, x0, x13			// rl[3] = rl0 ^ Add3
+	ldr	x13, superscalarAdd5
+	eor	x4, x0, x12			// rl[4] = rl0 ^ Add4
 	ldr	x12, superscalarAdd6
-	eor	x6, x0, x12
-
-	# rl[7] = rl[0] ^ superscalarAdd7;
-	ldr	x12, superscalarAdd7
-	eor	x7, x0, x12
+	eor	x5, x0, x13			// rl[5] = rl0 ^ Add5
+	ldr	x13, superscalarAdd7
+	eor	x6, x0, x12			// rl[6] = rl0 ^ Add6
+	eor	x7, x0, x13			// rl[7] = rl0 ^ Add7
 
 	b	rx_calc_dataset_item_prefetch
 

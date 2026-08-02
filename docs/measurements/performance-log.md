@@ -65,25 +65,65 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
   scheduling / dual-issue efficiency of the main-VM chain (IPC 0.554), NOT memory tricks.
   Memory ceiling (E9 +0.8%, E2 +5.8% IPC) is secondary. → Next: E11 (measured dual-issue analysis).
 
-### E11 — Measured dual-issue analysis of JIT buffer (DONE 2026-08-03)
-- Captured live JIT buffer (118,784 B, RWX region from `/proc/<pid>/mem`), disassembled on host
+### E11 — Dual-issue analysis + XMRig AArch64 codegen comparison (DONE 2026-08-03 — loss is CODEGEN, not structural)
+- Captured live JIT buffer (118,784 B, RWX from `/proc/<pid>/mem`), disassembled on host
   (aarch64-linux-musl-objdump), analyzed 7795 instructions. Two independent checks agreed.
 - **Robust finding:** of 1234 LOADs, **83.1% are immediately followed by an instruction that
   consumes the loaded register** (classifier 82.6%, pure-text register check 83.1% — agreement).
   Only 16.9% of loads are followed by an independent op.
-- **Interpretation:** RandomX's main-VM program is a **dependency chain** (read scratchpad →
-  transform → write back). Each load MUST feed the next op — no independent op exists to hoist into
-  the load's 3-cycle bubble. The 83% adjacency is **structural to the algorithm**, not a scheduling
-  mistake. → the chain's low IPC (0.554) is **largely STRUCTURAL on an in-order A53**, NOT a
-  recoverable scheduling loss.
-- **Explains project history:** the 4 prior scheduling tweaks (PRFM, dual-issue padding, PGO ×2,
-  `*_M` scheduler→divergence) nulled/regressed exactly because little ILP is exposable in a serial
-  chain on an in-order core. E11 is the empirical confirmation of *why*.
-- **Conclusion:** after E2 (memory capped +5.8% IPC) and E11 (scheduling capped by structural
-  dependency chains), the remaining ~6% gap to XMRig (0.551→0.648 IPC) is most plausibly
-  **XMRig's 9 years of x86 codegen tuning / different instruction mix** — not a lever armrx can
-  recover on this in-order A53. Architectural ceiling ~5–5.5 H/s/core. Do NOT chase E3b/E5/E7
-  emitter scheduling; document the dead-end (done above).
+- **CORRECTION:** the 83% serial-load pattern is NOT structural. Cloned XMRig
+  master, diffed `src/crypto/randomx/jit_compiler_a64_static.S` vs armrx's (620-line diff). XMRig's
+  `randomx_calc_dataset_item_aarch64` (dataset derivation, 16,384×/hash = bulk of the chain) batches
+  the superscalar constant loads via **`ldp` (load-pairs) with interleaved `eor` consumers**:
+    XMRig: `adr x7,superscalarMul0` / `ldp x12,x13,[x7]` / `eor x1,x0,x13` / `ldp x12,x13,[x7,16]` / ...
+  armrx's `rx_calc_dataset_item` instead does **serial `ldr`-then-consume**:
+    armrx: `ldr x12,superscalarMul0` / `eor x1,x0,x12` / `ldr x12,superscalarAdd1` / `eor x1,x0,x13` / ...
+  ⇒ the 83% is a **codegen choice armrx made**, not an algorithm necessity. XMRig keeps the A53 load
+  port busy (batched/pipelined) where armrx stalls it serially. (armrx's *main VM loop template* IS
+  pipelined — gap is specifically the dataset-derivation path.) Also: armrx has a Track-D1 "2-way
+  interleaved derivation" block but it is **explicitly unwired from the live mining path**.
+- **Revised conclusion:** the ~6% gap (0.551→0.648 IPC) looked attackable via load-batching in
+  `rx_calc_dataset_item` per XMRig's pattern. E12 tested exactly that and came back **NULL** (below).
+
+### E12 — Dataset-derivation load-batching, implemented + measured (DONE 2026-08-03 — NULL, precisely understood)
+- Rewrote `rx_calc_dataset_item` in `jit_compiler_a64_static.S` to pipeline the 8 superscalar-constant
+  loads ahead of their `eor` consumers. Two bugs found/fixed during implementation:
+  1. `adr x13, superscalarMul0` + `ldp [x13]` **segfaulted** — the `superscalarMul0..Add7` `.quad`
+     literals are **past `randomx_init_dataset_aarch64_end`** (outside the JIT `CodeSize` copy window),
+     so `adr`→garbage post-memcpy. Original `ldr x12,<sym>` works only via in-bounds literal pool.
+     Fix: pooled `ldr` (no `adr`).
+  2. Using x14–x17 as load temps **segfaulted** (qemu gdbstub: `stp x4,x5,[x17]`, x17 = superscalarAdd4
+     value). JIT main program keeps x14–x17 **live across the call**; prologue only saves x0–x13, so
+     x12/x13 are the only caller-safe clobberable regs. Fix: x12/x13 only (depth-2 overlap).
+- **RESULT:** gates GREEN (test_jit_equivalence 16/16 byte-identical, test_mining real shares,
+  test_aes_hash). Live bench **4.75 H/s, median 210.3 ms** = baseline (4.75 H/s, 210.7 ms).
+  perf A/B: **IPC 0.552 vs 0.554** — no instruction/cycle change. ⇒ **E12 NULL.**
+- **Why null:** load stream is **dependency-bound, not load-port-bound** — each `eor` waits 3 cycles
+  for its constant regardless of overlap; deeper overlap (x14–x17) is forbidden by the call convention.
+  The "simple load-batching" hypothesis is exhausted. The 0.551→0.648 IPC gap lives elsewhere
+  (main-VM program emission — E13). Unlike prior blind nulls, this one is *precisely understood*.
+
+### E13 — Locate the IPC gap: scratchpad memory-op emission (DONE 2026-08-03 — localized, forbidden)
+- Captured the live JIT buffer from a **real-mining** run (RWX `ffff9062c000`, 118,784 B = the static
+  template; same code as the E11 scratchpad-bench buffer) and disassembled (7907 instr). Classified
+  every bracketed `ldr`/`ldp` by base register + immediate-consumer rate:
+  - scratchpad (x2): **14 loads, 64.3% serial** (load→immediate consume) — the main-VM scratchpad path.
+  - dataset (x1/x20): 1 load, 0% serial — already pipelined.
+  - NEON vector + PC-relative literal loads (15): 0% serial — not relevant.
+  - Cross-check: E11 `--scratchpad-real` buffer gave 71.4% scratchpad-serial; the real-mining 64.3%
+    is authoritative (scratchpad-bench does not materially skew it).
+- **Conclusion:** the 0.551→0.648 IPC gap lives in **scratchpad memory-op emission** (`ldr x2 →
+  immediate consume` 64% of the time). This is exactly the **`*_M` memory-op scheduler region** that
+  AGENTS.md records as having **diverged and been reverted** (real JIT/interpreter mismatch). RandomX
+  scratchpad ops are `read → transform → write back` with the transform depending on the loaded value,
+  so there is little independent work to hoist into the 3-cycle bubble, and reordering risks divergence.
+  Dataset path, dataset-block read, and NEON AES are already pipelined — so the prior 4 nulls + E12
+  all attacked pipelined or forbidden regions.
+- **End of code-level search:** scratchpad is a small slice (~9% of instructions), so even a perfect
+  (and currently-forbidden) fix yields <9% IPC. The remaining gap to XMRig is predominantly XMRig's
+  ~9 years of x86/AArch64 codegen tuning, unreplicable on this in-order A53 without touching `*_M` or
+  a new codegen strategy. Architectural wall for armrx on this silicon: **~4.75-4.79 H/s/core**; the
+  ~14% `isolcpus` deployment lever (multi-core) is the only large real-world H/s gain.
 
 ## How to read deltas
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
