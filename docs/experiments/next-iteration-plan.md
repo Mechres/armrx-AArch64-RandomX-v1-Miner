@@ -226,22 +226,26 @@
   (E11-E13) was a **phantom real-world deficit**; the *next* concrete lever is E15, not E14. E14 is
   only worth doing as a pure correctness-exercise, not for performance.
 
-## E15 — Non-isolated gap: localized to MULTI-WORKER SCALING (per-core is fine)  [CLOSED — see E16]
+## E15 — Non-isolated gap: scaling is LINEAR (no software inefficiency); remaining gap is CODE (instr count)  [scaling CLOSED]
 - **The finding (2026-08-03, real pool, settled, same silicon):**
   | Test | armrx | XMRig | armrx / XMRig |
   |------|------:|------:|---------------:|
   | 1 worker, core 3 | **4.08 H/s** (settled 3.5 min) | 4.53 H/s (core-3) | **~90%** |
   | 8 workers, no isolcpus | **21-23 H/s** | 27.77 H/s | **~79%** |
   | 8 workers, isolcpus | ~28.4 H/s | (n/a) | == XMRig |
-- **Per-core is FINE (~90%):** 1 worker on core 3 = 4.08 vs XMRig 4.53. The ~10% per-core gap is the
-  known IPC microbenchmark delta (0.551 vs 0.628), already deemed a *phantom real-world deficit*. So
-  the hash loop / JIT is NOT the problem.
-- **The real gap is MULTI-WORKER SCALING:** armrx 1w→8w scales only **5.4×** (8 × 4.08 = 32.6 ideal;
-  actual 22 → **~67% of linear potential**). XMRig scales **6.1×** (27.77 / 4.53). So armrx's 8
-  concurrent workers lose ~33% of their own per-core potential to contention/placement on this
-  two-cluster MSM8929 interconnect, while XMRig loses less. The 8w armrx/XMRig ratio (79%) = per-core
-  (90%) × multi-worker scaling (armrx 5.4 vs XMRig 6.1 → ~88%) → the extra ~10-13% 8w gap beyond
-  per-core is pure multi-worker inefficiency.
+- **Per-core is FINE (~90%):** 1 worker on core 3 = 4.08 vs XMRig 4.53 (early-cool reading; the
+  fan-cool pool-test later gave 3.96 — same ballpark). The ~10% per-core gap tracks the known
+  instruction-count delta (armrx ~119M vs XMRig ~94.5M instr/hash, W1-4 census), NOT stalls.
+- **Multi-worker SCALING is actually LINEAR (corrected):** the fan-cool `--pool-test` per-worker
+  breakdown shows the fast cluster scales 3.8× from 1w→4w with NO interconnect penalty (every fast
+  worker ~3.75 H/s) and the weak cluster runs at exactly 0.53× fast (1.88 vs 3.58) — the SoC's own
+  design ratio, which XMRig also bears. So armrx's 8w "5.5× from 1w" is just 4 fast + 4 half-speed
+  cores; there is NO software multi-worker inefficiency. The old "armrx scales 5.4× vs XMRig 6.1×"
+  framing (built on throttled 4.08/21-23 vs XMRig 27.77) was a measurement artifact — both miners
+  carry the same weak-cluster penalty.
+- **Therefore the real, remaining gap is CODE (per-instruction efficiency), not scaling:** XMRig 28
+  vs armrx 21.85 @8w on identical HW+cooling, and the ~26% excess instruction count in armrx. See
+  the E16 code-level leads (E3a/E3b/E3c) for where to attack it.
 - **Two earlier hypotheses RULED OUT** (measurement + code inspection):
   - **Hugepages:** as root armrx acquires 128×2 MiB via `MAP_HUGETLB` (HugePages_Free 256→128) yet
     only 22.9 H/s (+1.5). armrx's `virtual_memory.c:235` already uses XMRig's exact technique.
@@ -264,7 +268,7 @@
 - **Constraints:** full gates; measure on real pool; do NOT regress isolcpus path. `jit_compiler_a64_
   static.S` E12 edit stays as dead-end reference. No code change made for E15 (localization only).
 
-## E16 — Multi-worker scaling: per-worker structure + THERMAL THROTTLE (fan re-test)  [CLOSED]
+## E16 — Multi-worker scaling: per-worker structure captured; GAP IS CODE (instr efficiency)  [scaling CLOSED, code-leads OPEN]
 - **Method:** `armrx --mine --seconds=60` (self-terminating local bench, same MiningEngine threading
   as pool). Light mode, 60s, settled. taskset pins as noted. Per-worker H/s printed at end.
 - **Raw data (Steady-state, H/s):**
@@ -329,23 +333,34 @@
   are measured cool. No code change pending; this is a measurement to close the book on E15/E16.
 - **Constraints:** full gates; do NOT regress isolcpus path or pool correctness; E12 edit stays as
   dead-end reference. `--pool-test` is a supported measurement mode (like other miners' test flags).
-- **CLOSED (2026-08-04, no further re-baseline needed — user-confirmed):** with the bigger fan holding
-  the SoC cool, thermally-clean pool-test results are: 1w=3.96, 4w=15.01 (fast cluster linear 3.8×),
-  8w=21.85 H/s. **User reports XMRig = 28 H/s @8w (cool)** → armrx 21.85 is **~78% of XMRig**, and the
-  residual is the MSM8929's own weak-cluster 0.53× hardware asymmetry (XMRig bears it too). Per-core
-  armrx ~88% of XMRig. **The multi-worker gap was entirely THERMAL + the SoC's fast/weak design, not a
-  software inefficiency** — no code change pending. E15/E16 are DONE; do not re-open the XMRig
-  comparison. (A hardware note for the future: a sustained sub-50°C SoC — better cooling or a DVFS/thermal
-  trip tweak — is the only path to materially higher H/s here, and it's outside armrx's code.)
-
-- **Sub-experiments (historical context — all superseded by the thermal finding):**
+- **CORRECTION (2026-08-04):** the earlier "thermal throttle is THE cause / weak-cluster 0.53× hardware
+  asymmetry explains the gap" write-up is **RETRACTED**. The fan was present throughout (6cm moved 2 days
+  prior; 12cm added after). Both miners ran on the SAME silicon + SAME cooling and both hit the same
+  ~60°C steady-state — so the gap is NOT thermal and NOT hardware asymmetry (XMRig bears the identical
+  asymmetry + identical temp and still wins). The "5.8× recovery" was a measurement error: comparing a
+  30s early-cool reading against a 120s steady-state reading, not a real before/after. **The real,
+  still-open gap is CODE.** Measured on identical HW: XMRig 28 H/s vs armrx 21.85 H/s @8w (both ~60°C,
+  both fan-cooled) → armrx ~78%. And the instruction census (W1-4, device) shows armrx emits
+  **~119M vs XMRig ~94.5M instr/hash (~+26%)** for the same algorithm. That instruction gap is the
+  lead. What DID hold up from the fan re-test: armrx's per-core/multi-worker scaling is LINEAR (4w =
+  3.8× from 1w, weak cluster = 0.53× fast = the SoC's design, not a software defect). So the scaling
+  structure is fine; the deficit is per-instruction efficiency, i.e. CODE.
+- **OPEN — code-level leads (NOT superseded, never actually measured):** the instruction-gap is real;
+  these are the named investigations to localize it. All must be measured COOL/steady-state and compared
+  miner-to-miner on the same device (the only valid comparison).
   - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
-    Run armrx Blake2b microbench under perf; compare IPC to XMRig's (or a known reference impl).
+    Run armrx Blake2b microbench under perf; compare IPC/instr to XMRig's (or a known reference impl).
     Blake2b is ~0.7M instr but could be high-cycle on A53.
-  - **E3b — main-VM emission / memory-op ordering diff vs XMRig.** XMRig may order/ interleave
-    its scratchpad loads to hide latency better. Diff the two under `perf mem` / cache-miss stats.
-- **Effort:** E3a ~10 min (microbench exists); E3b ~30 min + XMRig binary present on device.
-- **What a result tells us:** localizes the IPC deficit to a named region we can actually attack.
+  - **E3b — main-VM emission / memory-op ordering diff vs XMRig.** XMRig may order/interleave its
+    scratchpad loads to hide latency better, or emit fewer ops for the same program. Diff the two under
+    `perf mem` / cache-miss / instruction-count stats on identical workload.
+  - **E3c — superscalar body density vs XMRig.** W1-1 census: armrx superscalar = 5,224 A64/call vs
+    XMRig's ~? — the ~26% total instr gap is mostly here (80.5% of armrx instr is superscalar). The
+    C* immediate-materialization (MOVZ/MOVN+MOVK+ALU, ~3 instr vs XMRig's denser form) is the prime
+    suspect but was never measured miner-to-miner.
+- **Effort:** E3a ~10 min (microbench exists); E3b/E3c ~30-60 min + XMRig binary present on device.
+- **What a result tells us:** localizes the +26% instruction gap to a named region we can actually attack
+  with a code change. This is the active investigation; E15/E16's "scaling" question is the only closed part.
 
 ## E4 — 8-worker cluster-penalty measurement  [TODO]
 - **Question:** The 1-core number ignores the real deployment (8 workers). Cores 4–7 lose ~50%
