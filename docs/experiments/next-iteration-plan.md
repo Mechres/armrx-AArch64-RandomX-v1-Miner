@@ -21,21 +21,25 @@
 - Host x86_64 ctest 9/9 must stay green (hw branch compiled out there).
 - Every iteration appends ONE row to `docs/measurements/performance-log.md`.
 
----
-
-## E1 — Re-run region attribution on the current build  [TODO — recommended next]
-- **Question:** What is the *real* post-AES per-region instruction + cycle split?
-- **Why it matters:** Our current decomposition (superscalar ~84M / AES ~10.7M / mainVM ~11.8M /
-  blake2b ~0.7M) is **arithmetic from pre-AES numbers** (W1-1 census, 2026-08-01). We never
-  re-measured after W4 + AES. The AES region just shrank ~9M instr / ~8M cycles — that energy
-  didn't vanish, it redistributes. We are optimizing blind until we re-baseline the search space.
-- **Measurement:** `bench_armrx --attribution-only` on device (post-AES build), plus a fresh
-  `perf stat` region split if the tool supports it; else the `--scratchpad-real`/`--scratchpad-l1`
-  pair (E2) gives the memory-latency slice.
-- **Hypothesis:** AES region now ~1–2M instr; superscalar still dominant; the *cycle* share of
-  main-VM likely grew as a fraction.
-- **Effort:** ~15 min device, **no code change**.
-- **What a result tells us:** re-opens the search with real data instead of my arithmetic. Gates
+## E1 — Re-run region attribution on the current build  [DONE 2026-08-03 — time-based; chain = 86.6%]
+- **Question:** What is the *real* post-AES per-region split? (Prior decomposition was pre-AES arithmetic.)
+- **Result (device, post-AES + hugepages, core 3, `bench_armrx --attribution-only`):**
+  Full hash = 209.1 ms (4.78 H/s). Phase split (% of full hash):
+  - blake2b (input→seed): 2.97 μs — **0.00%**
+  - init_scratchpad (AES 2 MiB fill): 701 μs — **0.34%**  ← AES region is now negligible (the win stuck)
+  - **chain: 7×run() + 7×blake2b: 181,192 μs — 86.64%**  ← DOMINANT
+  - final run(): 25,847 μs — **12.36%**
+  - get_final_result (AES+blake2b): 1,091 μs — **0.52%**
+  - JIT speedup vs interpreted: **10.58×** (sanity check, healthy).
+- **Interpretation:** The "chain" (the 7 main-VM program iterations + their blake2bs) is the entire
+  ballgame — 86.6% of all hash time. AES is dead as a bottleneck (<1% combined). So the remaining
+  ~6% gap to XMRig lives almost entirely in **the chain's efficiency** (main-VM program execution
+  + its scratchpad/dataset memory traffic). This is exactly E2/E3b/E7 territory.
+- **Caveat:** `--attribution-only` is **time-based**, not instr/cycle. It tells us WHERE time goes
+  but not whether the chain is instruction-bound or IPC-bound. To decompose the chain's 86.6% into
+  "real memory latency vs compute/scheduling," run **E2** (`--scratchpad-real` vs `--scratchpad-l1`
+  under `perf stat -e cycles,instructions`) — that's the next pivot.
+- **Effort:** done (device measurement, no code change). Next: E2.
   E2/E3/E5 (whether the superscalar IPC is actually exposed, whether main-VM is the cycle sink).
 
 ## E2 — scratchpad-real vs scratchpad-l1 under perf  [TODO]
