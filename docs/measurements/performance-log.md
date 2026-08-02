@@ -19,6 +19,7 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
 |---|---|---|---|---:|---:|---:|---:|---:|---|
 | 0 | 2026-08-03 | `a1ea83c` | baseline — post-W4, pre-AES | 107.36M | 171.55M | 0.627 | 4.52 (gated) | 220.99 ms | B-M-B-M baseline runs; 500 hashes, core 3, md5 `1a5bb464…` |
 | 1 | 2026-08-03 | `2687a2e` | + hardware AESE/AESD funnel (zero-key) | 89.47M | 162.26M | 0.551 | 4.78 (gated) / 4.75 (live bench) | 209.32 ms | KAT hw==T-table 60k blocks; all device gates PASS; md5 `87e63b33…` |
+| 2 | 2026-08-03 | `2687a2e` | + E9 hugepages ON (256×2MiB reserved) | — | — | — | 4.79 (live bench) | 208.95 ms | 256MiB cache now on 2MiB pages (smaps KernelPageSize 2048kB); H/s +0.8% vs iter1; TLB was NOT the dominant cost (in-order mem-latency wall dominates) |
 
 ## Detail
 ### Iteration 0 — `a1ea83c` (baseline, post-W4, pre-AES)
