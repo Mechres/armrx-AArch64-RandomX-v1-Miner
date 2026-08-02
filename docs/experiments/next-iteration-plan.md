@@ -98,7 +98,77 @@
 
 ---
 
-## Explicitly dead (do NOT reopen — recorded so nobody re-discovers)
+## E8 — CRC32 method swap (Chorba / table-less braiding)  [RETIRED 2026-08-03 — not applicable]
+- **Source:** `armv8 papers/2412.16398v1.pdf` ("Chorba: A novel CRC32 implementation", Russell 2024).
+  +100% CRC32 throughput on ARMv8 vs table-based Sarwate; on par with / exceeds hardware
+  CRC32C on Graviton & Raspberry Pi 4. Method: table-less "zero polynomial" braiding/folding.
+- **RETIRED — evidence:** armrx's main build contains **no CRC32 in the hash path**.
+  (1) `objdump -d build-cross/bench_armrx` → 0 `crc32` opcodes. (2) No CRC32 polynomial
+  constant (`0xEDB88320`/`0x82F63B78`) in `.rodata`. (3) `VirtualMachine::get_final_result`
+  (src/vm.cpp:962) is `hash_aes_1r_x4` only — pure AES. (4) `rx_crc`/`soft_crc` appear only in
+  `scratch_vm_study/` (embedded reference, excluded from main build per AGENTS.md). The
+  `cpu.crc32` flag in `cpu_features.cpp` is inherited upstream cruft, **unreferenced**.
+  → there is no software CRC32 path to replace, so Chorba yields no win. Kept as a note so we
+  don't re-discover it. (Paper itself remains a good ARMv8 reference; just not for armrx.)
+
+## E9 — Hugepages actually allocated? (deployment, FREE, unmeasured)  [TODO — high ROI]
+- **Source:** XMRig RandomX Optimization Guide (xmrig.com/docs/miner/randomx-optimization-guide):
+  "Huge Pages can increase RandomX performance up to 50%; 1GB huge pages +1-3%."
+- **Question:** armrx has `MAP_HUGETLB` + `MADV_HUGEPAGE` ("Memory Tiering" in README), but
+  does the device *actually* get 2 MiB hugepages for the scratchpad/cache? `getconf HUGETLB`
+  / `cat /proc/meminfo | grep Huge` / a runtime assert in `allocate()` would confirm. If the
+  allocation silently falls back to 4 KiB pages, RandomX (which is TLB-pressure-heavy: 256 MiB
+  cache + 2 MiB scratchpad per thread) pays huge TLB-miss penalties on an A53 with a small TLB.
+- **Measurement:** check `/proc/meminfo` HugePages_*, and/or add a one-line log of the actual
+  mapping (hugetlb vs anon) at startup. If 4 KiB: enable hugepages on device (`sysctl vm.nr_hugepages`
+  or mount `hugetlbfs`) and re-bench.
+- **Why high ROI:** XMRig credits up to 50% to hugepages; even recovering a fraction is free and
+  we have NEVER verified armrx gets them on this device. Likely the single biggest untested lever.
+
+## E10 — Disable hardware prefetchers (deployment, FREE, unmeasured)  [TODO]
+- **Source:** XMRig RandomX Optimization Guide: "You must disable hardware prefetchers to get the
+  optimal RandomX performance." Also chipsandcheese: RandomX is *random-access*, not streaming, so
+  the HW prefetcher can't learn the pattern and may *pollute* the tiny L1D/L2 with useless lines.
+- **Question:** are the A53's L1/L2 hardware prefetchers enabled on this device? (Typically via
+  `MSR`/`CPUECTLR` — often locked on ARM64 Linux without firmware support; postmarketOS may leave
+  them on.) RandomX's random scratchpad stride defeats stride/stream prefetchers.
+- **Measurement:** try the known knobs (if accessible): `echo 0 > /sys/devices/system/cpu/cpuN/
+  cache/index2/prefetcher` (where exposed) or a kernel/boot flag; re-bench. If the sysfs node is
+  absent (common on ARM), this is a no-op on this device and we record it as "not applicable here."
+- **Caveat:** our T2-1 PRFM test (inline `PRFM PLDL1KEEP` in the main-VM path) measured a
+  *regression* — but that was the MAIN-VM load path under contention, NOT the scratchpad. The
+  XMRig guidance is about the *prefetcher hardware*, orthogonal to our PRFM test. Don't conflate.
+
+## Microarch knowledge (from web pass 2026-08-03 — informs E2/E3b/E7)
+- **A53 single memory port:** only ONE load OR store per cycle; cannot dual-issue load+store
+  (destevez.net "Coding NEON kernels for the Cortex-A53"; Tencent ncnn A53/A55 dual-issue wiki).
+  RandomX scratchpad traffic is register-indexed (`[x2, Xm]`), NOT streaming → every access is a
+  distinct AGU op serialized at the single port. This is the prime suspect for our 0.551 vs XMRig
+  0.648 IPC gap (XMRig may order/software-pipeline its memory ops to keep the port busy + hide
+  the 3-cycle L1D latency better).
+- **In-flight misses:** A53 L1D tracks only ~3-4 pending misses; L1D hit=3cyc, L2≈17cyc, DRAM≈129ns.
+  In-order → a miss stalls the whole pipe. RandomX light-mode = inherently memory-latency-bound.
+- **Prefetch contradiction resolved:** HW stream prefetcher helps streaming (Sonos found PRFM
+  useless there), but RandomX is random-access → HW prefetcher likely useless or polluting →
+  disabling it (E10) is the XMRig-recommended move; our PRFM test was a different path.
+- **Sources:** chipsandcheese "ARM's Cortex A53: Tiny But Important"; destevez.net 2025-02
+  "Coding NEON kernels for the Cortex-A53"; Sonos tech-blog "Assembly still matters: A53 vs M1";
+  Tencent ncnn arm-a53-a55-dual-issue wiki; ARM Cortex-A53 TRM; xmrig.com RandomX Optimization Guide.
+
+
+- **Source:** `armv8 papers/2412.16398v1.pdf` ("Chorba: A novel CRC32 implementation", Russell 2024).
+  +100% CRC32 throughput on ARMv8 vs table-based Sarwate; on par with / exceeds hardware
+  CRC32C on Graviton & Raspberry Pi 4. Method: table-less "zero polynomial" braiding/folding.
+- **RETIRED — evidence:** armrx's main build contains **no CRC32 in the hash path**.
+  (1) `objdump -d build-cross/bench_armrx` → 0 `crc32` opcodes. (2) No CRC32 polynomial
+  constant (`0xEDB88320`/`0x82F63B78`) in `.rodata`. (3) `VirtualMachine::get_final_result`
+  (src/vm.cpp:962) is `hash_aes_1r_x4` only — pure AES. (4) `rx_crc`/`soft_crc` appear only in
+  `scratch_vm_study/` (embedded reference, excluded from main build per AGENTS.md). The
+  `cpu.crc32` flag in `cpu_features.cpp` is inherited upstream cruft, **unreferenced**.
+  → there is no software CRC32 path to replace, so Chorba yields no win. Kept as a note so we
+  don't re-discover it. (Paper itself remains a good ARMv8 reference; just not for armrx.)
+
+
 - Superscalar NEON register pool (all 32 v-regs live across the loop; register-infeasible).
 - Superscalar density (post-W4 body at A64 ISA floor; w23's list exhausted).
 - PRFM hints (T2-1, regression), dual-issue padding (T2-2, regression), PGO (null ×2),
