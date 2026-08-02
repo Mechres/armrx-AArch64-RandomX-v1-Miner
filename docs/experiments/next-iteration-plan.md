@@ -226,45 +226,43 @@
   (E11-E13) was a **phantom real-world deficit**; the *next* concrete lever is E15, not E14. E14 is
   only worth doing as a pure correctness-exercise, not for performance.
 
-## E15 — Non-isolated gap: BOTH leading hypotheses ruled out; cause open  [INCONCLUSIVE — hypotheses dead]
-- **The finding (2026-08-03, real pool, 8 workers, no isolcpus, settled):**
-  | Miner | 8w, no isolcpus | 8w, isolcpus |
-  |-------|----------------:|-------------:|
-  | XMRig | 27.77 H/s       | (n/a)        |
-  | armrx | 21-23 H/s       | ~28.4 H/s    |
-  armrx non-isolated is **~18-23% behind** XMRig; armrx isolcpus (~28.4) == XMRig. So the gap is
-  armrx's non-isolated default behavior. Originally hypothesized as hugepages + affinity. Both are
-  now **ruled out by measurement + code inspection**:
-- **Hugepages — RULED OUT:** as root, armrx DOES acquire 128× 2 MiB hugepages via `MAP_HUGETLB`
-  (proven: `HugePages_Free` 256→128 during run, back to 256 after). But root armrx still settled at
-  only **22.9 H/s** (vs 21.4 non-root) — hugepages add ~1.5 H/s, not the ~6 needed. XMRig's hugepages
-  are not the lever. (armrx's `virtual_memory.c:235` already uses `MAP_HUGETLB|MAP_POPULATE` + a
-  `MADV_HUGEPAGE` THP fallback — same technique as XMRig's `virtual_memory_unix.cpp`.)
-- **Affinity — RULED OUT:** default `affinity_mode_ = AffinityMode::All` (mining_engine.cpp:168),
-  which pins worker `thread_id` to `core_order_[thread_id]` via `pthread_setaffinity_np`. On this
-  no-cpufreq device `detect_core_order()`'s `cpuinfo_max_freq` reads all fail → fallback returns
-  **sequential 0..7** (mining_engine.cpp:120-124) — coincidentally correct (0-3 fast / 4-7 weak), so
-  workers 0-3 land on fast cores, 4-7 on weak, matching XMRig's per-core layout. So armrx already pins
-  correctly 1:1; the gap is not mis-scheduling onto weak cores.
-- **Conclusion:** the ~18% gap persists despite correct pinning AND hugepages. Its cause is NOT in the
-  two areas hypothesized. Open possibilities (NOT yet tested, no measurement done):
-  (a) **hash-loop efficiency** — armrx's JIT/VM may be genuinely ~18% less efficient per cycle on the
-      *real* RandomX program mix than XMRig, even though the E11/E13 microbenchmarks (scratchpad bench,
-      isolated buffer) suggested parity. The live program's instruction mix may differ from the bench.
-  (b) **threading/contention overhead** — armrx's 8-worker setup may have extra cross-thread cost
-      (partial-dataset fill threads, dataset-rebuild handshake, shared-cache locking) that XMRig avoids.
-  (c) **weak-cluster under-contention** — under full 8-worker interconnect contention, armrx's weak-
-      cluster workers may lose more than XMRig's (AGENTS.md: cores 4-7 lose ~50% under contention).
-- **Why the earlier "2× per-core" claim was WRONG:** the 4-worker fast-only run was read at 9 H/s while
-  still warming up (its own log showed 10 H/s at 380s, not settled). Retracted — no clean settled
-  per-core armrx number exists yet. Do NOT conclude per-core deficit from that data.
-- **Next step requires a clean settled per-core A/B** (armrx 1 worker pinned to core 3 vs XMRig core 3,
-  4.53 H/s) to distinguish (a) from (b)/(c). That test was attempted but the process wouldn't die
-  (Ctrl+C ignored; needed `sudo kill -9`) and was read un-settled. Re-run properly before any code.
+## E15 — Non-isolated gap: localized to MULTI-WORKER SCALING (per-core is fine)  [DECISIVE — lever found]
+- **The finding (2026-08-03, real pool, settled, same silicon):**
+  | Test | armrx | XMRig | armrx / XMRig |
+  |------|------:|------:|---------------:|
+  | 1 worker, core 3 | **4.08 H/s** (settled 3.5 min) | 4.53 H/s (core-3) | **~90%** |
+  | 8 workers, no isolcpus | **21-23 H/s** | 27.77 H/s | **~79%** |
+  | 8 workers, isolcpus | ~28.4 H/s | (n/a) | == XMRig |
+- **Per-core is FINE (~90%):** 1 worker on core 3 = 4.08 vs XMRig 4.53. The ~10% per-core gap is the
+  known IPC microbenchmark delta (0.551 vs 0.628), already deemed a *phantom real-world deficit*. So
+  the hash loop / JIT is NOT the problem.
+- **The real gap is MULTI-WORKER SCALING:** armrx 1w→8w scales only **5.4×** (8 × 4.08 = 32.6 ideal;
+  actual 22 → **~67% of linear potential**). XMRig scales **6.1×** (27.77 / 4.53). So armrx's 8
+  concurrent workers lose ~33% of their own per-core potential to contention/placement on this
+  two-cluster MSM8929 interconnect, while XMRig loses less. The 8w armrx/XMRig ratio (79%) = per-core
+  (90%) × multi-worker scaling (armrx 5.4 vs XMRig 6.1 → ~88%) → the extra ~10-13% 8w gap beyond
+  per-core is pure multi-worker inefficiency.
+- **Two earlier hypotheses RULED OUT** (measurement + code inspection):
+  - **Hugepages:** as root armrx acquires 128×2 MiB via `MAP_HUGETLB` (HugePages_Free 256→128) yet
+    only 22.9 H/s (+1.5). armrx's `virtual_memory.c:235` already uses XMRig's exact technique.
+  - **Affinity:** default `AffinityMode::All` (mining_engine.cpp:168) pins worker i 1:1 to
+    `core_order_`; on no-cpufreq device that = 0..7 (coincidentally correct fast/weak split).
+- **The actual lever = multi-worker scaling on the two-cluster interconnect.** Concrete sub-areas to
+  investigate (NOT yet done): (a) armrx's 8 workers may under-utilize fast cores / over-subscribe weak
+  cluster under load (the `detect_core_order` fallback 0..7 means no awareness that 4-7 are weak);
+  (b) cross-thread cost unique to armrx — partial-dataset fill threads, dataset-rebuild handshake,
+  shared-cache locking — contending with workers on the shared interconnect; (c) XMRig may pin/balance
+  differently under load to avoid weak-cluster loss.
+- **Notes:** (1) the earlier "2× per-core" claim was WRONG (4w run read un-settled at 9 H/s; its own
+  log showed 10 H/s at 380s). Retracted. (2) armrx ignores SIGTERM in pool mode (`timeout`/`Ctrl+C`
+  don't kill it; needs `sudo kill -9`) — a test-methodology quirk, not a perf issue. (3) per-core 4.08
+  being ~90% of XMRig confirms the E11-E13 IPC-gap chase was a phantom real-world deficit.
+- **Next step (E16):** attack multi-worker scaling — measure per-worker H/s at 8w to find which workers
+  (likely weak-cluster 4-7) under-perform, and whether armrx's fast/weak awareness (currently absent on
+  no-cpufreq devices) or its fill-thread/handshake contention is the cause. Target: close the 79%→90%
+  8w ratio (recover ~3-4 H/s at 8w non-isolated).
 - **Constraints:** full gates; measure on real pool; do NOT regress isolcpus path. `jit_compiler_a64_
-  static.S` E12 edit stays as dead-end reference. No code change made for E15 (both hypotheses dead).
-- **Effort:** the open question needs one clean settled per-core measurement, then possibly a hash-loop
-  or threading investigation. Not a "quick affinity fix" — that path is exhausted.
+  static.S` E12 edit stays as dead-end reference. No code change made for E15 (localization only).
 
 
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?

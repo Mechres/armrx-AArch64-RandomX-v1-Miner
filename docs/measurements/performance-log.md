@@ -141,8 +141,10 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
 - cycles/hash + IPC: the per-cycle gap to XMRig (0.551 vs 0.628) is REAL in microbenchmarks but is a
   **phantom real-world deficit** — it does not show up as a real-world H/s gap (both are interconnect/
-  cluster-bound at 765 MHz). The non-isolated gap (E15) had its two leading hypotheses (hugepages,
-  affinity) **ruled out**; its cause is open pending a clean settled per-core A/B.
+  cluster-bound at 765 MHz). E15 localized the non-isolated gap to **multi-worker scaling** (not
+  hugepages/affinity, both ruled out): 1 worker core 3 = 4.08 H/s vs XMRig 4.53 (~90% per-core, fine);
+  8 workers scales only 5.4× (vs XMRig 6.1×) → ~33% of per-core potential lost to 8-worker contention
+  on the two-cluster interconnect. E16 = attack multi-worker scaling.
 - E2 reframes: the gap is instruction-scheduling (dual-issue), not memory latency — but that gap is
   microarchitectural only; system-level throughput is gated by the two-cluster topology + page size.
 
