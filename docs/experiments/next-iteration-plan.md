@@ -286,36 +286,47 @@
      workers to 1.77/w avg (**−23%**) while weak add only 1.06/w. Net 8w = 11.36. So weak-cluster
      workers' memory traffic contends on the shared two-cluster interconnect and starves the fast
      cluster — a real multi-worker scaling loss, observed even in --mine.
-- **RESOLVED — the 3× gap was THERMAL THROTTLING, not a mode difference:** added `--pool-test`
-  flag (self-terminating pool mode + per-worker summary, no `kill -9` needed) and swept the REAL
-  pool workload. Same 1-worker light-mode hash, two temperatures:
+- **RESOLVED — the multi-worker "gap" was THERMAL THROTTLING (confirmed with bigger fan, 2026-08-04):**
+  the device's MEMORY subsystem throttles at 60°C (CPU clock fixed 765 MHz, but RandomX is
+  memory-bound → craters). User installed a bigger fan; re-ran the `--pool-test` sweep with the
+  SoC held COOL. Same 1-worker light-mode hash, before/after fan:
   | 1w pool-test | Temp | Rate |
   |--------------|------|-----:|
-  | cool (30s, early) | 46°C | **3.19 H/s** |
-  | hot (45s, saturated) | 60°C | **0.68 H/s** |
-  That is a **~4.7× crash** from cool→60°C for the IDENTICAL workload. CPU clock is fixed 765 MHz,
-  but the **memory subsystem throttles at 60°C** (RandomX is memory-bound → craters). CONSEQUENCE:
-  EVERY prior "settled" E15/E16 number ran 150s+ and saturated at 60°C (throttled). The "4.08 H/s"
-  per-core and "22 H/s" 8w were thermal-throttled; the cool-silicon 1w is ~3-4 H/s. The `--mine` 1.32
-  vs pool 4.08 "3× gap" was simply the `--mine` run sitting at 60°C while the pool 1w reading was
-  taken cool/early. **Temperature was an uncontrolled confound in all E15/E16 absolute numbers.**
-- **Pool-test per-worker sweep (45s, @60°C throttled — shape only, NOT clean magnitudes):**
-  | Config | Total | w0 | w1 | w2 | w3 | w4 | w5 | w6 | w7 |
-  |--------|------:|---:|---:|---:|---:|---:|---:|---:|---:|
-  | 1w | 0.68 | 0.68 | | | | | | | |
-  | 4w | 7.90 | 1.81 | 2.03 | 2.03 | 2.03 | | | | |
-  | 8w | 10.45 | 0.99 | 1.34 | 1.34 | 1.34 | 1.30 | 1.41 | 1.37 | 1.34 |
-  Shape findings hold: worker[0] slowest (main-thread tax), weak-cluster 4-7 ≈ 0.55× fast.
-  But absolute magnitudes are throttled; ratios need re-measurement cool.
+  | old (saturated) | 60°C | 0.68 H/s |
+  | old (cool/early) | 46°C | 3.19 H/s |
+  | **new fan (stable whole run)** | **43°C** | **3.96 H/s** |
+  The fan holds 43°C → **3.96 H/s sustained** (vs 0.68 @60°C = **~5.8× recovery**). 3.96 ≈ the old
+  cool reading (4.08) → **~4 H/s is the TRUE un-throttled 1w rate**; every prior "settled" 150s+
+  number at 60°C was ~5-6× too low. Temperature was the uncontrolled confound in all E15/E16 numbers.
+- **THERMALLY-CLEAN pool-test sweep (fan, 120s each, settled):**
+  | Config | Pinned | Temp | Total | w0 | w1 | w2 | w3 | w4 | w5 | w6 | w7 |
+  |--------|--------|------|------:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 1w | core 3 | 43°C | **3.96** | 3.96 | | | | | | | |
+  | 4w | 0-3 (fast) | 53°C | **15.01** | 3.72 | 3.75 | 3.82 | 3.71 | | | | |
+  | 8w | 0-7 (0-3 fast/4-7 weak) | 57°C | **21.85** | 3.56 | 3.49 | 3.59 | 3.68 | 1.88 | 1.87 | 1.89 | 1.88 |
+  - **Fast cluster scales CLEANLY:** 4w = 3.8× from 1w (15.01/3.96), every fast worker ~3.75 H/s.
+    The earlier "--mine" finding of weak workers dragging fast workers, and worker[0] being the
+    slowest (main-thread tax), were BOTH thermal artifacts (at 60°C the shared memory bus was
+    bandwidth-starved; cool, w0 ≈ siblings and fast scaling is linear). NO structural interconnect
+    or main-thread deficit at 53-57°C.
+  - **Weak cluster = exactly 0.53× fast** (1.88 vs 3.58) — matches the topology's intrinsic 0.53
+    ratio (XMRig fast 4.5 / weak 2.4). It is NOT a scaling defect; the weak A53s are just ~half
+    speed, by design. Placement is correct (weak workers ARE on weak cores).
+  - **8w = 21.85 H/s = 5.5× from 1w** (ideal 8× = 31.7; actual 69%). The 31% loss vs ideal 8×
+    is ENTIRELY the weak cluster being half-speed (4 fast×3.7 + 4 weak×1.9 = 22.4 ≈ measured 21.85).
+    So armrx's multi-worker scaling is actually **linear per-core**; the "gap" vs ideal 8× is just
+    the hardware's own fast/weak asymmetry, not a software inefficiency.
 - **`--pool-test` feature (shipped, measurement-only):** `armrx --pool-test ... --seconds=S`
   honors `--seconds` (self-terminates via `std::_Exit(0)` right after printing the per-worker
   summary — skips the pool/engine teardown that otherwise hangs), prints `worker[0..N]` H/s + CPU
   max temp. Pool correctness unchanged (still connects/submits). No credentials in source — the
   user supplies `--pool/--wallet/--password` as always. CLI test passes; cross-build clean.
-- **NEXT STEP (decisive, blocked on temperature control):** re-run the pool-test sweep with the
-  device COOL (log temp; keep runs short / cool between them) to get un-throttled per-worker numbers,
-  then compute true scaling 1w→8w and the real armrx-vs-XMRig ratio. Until temperature is controlled,
-  no scaling conclusion is trustworthy. This is the next measurement, not a code change.
+- **REMAINING (measurement, not code):** the old "armrx 21-23 vs XMRig 27.77 H/s @8w" E15 comparison
+  is apples-to-oranges — that XMRig number was ALSO taken at 60°C (throttled). Re-baseline XMRig
+  COOL (same fan) to get the true 8w ratio. Per-core armrx is already ~88% of XMRig's 4.53 (3.96).
+  If XMRig@cool ≈ its known ~27-28 H/s, the residual (~22 vs ~28) is the weak-cluster 0.53×
+  hardware asymmetry that XMRig also bears — i.e. armrx may be within a few % of XMRig once both
+  are measured cool. No code change pending; this is a measurement to close the book on E15/E16.
 - **Constraints:** full gates; do NOT regress isolcpus path or pool correctness; E12 edit stays as
   dead-end reference. `--pool-test` is a supported measurement mode (like other miners' test flags).
 
