@@ -260,11 +260,51 @@
 - **Next step (E16):** attack multi-worker scaling — measure per-worker H/s at 8w to find which workers
   (likely weak-cluster 4-7) under-perform, and whether armrx's fast/weak awareness (currently absent on
   no-cpufreq devices) or its fill-thread/handshake contention is the cause. Target: close the 79%→90%
-  8w ratio (recover ~3-4 H/s at 8w non-isolated).
+  (recover ~3-4 H/s at 8w non-isolated).
 - **Constraints:** full gates; measure on real pool; do NOT regress isolcpus path. `jit_compiler_a64_
   static.S` E12 edit stays as dead-end reference. No code change made for E15 (localization only).
 
+## E16 — Multi-worker scaling: per-worker structure (--mine sweep) + open 3× gap  [IN PROGRESS]
+- **Method:** `armrx --mine --seconds=60` (self-terminating local bench, same MiningEngine threading
+  as pool). Light mode, 60s, settled. taskset pins as noted. Per-worker H/s printed at end.
+- **Raw data (Steady-state, H/s):**
+  | Config | Pinned | Total | w0 | w1 | w2 | w3 | w4 | w5 | w6 | w7 |
+  |--------|--------|------:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 1w | 0-7 | 1.32 | 1.32 | | | | | | | |
+  | 4w | 0-7 (→0-3 fast) | 9.18 | 1.89 | 2.55 | 2.42 | 2.32 | | | | |
+  | 8w | 0-7 (0-3 fast / 4-7 weak) | 11.36 | 1.32 | 1.92 | 1.92 | 1.92 | 1.06 | 1.03 | 1.06 | 1.13 |
+  | 4w-weak | 4-7 | 6.14 | 1.58 | 1.55 | 1.48 | 1.52 | | | | |
+- **Structural findings:**
+  1. **Placement is CORRECT** (not a bug): in 8w, fast cores 0-3 get 1.92/w, weak cores 4-7 get
+     1.06/w → ratio 0.55 ≈ topology's 0.53 (XMRig fast 4.5 / weak 2.4). So weak-cluster workers ARE
+     on weak cores; the gap is NOT mis-placement.
+  2. **worker[0] anomaly (real, reproducible):** w0 is always the slowest — 1.32 in 1w AND 8w, vs
+     1.89 in 4w and 1.92 for w1-3 in 8w. ~half of sibling workers in 8w (1.32 vs 1.92). Strongly
+     suggests **worker[0] is the main/coordinator thread** doing non-hash work (job dispatch, dataset
+     rebuild on new seed, pool network) and thus hashes less. Minor absolute effect (~0.6 H/s of 11.36).
+  3. **Interconnect contention signal:** 4 fast-only = 9.18 (2.30/w). Adding 4 weak workers drops fast
+     workers to 1.77/w avg (**−23%**) while weak add only 1.06/w. Net 8w = 11.36. So weak-cluster
+     workers' memory traffic contends on the shared two-cluster interconnect and starves the fast
+     cluster — a real multi-worker scaling loss, observed even in --mine.
+- **OPEN — 3× absolute gap makes --mine an unreliable pool proxy:** `--mine` 1w = **1.32 H/s** but the
+  earlier POOL 1w (core 3) = **4.08 H/s** — a **3.1× discrepancy** for the identical 1-worker light-mode
+  hash. Consequences: (a) `--mine` scaling 1w→8w = 8.6× (near-linear) **contradicts** the pool-mode
+  5.4× inferred from 4.08→22; (b) cannot trust --mine absolute or scaling % as representative of pool.
+  Unexplained cause — candidates: thermal (--mine hit 60°C vs unknown pool temp; device may throttle
+  memory controller at 60°C though CPU clock is fixed), or mode-specific per-hash cost in --mine
+  (bench path differs from pool path). **Must resolve before drawing scaling conclusions from --mine.**
+- **Next step (decisive):** get POOL-mode per-worker breakdown (the real workload). Pool mode currently
+  logs only aggregate Speed; it does not self-terminate (needs `sudo kill -9`, assistant can't sudo).
+  Proposed: add per-worker H/s to the pool status line (small, measurement-only change to
+  mining_engine.cpp status reporting) so a pool sweep yields the same w0/w1.. breakdown as --mine.
+  Alternative: re-run the 3× gap check (--mine 1w at lower temp / pool 1w with logged temp) to rule
+  thermal in/out first. Target once per-worker pool data exists: confirm whether weak workers drag
+  fast workers in POOL mode (the real E15 scaling loss) and whether worker[0]'s deficit is the main
+  thread tax. Then decide the fix (cluster-aware worker policy / reduce main-thread tax).
+- **Constraints:** full gates; do NOT regress isolcpus path or pool correctness; E12 edit stays as
+  dead-end reference. No code change yet for E16 (sweep + analysis only; 3× gap unresolved).
 
+- **Question:** XMRig gets more work/cycle doing the *same algorithm* on *the same silicon*. Where?
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?
 - **Sub-experiments:**
   - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
