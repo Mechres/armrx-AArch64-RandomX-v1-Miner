@@ -89,6 +89,18 @@ the standard RandomX AES round specification.
 **Fix:** Removed all NEON hardware paths. All AES operations now use the
 software T-table path, which correctly implements the standard round order.
 
+**Status update (2026-08-03):** The hardware path was RE-ADOPTED in corrected form.
+The 2026-07-20 attempt failed because it fed `AESE`/`AESD` the *real* round key, and
+those instructions apply AddRoundKey **first** (RandomX applies it **last**). The fix is
+the **zero-key compensation**: feed `AESE`/`AESD` a *zero* round key (AddRoundKey becomes
+a no-op), let `AESMC`/`AESIMC` do MixColumns, then apply the real key as a trailing XOR in
+the caller. This is byte-identical to the T-table path and is now the default aarch64+crypto
+funnel (`encrypt_transform`/`decrypt_transform` in `include/armrx/aes.hpp`, gated on
+`__ARM_FEATURE_AES`). Verified byte-identical to the T-table path over 60,000 random blocks
+on-device, and `test_mining` produces valid shares. So the postmortem's own closing line —
+"not interchangeable *without compensating transformations*" — is exactly right: the
+compensation is the zero key.
+
 ### Why the FIPS-197 KAT didn't catch it
 
 The KAT expected value in `tests/test_blake2b.cpp` was **circular** —

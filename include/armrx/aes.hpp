@@ -18,7 +18,9 @@ namespace armrx {
 
 using AesBlock = std::array<std::byte, 16>;
 
-[[nodiscard]] inline AesBlock encrypt_transform(AesBlock input) {
+// Scalar T-table transforms — always available as the non-crypto fallback and as
+// the oracle the hardware path is checked against (tools/aes_kat_check.cpp).
+[[nodiscard]] inline AesBlock encrypt_transform_ttable(AesBlock input) {
     uint32_t s0, s1, s2, s3;
     std::memcpy(&s0, &input[0], 4);
     std::memcpy(&s1, &input[4], 4);
@@ -50,7 +52,7 @@ using AesBlock = std::array<std::byte, 16>;
     return output;
 }
 
-[[nodiscard]] inline AesBlock decrypt_transform(AesBlock input) {
+[[nodiscard]] inline AesBlock decrypt_transform_ttable(AesBlock input) {
     uint32_t s0, s1, s2, s3;
     std::memcpy(&s0, &input[0], 4);
     std::memcpy(&s1, &input[4], 4);
@@ -82,6 +84,44 @@ using AesBlock = std::array<std::byte, 16>;
     return output;
 }
 
+// Hardware-AES funnel for aarch64 + crypto.
+//
+// RandomX round order is SubBytes->ShiftRows->MixColumns->AddRoundKey (last). AESE
+// performs SubBytes->ShiftRows->AddRoundKey->MixColumns (AddRoundKey FIRST), so feed
+// it a ZERO key (AddRoundKey becomes a no-op), let AESMC do MixColumns, and the caller
+// applies the real key as a trailing XOR (aes_encrypt_round / the x4 AddRoundKey blocks).
+// This is byte-identical to encrypt_transform_ttable and matches armrx's JIT v2 FE_mix
+// (jit_compiler_a64_static.S:425-489). Proven on this silicon in W1-4 (upstream
+// intrin_portable.h:476-484, RANDOMX_FLAG_HARD_AES default).
+//
+// Gate on __ARM_FEATURE_AES (defined under -march=armv8-a+crypto, CMakeLists.txt:67).
+// arm_neon.h is already included for aarch64 above, so the AES intrinsics are in scope.
+#if defined(__aarch64__) && defined(__ARM_FEATURE_AES)
+[[nodiscard]] inline AesBlock encrypt_transform(AesBlock input) {
+    const uint8x16_t z = vdupq_n_u8(0);
+    const uint8x16_t s = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data()));
+    const uint8x16_t r = vaesmcq_u8(vaeseq_u8(s, z));
+    AesBlock output{};
+    vst1q_u8(reinterpret_cast<uint8_t*>(output.data()), r);
+    return output;
+}
+[[nodiscard]] inline AesBlock decrypt_transform(AesBlock input) {
+    const uint8x16_t z = vdupq_n_u8(0);
+    const uint8x16_t s = vld1q_u8(reinterpret_cast<const uint8_t*>(input.data()));
+    const uint8x16_t r = vaesimcq_u8(vaesdq_u8(s, z));
+    AesBlock output{};
+    vst1q_u8(reinterpret_cast<uint8_t*>(output.data()), r);
+    return output;
+}
+#else
+[[nodiscard]] inline AesBlock encrypt_transform(AesBlock input) {
+    return encrypt_transform_ttable(input);
+}
+[[nodiscard]] inline AesBlock decrypt_transform(AesBlock input) {
+    return decrypt_transform_ttable(input);
+}
+#endif
+
 #if defined(__aarch64__) && defined(__ARM_NEON)
 
 // NEON "vector-permute" AES: a from-scratch, independently-derived-and-verified
@@ -91,9 +131,14 @@ using AesBlock = std::array<std::byte, 16>;
 // AES field) and a "tower" representation GF(2^4)^2, where every sub-step (nibble-split
 // forward/backward maps, GF(2^4) inversion, GF(2^4) multiplication via log/antilog) fits a
 // 16-entry vtbl. This is NOT the same as the hardware AESE/AESD instructions previously tried
-// and reverted (changelogs.md 2026-07-20) -- those failed because AESE fixes AddRoundKey's
-// position in the round; this is pure software computing the standard SubBytes->ShiftRows->
-// MixColumns order explicitly, same as encrypt_transform/decrypt_transform already do.
+// and reverted (changelogs.md 2026-07-20) -- those failed because they fed AESE the REAL round
+// key, and AESE applies AddRoundKey FIRST (RandomX applies it LAST), so the round was wrong.
+// The correct hardware form feeds AESE a ZERO key (AddRoundKey becomes a no-op), lets AESMC do
+// MixColumns, and applies the real key as a trailing XOR -- byte-identical to the T-table path.
+// That zero-key form is now ADOPTED as the default aarch64+crypto funnel (see encrypt_transform
+// / decrypt_transform below, gated on __ARM_FEATURE_AES). This Track-G block is the separate
+// tower-field SOFTWARE path, which computes the standard SubBytes->ShiftRows->MixColumns order
+// explicitly, same as encrypt_transform_ttable/decrypt_transform_ttable already do.
 namespace detail {
 
 // General GF(2^4) multiply of two vectors (both operands vary per-lane), via log/antilog
@@ -319,6 +364,22 @@ inline void decrypt_round_x4_neon(
 #else
     auto output = decrypt_transform(state);
 #endif
+    for (unsigned i = 0; i < output.size(); ++i)
+        output[i] ^= round_key[i];
+    return output;
+}
+
+// T-table-only round helpers — used by tools/aes_kat_check.cpp as the oracle the
+// hardware funnel is compared against. They always use the scalar T-table transform
+// regardless of __ARM_FEATURE_AES, so a hw-vs-ttable round comparison is meaningful.
+[[nodiscard]] inline AesBlock aes_encrypt_round_ttable(AesBlock state, AesBlock round_key) {
+    auto output = encrypt_transform_ttable(state);
+    for (unsigned i = 0; i < output.size(); ++i)
+        output[i] ^= round_key[i];
+    return output;
+}
+[[nodiscard]] inline AesBlock aes_decrypt_round_ttable(AesBlock state, AesBlock round_key) {
+    auto output = decrypt_transform_ttable(state);
     for (unsigned i = 0; i < output.size(); ++i)
         output[i] ^= round_key[i];
     return output;
