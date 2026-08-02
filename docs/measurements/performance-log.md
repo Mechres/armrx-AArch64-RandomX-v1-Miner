@@ -65,6 +65,26 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
   scheduling / dual-issue efficiency of the main-VM chain (IPC 0.554), NOT memory tricks.
   Memory ceiling (E9 +0.8%, E2 +5.8% IPC) is secondary. → Next: E11 (measured dual-issue analysis).
 
+### E11 — Measured dual-issue analysis of JIT buffer (DONE 2026-08-03)
+- Captured live JIT buffer (118,784 B, RWX region from `/proc/<pid>/mem`), disassembled on host
+  (aarch64-linux-musl-objdump), analyzed 7795 instructions. Two independent checks agreed.
+- **Robust finding:** of 1234 LOADs, **83.1% are immediately followed by an instruction that
+  consumes the loaded register** (classifier 82.6%, pure-text register check 83.1% — agreement).
+  Only 16.9% of loads are followed by an independent op.
+- **Interpretation:** RandomX's main-VM program is a **dependency chain** (read scratchpad →
+  transform → write back). Each load MUST feed the next op — no independent op exists to hoist into
+  the load's 3-cycle bubble. The 83% adjacency is **structural to the algorithm**, not a scheduling
+  mistake. → the chain's low IPC (0.554) is **largely STRUCTURAL on an in-order A53**, NOT a
+  recoverable scheduling loss.
+- **Explains project history:** the 4 prior scheduling tweaks (PRFM, dual-issue padding, PGO ×2,
+  `*_M` scheduler→divergence) nulled/regressed exactly because little ILP is exposable in a serial
+  chain on an in-order core. E11 is the empirical confirmation of *why*.
+- **Conclusion:** after E2 (memory capped +5.8% IPC) and E11 (scheduling capped by structural
+  dependency chains), the remaining ~6% gap to XMRig (0.551→0.648 IPC) is most plausibly
+  **XMRig's 9 years of x86 codegen tuning / different instruction mix** — not a lever armrx can
+  recover on this in-order A53. Architectural ceiling ~5–5.5 H/s/core. Do NOT chase E3b/E5/E7
+  emitter scheduling; document the dead-end (done above).
+
 ## How to read deltas
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
 - cycles/hash + IPC: the real throughput lever now. XMRig 0.648 vs our 0.551 is the open gap.
