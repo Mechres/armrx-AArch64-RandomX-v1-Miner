@@ -362,6 +362,10 @@
 - **What a result tells us:** localizes the +26% instruction gap to a named region we can actually attack
   with a code change. This is the active investigation; E15/E16's "scaling" question is the only closed part.
 
+> **Lead tracking & discipline:** see [`docs/experiments/perf-tracking.md`](perf-tracking.md) —
+> standing facts, the CLOSED/DEAD lead table (so we never re-run them), open E3a/b/c status, and the
+> GitHub-Copilot-ideas triage. Read it before starting any new measurement.
+
 ## E4 — 8-worker cluster-penalty measurement  [TODO]
 - **Question:** The 1-core number ignores the real deployment (8 workers). Cores 4–7 lose ~50%
   under contention (interconnect arbitration). What's armrx's *actual* 8-worker H/s vs XMRig's?
