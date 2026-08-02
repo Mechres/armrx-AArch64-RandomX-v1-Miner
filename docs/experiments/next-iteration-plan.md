@@ -216,7 +216,48 @@
   safe reorder exists (gap is then truly structural for this core). Either outcome closes E14.
 - **Effort:** analysis + a contained emitter experiment + the full gate suite. No production change
   until gates are green and the mechanism is documented.
+- **DE-PRIORITIZED (2026-08-03, real-world evidence):** the like-for-like real-pool test (both 8-worker,
+  no isolcpus) shows armrx = **21.4 H/s** vs XMRig = **27.77 H/s** — a real **~23% gap**. But armrx WITH
+  isolcpus = **~28.4 H/s** (matches XMRig). So the gap is NOT the IPC microbenchmark delta (0.551 vs
+  0.628) — it is armrx's **non-isolated hugepage + worker-affinity handling** vs XMRig's. XMRig gets
+  hugepages ("huge pages 100% 8/8") and tolerates the two-cluster topology without isolcpus; armrx's
+  non-isolated default falls back to **4 KiB pages** (E9: MAP_HUGETLB failed) and lets the OS scatter
+  workers onto weak cores 4-7 (the documented ~half-throughput penalty). Therefore the IPC-gap chase
+  (E11-E13) was a **phantom real-world deficit**; the *next* concrete lever is E15, not E14. E14 is
+  only worth doing as a pure correctness-exercise, not for performance.
 
+## E15 — Close the non-isolated real-world gap (hugepages + fast-cluster affinity)  [TODO — next concrete lever]
+- **The finding (2026-08-03, real pool, both non-isolated, 8 workers, settled):**
+  | Miner | 8w, no isolcpus | 8w, isolcpus |
+  |-------|----------------:|-------------:|
+  | XMRig | 27.77 H/s       | (n/a tested) |
+  | armrx | 21.4 H/s        | ~28.4 H/s    |
+  XMRig non-isolated (27.77) == armrx isolcpus (~28.4). armrx non-isolated (21.4) is **~23% behind**.
+  This is the genuine remaining real-world gap — and it is NOT codegen (E11-E13 dead-ends), it is
+  **deployment/scheduler behavior under non-isolation**: (a) **hugepages** — XMRig acquired them
+  automatically ("huge pages 100% 8/8"); armrx's E9 showed `MAP_HUGETLB` fails without root-reserved
+  pages, so non-isolated armrx runs on 4 KiB pages; (b) **affinity** — non-isolated armrx lets the OS
+  scatter workers onto weak cluster 4-7 (AGENTS.md: 2-3 such workers lose ~half throughput), while
+  XMRig pins/balances to ride the fast cluster. Both penalties are absent under isolcpus (which is why
+  armrx isolcpus == XMRig), but most users run WITHOUT isolcpus.
+- **Hypothesis:** making armrx's *default non-isolated* behavior match XMRig (auto hugepages + prefer
+  fast-cluster cores 0-3 with weak-cluster avoidance) recovers most of the 23% without requiring the
+  user to edit the kernel cmdline. This is a real, shippable ~20% real-world win for the common case.
+- **Sub-experiments:**
+  1. **Hugepages without root reservation:** why does XMRig get them and armrx doesn't? Check XMRig's
+     approach (it may use `madvise(MADV_HUGEPAGE)` on the anonymous mapping, or `MAP_HUGETLB` after a
+     `/proc/sys/vm/nr_hugepages` nudge, or rely on THP more aggressively). armrx should try
+     `madvise(MADV_HUGEPAGE)` on its cache mapping as a portable fallback (E9 only tested MAP_HUGETLB).
+  2. **Fast-cluster affinity by default:** when `isolcpus` is absent, pin workers to cores 0-3 (fast
+     cluster) and only spill to 4-7 if more workers requested — mirror what isolcpus achieves without
+     the kernel change. Verify via `perf stat -e instructions,cycles` per-worker that weak-cluster
+     workers are avoided.
+  3. **A/B on real pool:** re-run armrx 8-worker non-isolated after each fix; target >= 27 H/s to match
+     XMRig's out-of-the-box number.
+- **Clean-room:** XMRig technique only (how it acquires hugepages / sets affinity); no code copy.
+- **Constraints:** full gates; measure on real pool (not just bench) since the gap only shows there;
+  do NOT regress the isolcpus path. The `jit_compiler_a64_static.S` E12 edit stays as dead-end reference.
+- **Effort:** small (hugepage madvise fallback + default affinity tweak) to medium; primarily measurement.
 
 ## E3 — The IPC gap: 0.551 (us) vs 0.648 (XMRig)  [TODO — the live mystery]
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?

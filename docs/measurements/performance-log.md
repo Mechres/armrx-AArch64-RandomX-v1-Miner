@@ -119,16 +119,28 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
   so there is little independent work to hoist into the 3-cycle bubble, and reordering risks divergence.
   Dataset path, dataset-block read, and NEON AES are already pipelined — so the prior 4 nulls + E12
   all attacked pipelined or forbidden regions.
-- **End of code-level search:** scratchpad is a small slice (~9% of instructions), so even a perfect
-  (and currently-forbidden) fix yields <9% IPC. The remaining gap to XMRig is predominantly XMRig's
-  ~9 years of x86/AArch64 codegen tuning, unreplicable on this in-order A53 without touching `*_M` or
-  a new codegen strategy. Architectural wall for armrx on this silicon: **~4.75-4.79 H/s/core**; the
-  ~14% `isolcpus` deployment lever (multi-core) is the only large real-world H/s gain.
+- **CORRECTED by real-pool like-for-like test (2026-08-03):** the IPC delta (0.551 vs 0.628) is a
+  **phantom real-world deficit**. On the herominers pool, 8 workers, NO isolcpus, same silicon:
+  - **XMRig = 27.77 H/s** (settled by 60s; per-core 4.5 fast-cluster / 2.4 weak-cluster)
+  - **armrx = 21.4 H/s** (settled ~150s; ~23% behind XMRig)
+  - **armrx WITH isolcpus = ~28.4 H/s** (== XMRig)
+  So the gap is NOT codegen or the `*_M` scratchpad path — it is armrx's **non-isolated default
+  behavior**: (a) hugepages — XMRig auto-acquires them ("huge pages 100% 8/8"); armrx's E9 showed
+  `MAP_HUGETLB` fails without root-reserved pages (falls back to 4 KiB); (b) affinity — non-isolated
+  armrx lets the OS scatter workers onto weak cores 4-7 (documented ~half-throughput penalty) while
+  XMRig rides the fast cluster. The E11-E13 codegen chase was a dead end for *real-world* H/s.
+  **E15** is the real remaining lever (close the non-isolated gap via madvise(MADV_HUGEPAGE) +
+  default fast-cluster affinity). **E14** (root-cause `*_M`) de-prioritized — even a perfect IPC fix
+  wouldn't move real-world H/s (bottleneck is interconnect/cluster, not IPC).
 
 ## How to read deltas
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
-- cycles/hash + IPC: the real throughput lever now. XMRig 0.648 vs our 0.551 is the open gap.
-- E2 reframes: the gap is instruction-scheduling (dual-issue), not memory latency.
+- cycles/hash + IPC: the per-cycle gap to XMRig (0.551 vs 0.628) is REAL in microbenchmarks but is a
+  **phantom real-world deficit** — it does not show up as a real-world H/s gap (both are interconnect/
+  cluster-bound at 765 MHz). The next concrete real-world gap to investigate is **E15** (non-isolated
+  hugepages + affinity).
+- E2 reframes: the gap is instruction-scheduling (dual-issue), not memory latency — but that gap is
+  microarchitectural only; system-level throughput is gated by the two-cluster topology + page size.
 
 
 - H/s: the only number that pays. ~5–5.5/core is the architectural wall on this silicon.
