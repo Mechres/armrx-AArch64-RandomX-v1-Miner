@@ -128,17 +128,21 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
   behavior**: (a) hugepages — XMRig auto-acquires them ("huge pages 100% 8/8"); armrx's E9 showed
   `MAP_HUGETLB` fails without root-reserved pages (falls back to 4 KiB); (b) affinity — non-isolated
   armrx lets the OS scatter workers onto weak cores 4-7 (documented ~half-throughput penalty) while
-  XMRig rides the fast cluster. The E11-E13 codegen chase was a dead end for *real-world* H/s.
-  **E15** is the real remaining lever (close the non-isolated gap via madvise(MADV_HUGEPAGE) +
-  default fast-cluster affinity). **E14** (root-cause `*_M`) de-prioritized — even a perfect IPC fix
-  wouldn't move real-world H/s (bottleneck is interconnect/cluster, not IPC).
+  XMRig rides the fast cluster. E15 investigated both obvious non-isolated causes (hugepages,
+  affinity) and **ruled both out**: armrx already pins correctly (AffinityMode::All → 1:1 to
+  core_order_, which degenerates to 0..7 on this no-cpufreq device, coincidentally correct) and as
+  root already acquires 128×2 MiB hugepages (HugePages_Free 256→128) yet only reaches 22.9 H/s (+1.5).
+  So the ~18% residual gap's cause is **open** (real-program hash-loop efficiency vs XMRig, or
+  8-worker threading/contention overhead — not yet measured). **E14** (root-cause `*_M`) de-prioritized
+  — even a perfect IPC fix wouldn't move real-world H/s. Next step: a clean settled per-core A/B
+  (armrx 1w core 3 vs XMRig 4.53 H/s) before any code.
 
 ## How to read deltas
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
 - cycles/hash + IPC: the per-cycle gap to XMRig (0.551 vs 0.628) is REAL in microbenchmarks but is a
   **phantom real-world deficit** — it does not show up as a real-world H/s gap (both are interconnect/
-  cluster-bound at 765 MHz). The next concrete real-world gap to investigate is **E15** (non-isolated
-  hugepages + affinity).
+  cluster-bound at 765 MHz). The non-isolated gap (E15) had its two leading hypotheses (hugepages,
+  affinity) **ruled out**; its cause is open pending a clean settled per-core A/B.
 - E2 reframes: the gap is instruction-scheduling (dual-issue), not memory latency — but that gap is
   microarchitectural only; system-level throughput is gated by the two-cluster topology + page size.
 

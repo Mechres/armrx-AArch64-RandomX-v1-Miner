@@ -226,40 +226,47 @@
   (E11-E13) was a **phantom real-world deficit**; the *next* concrete lever is E15, not E14. E14 is
   only worth doing as a pure correctness-exercise, not for performance.
 
-## E15 — Close the non-isolated real-world gap (hugepages + fast-cluster affinity)  [TODO — next concrete lever]
-- **The finding (2026-08-03, real pool, both non-isolated, 8 workers, settled):**
+## E15 — Non-isolated gap: BOTH leading hypotheses ruled out; cause open  [INCONCLUSIVE — hypotheses dead]
+- **The finding (2026-08-03, real pool, 8 workers, no isolcpus, settled):**
   | Miner | 8w, no isolcpus | 8w, isolcpus |
   |-------|----------------:|-------------:|
-  | XMRig | 27.77 H/s       | (n/a tested) |
-  | armrx | 21.4 H/s        | ~28.4 H/s    |
-  XMRig non-isolated (27.77) == armrx isolcpus (~28.4). armrx non-isolated (21.4) is **~23% behind**.
-  This is the genuine remaining real-world gap — and it is NOT codegen (E11-E13 dead-ends), it is
-  **deployment/scheduler behavior under non-isolation**: (a) **hugepages** — XMRig acquired them
-  automatically ("huge pages 100% 8/8"); armrx's E9 showed `MAP_HUGETLB` fails without root-reserved
-  pages, so non-isolated armrx runs on 4 KiB pages; (b) **affinity** — non-isolated armrx lets the OS
-  scatter workers onto weak cluster 4-7 (AGENTS.md: 2-3 such workers lose ~half throughput), while
-  XMRig pins/balances to ride the fast cluster. Both penalties are absent under isolcpus (which is why
-  armrx isolcpus == XMRig), but most users run WITHOUT isolcpus.
-- **Hypothesis:** making armrx's *default non-isolated* behavior match XMRig (auto hugepages + prefer
-  fast-cluster cores 0-3 with weak-cluster avoidance) recovers most of the 23% without requiring the
-  user to edit the kernel cmdline. This is a real, shippable ~20% real-world win for the common case.
-- **Sub-experiments:**
-  1. **Hugepages without root reservation:** why does XMRig get them and armrx doesn't? Check XMRig's
-     approach (it may use `madvise(MADV_HUGEPAGE)` on the anonymous mapping, or `MAP_HUGETLB` after a
-     `/proc/sys/vm/nr_hugepages` nudge, or rely on THP more aggressively). armrx should try
-     `madvise(MADV_HUGEPAGE)` on its cache mapping as a portable fallback (E9 only tested MAP_HUGETLB).
-  2. **Fast-cluster affinity by default:** when `isolcpus` is absent, pin workers to cores 0-3 (fast
-     cluster) and only spill to 4-7 if more workers requested — mirror what isolcpus achieves without
-     the kernel change. Verify via `perf stat -e instructions,cycles` per-worker that weak-cluster
-     workers are avoided.
-  3. **A/B on real pool:** re-run armrx 8-worker non-isolated after each fix; target >= 27 H/s to match
-     XMRig's out-of-the-box number.
-- **Clean-room:** XMRig technique only (how it acquires hugepages / sets affinity); no code copy.
-- **Constraints:** full gates; measure on real pool (not just bench) since the gap only shows there;
-  do NOT regress the isolcpus path. The `jit_compiler_a64_static.S` E12 edit stays as dead-end reference.
-- **Effort:** small (hugepage madvise fallback + default affinity tweak) to medium; primarily measurement.
+  | XMRig | 27.77 H/s       | (n/a)        |
+  | armrx | 21-23 H/s       | ~28.4 H/s    |
+  armrx non-isolated is **~18-23% behind** XMRig; armrx isolcpus (~28.4) == XMRig. So the gap is
+  armrx's non-isolated default behavior. Originally hypothesized as hugepages + affinity. Both are
+  now **ruled out by measurement + code inspection**:
+- **Hugepages — RULED OUT:** as root, armrx DOES acquire 128× 2 MiB hugepages via `MAP_HUGETLB`
+  (proven: `HugePages_Free` 256→128 during run, back to 256 after). But root armrx still settled at
+  only **22.9 H/s** (vs 21.4 non-root) — hugepages add ~1.5 H/s, not the ~6 needed. XMRig's hugepages
+  are not the lever. (armrx's `virtual_memory.c:235` already uses `MAP_HUGETLB|MAP_POPULATE` + a
+  `MADV_HUGEPAGE` THP fallback — same technique as XMRig's `virtual_memory_unix.cpp`.)
+- **Affinity — RULED OUT:** default `affinity_mode_ = AffinityMode::All` (mining_engine.cpp:168),
+  which pins worker `thread_id` to `core_order_[thread_id]` via `pthread_setaffinity_np`. On this
+  no-cpufreq device `detect_core_order()`'s `cpuinfo_max_freq` reads all fail → fallback returns
+  **sequential 0..7** (mining_engine.cpp:120-124) — coincidentally correct (0-3 fast / 4-7 weak), so
+  workers 0-3 land on fast cores, 4-7 on weak, matching XMRig's per-core layout. So armrx already pins
+  correctly 1:1; the gap is not mis-scheduling onto weak cores.
+- **Conclusion:** the ~18% gap persists despite correct pinning AND hugepages. Its cause is NOT in the
+  two areas hypothesized. Open possibilities (NOT yet tested, no measurement done):
+  (a) **hash-loop efficiency** — armrx's JIT/VM may be genuinely ~18% less efficient per cycle on the
+      *real* RandomX program mix than XMRig, even though the E11/E13 microbenchmarks (scratchpad bench,
+      isolated buffer) suggested parity. The live program's instruction mix may differ from the bench.
+  (b) **threading/contention overhead** — armrx's 8-worker setup may have extra cross-thread cost
+      (partial-dataset fill threads, dataset-rebuild handshake, shared-cache locking) that XMRig avoids.
+  (c) **weak-cluster under-contention** — under full 8-worker interconnect contention, armrx's weak-
+      cluster workers may lose more than XMRig's (AGENTS.md: cores 4-7 lose ~50% under contention).
+- **Why the earlier "2× per-core" claim was WRONG:** the 4-worker fast-only run was read at 9 H/s while
+  still warming up (its own log showed 10 H/s at 380s, not settled). Retracted — no clean settled
+  per-core armrx number exists yet. Do NOT conclude per-core deficit from that data.
+- **Next step requires a clean settled per-core A/B** (armrx 1 worker pinned to core 3 vs XMRig core 3,
+  4.53 H/s) to distinguish (a) from (b)/(c). That test was attempted but the process wouldn't die
+  (Ctrl+C ignored; needed `sudo kill -9`) and was read un-settled. Re-run properly before any code.
+- **Constraints:** full gates; measure on real pool; do NOT regress isolcpus path. `jit_compiler_a64_
+  static.S` E12 edit stays as dead-end reference. No code change made for E15 (both hypotheses dead).
+- **Effort:** the open question needs one clean settled per-core measurement, then possibly a hash-loop
+  or threading investigation. Not a "quick affinity fix" — that path is exhausted.
 
-## E3 — The IPC gap: 0.551 (us) vs 0.648 (XMRig)  [TODO — the live mystery]
+
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?
 - **Sub-experiments:**
   - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
