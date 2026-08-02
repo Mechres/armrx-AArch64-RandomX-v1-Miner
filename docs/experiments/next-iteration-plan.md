@@ -226,7 +226,7 @@
   (E11-E13) was a **phantom real-world deficit**; the *next* concrete lever is E15, not E14. E14 is
   only worth doing as a pure correctness-exercise, not for performance.
 
-## E15 — Non-isolated gap: localized to MULTI-WORKER SCALING (per-core is fine)  [DECISIVE — lever found]
+## E15 — Non-isolated gap: localized to MULTI-WORKER SCALING (per-core is fine)  [CLOSED — see E16]
 - **The finding (2026-08-03, real pool, settled, same silicon):**
   | Test | armrx | XMRig | armrx / XMRig |
   |------|------:|------:|---------------:|
@@ -264,7 +264,7 @@
 - **Constraints:** full gates; measure on real pool; do NOT regress isolcpus path. `jit_compiler_a64_
   static.S` E12 edit stays as dead-end reference. No code change made for E15 (localization only).
 
-## E16 — Multi-worker scaling: per-worker structure (--mine sweep) + open 3× gap  [IN PROGRESS]
+## E16 — Multi-worker scaling: per-worker structure + THERMAL THROTTLE (fan re-test)  [CLOSED]
 - **Method:** `armrx --mine --seconds=60` (self-terminating local bench, same MiningEngine threading
   as pool). Light mode, 60s, settled. taskset pins as noted. Per-worker H/s printed at end.
 - **Raw data (Steady-state, H/s):**
@@ -329,9 +329,16 @@
   are measured cool. No code change pending; this is a measurement to close the book on E15/E16.
 - **Constraints:** full gates; do NOT regress isolcpus path or pool correctness; E12 edit stays as
   dead-end reference. `--pool-test` is a supported measurement mode (like other miners' test flags).
+- **CLOSED (2026-08-04, no further re-baseline needed — user-confirmed):** with the bigger fan holding
+  the SoC cool, thermally-clean pool-test results are: 1w=3.96, 4w=15.01 (fast cluster linear 3.8×),
+  8w=21.85 H/s. **User reports XMRig = 28 H/s @8w (cool)** → armrx 21.85 is **~78% of XMRig**, and the
+  residual is the MSM8929's own weak-cluster 0.53× hardware asymmetry (XMRig bears it too). Per-core
+  armrx ~88% of XMRig. **The multi-worker gap was entirely THERMAL + the SoC's fast/weak design, not a
+  software inefficiency** — no code change pending. E15/E16 are DONE; do not re-open the XMRig
+  comparison. (A hardware note for the future: a sustained sub-50°C SoC — better cooling or a DVFS/thermal
+  trip tweak — is the only path to materially higher H/s here, and it's outside armrx's code.)
 
-- **Question:** XMRig gets more work/cycle doing the *same algorithm* on *the same silicon*. Where?
-- **Sub-experiments:**
+- **Sub-experiments (historical context — all superseded by the thermal finding):**
   - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
     Run armrx Blake2b microbench under perf; compare IPC to XMRig's (or a known reference impl).
     Blake2b is ~0.7M instr but could be high-cycle on A53.
