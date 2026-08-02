@@ -42,17 +42,61 @@
 - **Effort:** done (device measurement, no code change). Next: E2.
   E2/E3/E5 (whether the superscalar IPC is actually exposed, whether main-VM is the cycle sink).
 
-## E2 — scratchpad-real vs scratchpad-l1 under perf  [TODO]
-- **Question:** How much of our cycles are *genuine DRAM latency* vs *our access pattern*?
-- **Why:** `-scratchpad-l1` aliases the 2 MiB scratchpad to 16 KiB L1 — removes DRAM entirely.
-  If IPC jumps, our access pattern / working set is the lever (fixable). If it doesn't, the
-  cycles are inherent RandomX light-mode memory latency (the 2.2× main-VM penalty both impls pay).
-- **Measurement:** both flags under `perf stat -e cycles,instructions,L1-dcache-misses,
-  cache-misses` on device, core 3, md5-recorded binary.
-- **Hypothesis:** partial jump — some penalty is pattern, some is inherent.
-- **Effort:** ~5 min device, no code change.
-- **What a result tells us:** whether the 6% H/s gap is attackable in code (pattern) or a wall
-  (inherent DRAM). Directly scopes E3/E7.
+## E2 — scratchpad-real vs scratchpad-l1 under perf  [DONE 2026-08-03 — CHAIN IS COMPUTE/IPC-BOUND, not memory]
+- **Question:** How much of the chain's cycles are *genuine memory latency* vs *compute/scheduling*?
+- **Result (device, core 3, 2000 executions each, bench-internal `perf stat`):**
+
+  | metric | scratchpad-REAL (2MiB) | scratchpad-L1 (16KiB) | Δ |
+  |---|---:|---:|---:|
+  | wall μs/program | 24,801.54 | 23,288.81 | −6.1% |
+  | **cycles** | 47,306,235,460 | 44,721,186,358 | **−5.5%** |
+  | **instructions** | 26,221,057,422 | 26,217,928,865 | **−0.01%** (identical) |
+  | cache-misses | 190,339,816 | 113,037,514 | **−40.6%** |
+  | **IPC** | **0.554** | **0.586** | **+5.8%** |
+
+- **Interpretation (pivotal):**
+  - Instructions are **identical** (0.01% diff) → L1-aliasing changes *memory behavior only*, not code.
+    Clean isolation. ✓
+  - Eliminating **77M cache misses** (whole scratchpad → L1) saves only **5.5% cycles / +5.8% IPC**.
+  - ⇒ **~94% of the chain's cycles are COMPUTE/IPC-bound, NOT memory-latency-bound.** The A53's
+    ~3-4 in-flight misses + working set fitting in L2 mostly hides the latency. Memory tricks
+    (E9 hugepages +0.8%, E2 L1 +5.8% IPC ceiling) are **secondary**.
+  - The chain runs at **IPC 0.554** — low for an in-order dual-issue core. The real cost is
+    *instruction execution efficiency*: dual-issue utilization, dependency chains, the single
+    memory-port serialization, integer/FP scheduling of the main-VM program.
+- **Conclusion:** the remaining ~6% gap to XMRig (0.551→0.648 IPC = +17%) is **NOT memory**
+  (that's capped at +5.8%). It is **instruction scheduling / dual-issue efficiency of the main-VM
+  chain** → E3b / E5 / E7 territory. BUT the project has 4 prior confirmations that *blind*
+  scheduling tweaks (PRFM, dual-issue padding, PGO ×2) regress/null on this core. So the next
+  move is NOT another blind tweak — it's a **measured dual-issue analysis** of the chain's emitted
+  AArch64 (JIT dump + the A53 dual-issue rules from the web sources: destevez.net, Tencent ncnn
+  wiki) to find *concrete, evidence-based* pairing opportunities. See E11.
+- **Effort:** done (device measurement, no code change). Next: E11 (dual-issue analysis) → then E3b/E5/E7.
+
+## E11 — Measured A53 dual-issue analysis of the chain's emitted AArch64  [TODO — next research step]
+- **Question (the real frontier from E2):** the chain is ~94% compute/IPC-bound at IPC 0.554. Where
+  exactly does the A53 dual-issue pipeline go idle? Find *concrete* pairing/serialization losses in
+  the main-VM program's emitted code — not a blind tweak.
+- **Method (evidence-based, avoids the 4 prior blind-null failures):**
+  1. Dump the JIT-emitted main-VM program (`--jit-dump` / the JIT dump buffer; or capture the
+     `run_execute_only` program's code via `/proc/<pid>/maps` + objdump) for a representative seed.
+  2. Apply the A53 dual-issue rules gathered in the web pass: single memory port (load XOR store/
+     cycle, no load+store dual-issue); `fmla`/`ins` mutual exclusion; loads can dual-issue with
+     integer ops but not with each other; branch/IMUL can't dual-issue. (Sources: destevez.net
+     "Coding NEON kernels for the Cortex-A53"; Tencent ncnn arm-a53-a55-dual-issue wiki; Sonos
+     "Assembly still matters: A53 vs M1".)
+  3. Statistically classify consecutive instruction pairs in the emitted stream: how many *could*
+     have dual-issued but didn't (dependency / port conflict), vs truly serial. Quantify the lost
+     IPC as a delta vs the 0.554 observed.
+- **Decision rule:** if the analysis shows a *specific, repeatable* pairing opportunity (e.g., the
+  emitter places a dependent integer op immediately after a load instead of an independent op),
+  that becomes a targeted emitter change (feeds E3b/E5/E7). If it shows the code is already
+  near the A53 dual-issue ceiling, then 0.554 is the architectural floor for our instruction mix
+  and the gap to XMRig (0.648) is XMRig's *different instruction mix* (x86→AArch64 translation),
+  not something we can close on this core.
+- **Effort:** research/analysis, no code change. Output: a quantified dual-issue loss report.
+- **Why this and not another blind tweak:** E2 proved the lever is scheduling; the 4 prior nulls
+  proved guessing doesn't work. Measured analysis is the only way to find a real, non-null lever.
 
 ## E3 — The IPC gap: 0.551 (us) vs 0.648 (XMRig)  [TODO — the live mystery]
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?

@@ -46,7 +46,29 @@ Live H/s also taken from a plain `taskset -c 3 ./bench_armrx --full-hash-only` r
   gap to XMRig is now ~6% (4.75 vs 5.05) and is a **cycle-efficiency** gap, not instructions.
   → instruction-count hypothesis falsified; frontier is now IPC/cycle efficiency.
 
+### Iteration 2 follow-up — E1 (re-attribution) + E2 (scratchpad-real vs L1)
+- **E1 (region attribution, `--attribution-only`, core 3, current build + hugepages):** full hash
+  209.1 ms (4.78 H/s). Phase split: blake2b seed 0.00% / init_scratchpad(AES) 0.34% /
+  **chain 7xrun+7xblake2b 86.64%** / final run 12.36% / get_final_result 0.52%.
+  → AES is dead as a bottleneck (<1% combined). The chain dominates.
+- **E2 (scratchpad-real vs L1 under perf, 2000 execs each, core 3):**
+
+  | metric | REAL (2MiB) | L1 (16KiB) | Δ |
+  |---|---:|---:|---:|
+  | cycles | 47.31B | 44.72B | −5.5% |
+  | instructions | 26.221B | 26.218B | −0.01% (identical) |
+  | cache-misses | 190.3M | 113.0M | −40.6% |
+  | IPC | 0.554 | 0.586 | +5.8% |
+
+  → Eliminating 77M cache misses (whole scratchpad→L1) saves only 5.5% cycles / +5.8% IPC.
+  **~94% of the chain is COMPUTE/IPC-bound, not memory-latency-bound.** The lever is instruction
+  scheduling / dual-issue efficiency of the main-VM chain (IPC 0.554), NOT memory tricks.
+  Memory ceiling (E9 +0.8%, E2 +5.8% IPC) is secondary. → Next: E11 (measured dual-issue analysis).
+
 ## How to read deltas
 - instr/hash: lower = leaner. We won this vs both references (iter 1).
 - cycles/hash + IPC: the real throughput lever now. XMRig 0.648 vs our 0.551 is the open gap.
+- E2 reframes: the gap is instruction-scheduling (dual-issue), not memory latency.
+
+
 - H/s: the only number that pays. ~5–5.5/core is the architectural wall on this silicon.
