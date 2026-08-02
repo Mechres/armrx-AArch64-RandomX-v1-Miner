@@ -286,26 +286,40 @@
      workers to 1.77/w avg (**−23%**) while weak add only 1.06/w. Net 8w = 11.36. So weak-cluster
      workers' memory traffic contends on the shared two-cluster interconnect and starves the fast
      cluster — a real multi-worker scaling loss, observed even in --mine.
-- **OPEN — 3× absolute gap makes --mine an unreliable pool proxy:** `--mine` 1w = **1.32 H/s** but the
-  earlier POOL 1w (core 3) = **4.08 H/s** — a **3.1× discrepancy** for the identical 1-worker light-mode
-  hash. Consequences: (a) `--mine` scaling 1w→8w = 8.6× (near-linear) **contradicts** the pool-mode
-  5.4× inferred from 4.08→22; (b) cannot trust --mine absolute or scaling % as representative of pool.
-  Unexplained cause — candidates: thermal (--mine hit 60°C vs unknown pool temp; device may throttle
-  memory controller at 60°C though CPU clock is fixed), or mode-specific per-hash cost in --mine
-  (bench path differs from pool path). **Must resolve before drawing scaling conclusions from --mine.**
-- **Next step (decisive):** get POOL-mode per-worker breakdown (the real workload). Pool mode currently
-  logs only aggregate Speed; it does not self-terminate (needs `sudo kill -9`, assistant can't sudo).
-  Proposed: add per-worker H/s to the pool status line (small, measurement-only change to
-  mining_engine.cpp status reporting) so a pool sweep yields the same w0/w1.. breakdown as --mine.
-  Alternative: re-run the 3× gap check (--mine 1w at lower temp / pool 1w with logged temp) to rule
-  thermal in/out first. Target once per-worker pool data exists: confirm whether weak workers drag
-  fast workers in POOL mode (the real E15 scaling loss) and whether worker[0]'s deficit is the main
-  thread tax. Then decide the fix (cluster-aware worker policy / reduce main-thread tax).
+- **RESOLVED — the 3× gap was THERMAL THROTTLING, not a mode difference:** added `--pool-test`
+  flag (self-terminating pool mode + per-worker summary, no `kill -9` needed) and swept the REAL
+  pool workload. Same 1-worker light-mode hash, two temperatures:
+  | 1w pool-test | Temp | Rate |
+  |--------------|------|-----:|
+  | cool (30s, early) | 46°C | **3.19 H/s** |
+  | hot (45s, saturated) | 60°C | **0.68 H/s** |
+  That is a **~4.7× crash** from cool→60°C for the IDENTICAL workload. CPU clock is fixed 765 MHz,
+  but the **memory subsystem throttles at 60°C** (RandomX is memory-bound → craters). CONSEQUENCE:
+  EVERY prior "settled" E15/E16 number ran 150s+ and saturated at 60°C (throttled). The "4.08 H/s"
+  per-core and "22 H/s" 8w were thermal-throttled; the cool-silicon 1w is ~3-4 H/s. The `--mine` 1.32
+  vs pool 4.08 "3× gap" was simply the `--mine` run sitting at 60°C while the pool 1w reading was
+  taken cool/early. **Temperature was an uncontrolled confound in all E15/E16 absolute numbers.**
+- **Pool-test per-worker sweep (45s, @60°C throttled — shape only, NOT clean magnitudes):**
+  | Config | Total | w0 | w1 | w2 | w3 | w4 | w5 | w6 | w7 |
+  |--------|------:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | 1w | 0.68 | 0.68 | | | | | | | |
+  | 4w | 7.90 | 1.81 | 2.03 | 2.03 | 2.03 | | | | |
+  | 8w | 10.45 | 0.99 | 1.34 | 1.34 | 1.34 | 1.30 | 1.41 | 1.37 | 1.34 |
+  Shape findings hold: worker[0] slowest (main-thread tax), weak-cluster 4-7 ≈ 0.55× fast.
+  But absolute magnitudes are throttled; ratios need re-measurement cool.
+- **`--pool-test` feature (shipped, measurement-only):** `armrx --pool-test ... --seconds=S`
+  honors `--seconds` (self-terminates via `std::_Exit(0)` right after printing the per-worker
+  summary — skips the pool/engine teardown that otherwise hangs), prints `worker[0..N]` H/s + CPU
+  max temp. Pool correctness unchanged (still connects/submits). No credentials in source — the
+  user supplies `--pool/--wallet/--password` as always. CLI test passes; cross-build clean.
+- **NEXT STEP (decisive, blocked on temperature control):** re-run the pool-test sweep with the
+  device COOL (log temp; keep runs short / cool between them) to get un-throttled per-worker numbers,
+  then compute true scaling 1w→8w and the real armrx-vs-XMRig ratio. Until temperature is controlled,
+  no scaling conclusion is trustworthy. This is the next measurement, not a code change.
 - **Constraints:** full gates; do NOT regress isolcpus path or pool correctness; E12 edit stays as
-  dead-end reference. No code change yet for E16 (sweep + analysis only; 3× gap unresolved).
+  dead-end reference. `--pool-test` is a supported measurement mode (like other miners' test flags).
 
 - **Question:** XMRig gets more work/cycle doing the *same algorithm* on *the same silicon*. Where?
-- **Question:** XMRig gets more work/cycle doing the *same algorithm* on the *same silicon*. Where?
 - **Sub-experiments:**
   - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
     Run armrx Blake2b microbench under perf; compare IPC to XMRig's (or a known reference impl).

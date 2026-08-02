@@ -41,6 +41,13 @@ struct MinerOptions {
     std::uint16_t metrics_port = 0; // 0 = disabled
     AffinityMode affinity_mode = AffinityMode::All;
 
+    // Pool self-terminating test mode: makes `run_pool_mining` honor
+    // --seconds (self-terminate, no Ctrl+C/kill -9 needed) and print a
+    // per-worker steady-state summary at the end. Useful for reproducible
+    // A/B measurement sweeps on the real pool workload. Mining is unchanged
+    // (still connects + submits shares); only the run length + reporting differ.
+    bool pool_test = false;
+
     bool jit_dump_mode = false;
     std::string jit_dump_key = "test key 000";
 

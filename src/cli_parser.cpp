@@ -225,6 +225,10 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
             o.pool_tls_verify = false;
             continue;
         }
+        if (argument == "--pool-test") {
+            o.pool_test = true;
+            continue;
+        }
         if (argument == "--tui") {
             o.use_tui = true;
             continue;
@@ -349,6 +353,7 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
                 << "  --password=<pw>            Worker password (default: x)\n"
                 << "  --tls / --no-tls          Enable TLS encryption (default: off, requires OpenSSL)\n"
                 << "  --no-verify-tls          Skip TLS certificate verification (default: verify)\n"
+              << "  --pool-test               Self-terminating pool test mode: honor --seconds (no Ctrl+C/kill needed) and print a per-worker summary at the end (mining unchanged)\n"
                 << "  --config=<path>           Config file path (default: ~/.config/armrx/config.json)\n"
                 << "  --tui / --no-tui          Terminal UI dashboard (default: off)\n"
                 << "  --no-color                Disable ANSI color in TUI output\n"

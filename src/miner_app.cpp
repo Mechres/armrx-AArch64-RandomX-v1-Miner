@@ -20,6 +20,7 @@
 #include <thread>
 #include <csignal>
 #include <sys/mman.h>
+#include <cstdlib>
 
 namespace armrx {
 
@@ -375,6 +376,12 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     engine.start(share_callback);
     pool_mgr->connect();
 
+    // Take the pool-test start snapshot now (before the loop) so the end
+    // snapshot delta covers the whole run.
+    if (opts_.pool_test) {
+        pool_test_snap_start_ = engine.snapshot();
+    }
+
     // Optional TUI dashboard
     std::unique_ptr<armrx::Tui> tui;
     if (opts_.use_tui) {
@@ -388,7 +395,7 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
 
     unsigned elapsed_sec = 0;
 
-    while (keep_running) {
+    while (keep_running && (!opts_.pool_test || opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         ++elapsed_sec;
 
@@ -459,6 +466,44 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
         }
     }
     std::cout << std::endl;
+
+    // Pool-test mode: print a per-worker steady-state summary (same shape as
+    // the --mine benchmark) BEFORE teardown, so the data is captured even if
+    // the pool/engine teardown hangs. Uses the full-run snapshot delta.
+    if (opts_.pool_test) {
+        const auto snap_end = engine.snapshot();
+        const double delta_secs =
+            std::chrono::duration<double>(snap_end.ts - pool_test_snap_start_.ts).count();
+        std::cout << "\n[Pool-test] summary over " << std::fixed << std::setprecision(1)
+                  << delta_secs << "s:\n";
+        if (delta_secs > 0.5 && snap_end.total >= pool_test_snap_start_.total) {
+            const std::uint64_t delta_total = snap_end.total - pool_test_snap_start_.total;
+            const double total_rate = static_cast<double>(delta_total) / delta_secs;
+            std::cout << "  Total: " << std::fixed << std::setprecision(2) << total_rate << " H/s\n";
+            const unsigned nw = engine.num_workers();
+            for (unsigned i = 0; i < nw; ++i) {
+                const std::uint64_t sw = (i < snap_end.per_worker.size() &&
+                                          i < pool_test_snap_start_.per_worker.size() &&
+                                          snap_end.per_worker[i] >= pool_test_snap_start_.per_worker[i])
+                    ? snap_end.per_worker[i] - pool_test_snap_start_.per_worker[i] : 0;
+                std::cout << "  worker[" << i << "]: "
+                          << std::fixed << std::setprecision(2)
+                          << (static_cast<double>(sw) / delta_secs) << " H/s\n";
+            }
+        } else {
+            std::cout << "  (insufficient run time for steady-state delta)\n";
+        }
+        if (const double temp_c = armrx::max_cpu_temperature(); temp_c >= 0.0) {
+            std::cout << "  CPU max temp: " << std::fixed << std::setprecision(1) << temp_c << "C\n";
+        }
+        std::cout << std::flush;
+        // Self-terminate immediately after capturing the summary. Skipping the
+        // pool/engine teardown on purpose: pool_mgr->disconnect()/engine.stop()
+        // can block waiting on the network/worker threads, which would prevent
+        // clean exit and force a kill -9. For a measurement mode the data above
+        // is what matters; leaking the socket on exit is acceptable here.
+        std::_Exit(0);
+    }
 
     pool_mgr->disconnect();
     engine.stop();

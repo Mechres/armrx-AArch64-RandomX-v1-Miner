@@ -30,6 +30,10 @@ private:
 
     MinerOptions opts_;
     std::shared_ptr<PartialDataset> partial_dataset_;
+
+    // Start snapshot for --pool-test steady-state delta (taken right before
+    // the mining loop begins). Only meaningful when opts_.pool_test is set.
+    MiningEngine::HashSnapshot pool_test_snap_start_{};
 };
 
 } // namespace armrx
