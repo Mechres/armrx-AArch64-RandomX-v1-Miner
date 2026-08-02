@@ -111,19 +111,27 @@
   → there is no software CRC32 path to replace, so Chorba yields no win. Kept as a note so we
   don't re-discover it. (Paper itself remains a good ARMv8 reference; just not for armrx.)
 
-## E9 — Hugepages actually allocated? (deployment, FREE, unmeasured)  [TODO — high ROI]
+## E9 — Hugepages actually allocated? (deployment, FREE, unmeasured)  [DIAGNOSED 2026-08-03 — fix BLOCKED on device root]
 - **Source:** XMRig RandomX Optimization Guide (xmrig.com/docs/miner/randomx-optimization-guide):
   "Huge Pages can increase RandomX performance up to 50%; 1GB huge pages +1-3%."
-- **Question:** armrx has `MAP_HUGETLB` + `MADV_HUGEPAGE` ("Memory Tiering" in README), but
-  does the device *actually* get 2 MiB hugepages for the scratchpad/cache? `getconf HUGETLB`
-  / `cat /proc/meminfo | grep Huge` / a runtime assert in `allocate()` would confirm. If the
-  allocation silently falls back to 4 KiB pages, RandomX (which is TLB-pressure-heavy: 256 MiB
-  cache + 2 MiB scratchpad per thread) pays huge TLB-miss penalties on an A53 with a small TLB.
-- **Measurement:** check `/proc/meminfo` HugePages_*, and/or add a one-line log of the actual
-  mapping (hugetlb vs anon) at startup. If 4 KiB: enable hugepages on device (`sysctl vm.nr_hugepages`
-  or mount `hugetlbfs`) and re-bench.
-- **Why high ROI:** XMRig credits up to 50% to hugepages; even recovering a fraction is free and
-  we have NEVER verified armrx gets them on this device. Likely the single biggest untested lever.
+- **DIAGNOSIS (device, 2026-08-03):** armrx is NOT getting hugepages.
+  - `/proc/meminfo`: `HugePages_Total: 0`, `nr_hugepages: 0`, no `hugetlbfs` mount.
+  - `src/virtual_memory.c:235` does `mmap(... MAP_HUGETLB | MAP_POPULATE)` with no sized flag;
+    with 0 reserved it FAILS → callers (vm.cpp:132, argon2.cpp:271) fall back to anonymous +
+    `MADV_HUGEPAGE` (THP).
+  - **Empirical proof:** live bench `/proc/<pid>/smaps` for the 256 MiB region
+    (`ffff9ce00000-fffface00000`): `KernelPageSize: 4 kB`, `MMUPageSize: 4 kB`,
+    `AnonHugePages: 0 kB`. The entire 256 MiB light-mode cache is on **4 KiB pages** = 65,536
+    PTEs/thread, hammered by random-access dataset derivation 16,384×/hash → massive TLB pressure
+    on the A53's small TLB.
+- **FIX (needs device root — BLOCKED):** reserve 2 MiB hugepages as root, e.g.
+  `echo 256 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages` (needs ~512 MiB free;
+  device had 1378 MiB free). Then `MAP_HUGETLB` succeeds and cache/scratchpad land on 2 MiB pages.
+  `mechres` user cannot (no passwordless sudo/doas; `su` needs password) → **user must run as
+  root on device**, then re-bench. This is a deployment change only; no armrx code change needed.
+- **Why high ROI:** XMRig credits up to 50% to hugepages; we are definitively NOT getting them,
+  and the 256 MiB cache at 4 KiB is the single biggest untested lever. Likely a large, free win
+  once root reserves the pages.
 
 ## E10 — Disable hardware prefetchers (deployment, FREE, unmeasured)  [TODO]
 - **Source:** XMRig RandomX Optimization Guide: "You must disable hardware prefetchers to get the
