@@ -1324,45 +1324,22 @@ void JitCompilerA64::emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* /*c
 {
 	uint32_t k = codePos;
 
-	if (imm < (1 << 16))
-	{
-		emit32(ARMV8A::MOVZ | dst | (imm << 5), code, k);
-	}
-	else if (cpoolBase_ != 0 && cpoolSlot_ < SuperscalarCpoolSlots)
-	{
-		// Match emitMovImmediate's MOVN+MOVK result for negative values: LDR Xt
-		// loads all 64 bits of the pool entry as-is, so the entry itself must
-		// hold the sign-extended 64-bit constant.
-		const uint64_t value = static_cast<uint64_t>(static_cast<int64_t>(static_cast<int32_t>(imm)));
-		memcpy(code + cpoolLiteralPos_, &value, sizeof(value));
-		// ldr dst, [PC + offset]  -- mirrors IMUL_RCP's PC-relative geometry
-		// EXACTLY (off = (slot_pos - k)/4, same as the main-VM IMUL_RCP site
-		// and the superscalar IMUL_RCP site above). A64 LDR (literal) computes
-		// target = k + off*4 (PC == address of the LDR instruction itself; the
-		// "PC+8" quirk is an A32/T32 artifact, NOT A64) -- verified empirically
-		// on the Cortex-A53 target 2026-08-01. The earlier "-8" form
-		// (target = k+8+off*4) made every pooled load hit litpos-8: the first
-		// C* op read pre-pool bytes and each later op read the PREVIOUS op's
-		// constant -> seed_0 hash mismatch. The runtime self-check that
-		// "validated" the -8 was circular (it computed the check target with
-		// the same formula under test, so it could never fail).
-		int32_t offset = static_cast<int32_t>(cpoolLiteralPos_ - k) / 4;
-		offset &= (1 << 19) - 1;
-		emit32(ARMV8A::LDR_LITERAL | dst | (offset << 5), code, k);
-		cpoolLiteralPos_ += 8;
-		++cpoolSlot_;
-	}
+	// E24 (2026-08-04): C* immediate is emitted as the XMRig-style 3-instr
+	// MOVZ/MOVN + MOVK form (NOT the 2-instr LDR-pool form). The 2-instr form
+	// was DENSER than XMRig (1 load between multiplies vs 2 ALU ops) and exposed
+	// the Cortex-A53's 4-cycle MAC interlock: consecutive program multiplies
+	// landed only 2 instructions apart, saturating other_interlock_stall. The
+	// 3-instr form inserts one extra independent ALU op between multiplies,
+	// hiding the multiply latency. Measured: +7.1% H/s (4.77->5.11) and
+	// other_interlock_stall 23.3M->6.2M/hash at 1 worker — below even XMRig
+	// (10.96M). KATs 16/16 byte-identical (identical constant, slower form).
+	if (static_cast<int32_t>(imm) < 0)
+		emit32(ARMV8A::MOVN | dst | (1 << 21) | ((~imm >> 16) << 5), code, k);
 	else
-	{
-		// fallback (pool full or not set): MOVZ/MOVN + MOVK, 3 instr
-		if (static_cast<int32_t>(imm) < 0)
-			emit32(ARMV8A::MOVN | dst | (1 << 21) | ((~imm >> 16) << 5), code, k);
-		else
-			emit32(ARMV8A::MOVZ | dst | (1 << 21) | ((imm >> 16) << 5), code, k);
-		emit32(ARMV8A::MOVK | dst | ((imm & 0xFFFF) << 5), code, k);
-	}
-
+		emit32(ARMV8A::MOVZ | dst | (1 << 21) | ((imm >> 16) << 5), code, k);
+	emit32(ARMV8A::MOVK | dst | ((imm & 0xFFFF) << 5), code, k);
 	codePos = k;
+	return;
 }
 
 // 5-arg convenience wrapper (defaults to x20, the original hardcoded temp)

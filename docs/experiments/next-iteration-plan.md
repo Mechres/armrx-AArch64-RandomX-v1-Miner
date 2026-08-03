@@ -233,9 +233,11 @@
   | 1 worker, core 3 | **4.08 H/s** (settled 3.5 min) | 4.53 H/s (core-3) | **~90%** |
   | 8 workers, no isolcpus | **21-23 H/s** | 27.77 H/s | **~79%** |
   | 8 workers, isolcpus | ~28.4 H/s | (n/a) | == XMRig |
-- **Per-core is FINE (~90%):** 1 worker on core 3 = 4.08 vs XMRig 4.53 (early-cool reading; the
-  fan-cool pool-test later gave 3.96 — same ballpark). The ~10% per-core gap tracks the known
-  instruction-count delta (armrx ~119M vs XMRig ~94.5M instr/hash, W1-4 census), NOT stalls.
+- **Per-core is FINE (~90-95%):** 1 worker on core 3 = 4.08 vs XMRig 4.53 (early-cool reading; the
+  fan-cool pool-test later gave 3.96 — same ballpark). **RETIRED 2026-08-04 (E19):** the "~10% per-core
+  gap is an instruction-count delta" framing is wrong — a clean 500-hash census shows armrx emits
+  **12% FEWER** instructions and loses on **IPC 0.547 vs 0.654** (`other_interlock_stall`, 2.12×).
+  The deficit is stalls, not instruction count; the *size* of the per-core gap (~5-10%) still stands.
 - **Multi-worker SCALING is actually LINEAR (corrected):** the fan-cool `--pool-test` per-worker
   breakdown shows the fast cluster scales 3.8× from 1w→4w with NO interconnect penalty (every fast
   worker ~3.75 H/s) and the weak cluster runs at exactly 0.53× fast (1.88 vs 3.58) — the SoC's own
@@ -340,31 +342,85 @@
   asymmetry + identical temp and still wins). The "5.8× recovery" was a measurement error: comparing a
   30s early-cool reading against a 120s steady-state reading, not a real before/after. **The real,
   still-open gap is CODE.** Measured on identical HW: XMRig 28 H/s vs armrx 21.85 H/s @8w (both ~60°C,
-  both fan-cooled) → armrx ~78%. And the instruction census (W1-4, device) shows armrx emits
-  **~119M vs XMRig ~94.5M instr/hash (~+26%)** for the same algorithm. That instruction gap is the
-  lead. What DID hold up from the fan re-test: armrx's per-core/multi-worker scaling is LINEAR (4w =
-  3.8× from 1w, weak cluster = 0.53× fast = the SoC's design, not a software defect). So the scaling
-  structure is fine; the deficit is per-instruction efficiency, i.e. CODE.
-- **OPEN — code-level leads (NOT superseded, never actually measured):** the instruction-gap is real;
-  these are the named investigations to localize it. All must be measured COOL/steady-state and compared
-  miner-to-miner on the same device (the only valid comparison).
-  - **E3a — Blake2b IPC vs reference.** Roadmap *assumed* Blake2b parity, never *measured* it.
-    Run armrx Blake2b microbench under perf; compare IPC/instr to XMRig's (or a known reference impl).
-    Blake2b is ~0.7M instr but could be high-cycle on A53.
-  - **E3b — main-VM emission / memory-op ordering diff vs XMRig.** XMRig may order/interleave its
-    scratchpad loads to hide latency better, or emit fewer ops for the same program. Diff the two under
-    `perf mem` / cache-miss / instruction-count stats on identical workload.
-  - **E3c — superscalar body density vs XMRig.** W1-1 census: armrx superscalar = 5,224 A64/call vs
-    XMRig's ~? — the ~26% total instr gap is mostly here (80.5% of armrx instr is superscalar). The
-    C* immediate-materialization (MOVZ/MOVN+MOVK+ALU, ~3 instr vs XMRig's denser form) is the prime
-    suspect but was never measured miner-to-miner.
-- **Effort:** E3a ~10 min (microbench exists); E3b/E3c ~30-60 min + XMRig binary present on device.
-- **What a result tells us:** localizes the +26% instruction gap to a named region we can actually attack
-  with a code change. This is the active investigation; E15/E16's "scaling" question is the only closed part.
+  both fan-cooled) → armrx ~78%. The original W1-4 census claimed armrx emits **~119M vs XMRig
+  ~94.5M instr/hash (~+26%)** for the same algorithm. That instruction-gap claim was
+  the original lead — **RETIRED 2026-08-04 (E19)**: a clean 500-hash `--perf-ready` census shows
+  armrx actually emits **12% FEWER** instructions (89.5M vs 101.4M) and loses on **IPC 0.547 vs
+  0.654** from `other_interlock_stall` (integer-multiplier interlocks, 2.12× XMRig). What DID hold up
+  from the fan re-test: armrx's per-core/multi-worker scaling is LINEAR (4w = 3.8× from 1w, weak
+  cluster = 0.53× fast = the SoC's design, not a software defect). So the scaling structure is fine;
+  the deficit is per-instruction efficiency (stall/IPC), i.e. CODE — but the lever is stalls, not
+  instruction count.
+- **OPEN — code-level leads (see perf-tracking.md §1/§2 for live status):** E3c (C* immediates) and
+  E3a (Blake2b) are CLOSED; E20 (peephole) NULL-reverted; E21 (umov) false-premise-closed. The
+  dominant stall class is named (E19) but its proximate cause in *our* emitters is not yet localized
+  to a specific region or instruction sequence. Remaining live investigations:
+  - **Localize the `other_interlock_stall` excess to a specific emitter region** — the superscalar
+    body (~80% of work, 35% multiplies) and the main-VM body (~10%) are the candidates. A
+    region-tagged `perf annotate` / `--jit-dump` attribution per opcode class, miner-to-miner, would
+    say which region over-emits multiply-dependent chains. (E19 named the class; this names the place.)
+  - **E22 (2026-08-04): superscalar scheduler — INCONCLUSIVE on the interlock cause.** Disabling
+    `scheduleSuperscalarProgram` (identity order) gave H/s **unchanged (4.77)** and instruction
+    count **+13.3%** (101.4 vs 89.5 M — the scheduler hides ~12 M instr of latency-fill, so the
+    "armrx 12% leaner than XMRig" figure is scheduler-driven, not structural). The cycle/stall
+    comparison was **contaminated** (two bad perf runs: background on core 3 in run #1; perf attached
+    to a dead PID in run #2) and is **retracted** — the interlock question is OPEN, not answered.
+    Net: the scheduler is safe to keep (density-positive, no H/s regression) but E22 does NOT
+    localize the E19 excess; the live hypotheses stay upstream of emission (generated program order,
+    main-VM multiply handlers, C* padding, x12 WAR).
+  - **TOP UNTESTED LEAD — generated program order (`src/superscalar.cpp`).** E22 rules out the
+    *emitter*; the difference must be upstream. armrx's **generated** superscalar stream may differ
+    from XMRig's before emission. XMRig's generator deliberately tracks multiply availability
+    (`mulCount`, `fetchNext`, `allowChainedMul` in its `superscalar.cpp`). A static diff of the two
+    generators' multiply-to-multiply spacing, or a region-tagged PMU on armrx's generated vs XMRig's
+    order, localizes this. **This is the next thing to measure.**
+  - **Main-VM multiply handlers / `emitMemLoad`** (h_IMUL_R/M, h_IMULH_M, h_ISMULH_M + the
+    address/load/use chain) — structurally different from the superscalar path; region-tagged PMU
+    could show disproportionate contribution. Not yet measured.
+  - **C* density stripped "free" padding (Planner H2, lower confidence):** armrx's 2-instr form is
+    denser than XMRig's 3-instr; on a latency-bound in-order core, removing instructions can *expose*
+    MAC latency. Only matters if the generated-order test comes back clean.
+  - **`x12` WAR (Planner H3, lower confidence):** `computeSuperscalarFootprint` tracks only VM regs
+    r0–r7, blind to the `x12` temp shared by `IMUL_RCP`/`IXOR_C*`. Cheap check: repoint `IXOR_C*`'s
+    temp to `x14`.
 
 > **Lead tracking & discipline:** see [`docs/experiments/perf-tracking.md`](perf-tracking.md) —
-> standing facts, the CLOSED/DEAD lead table (so we never re-run them), open E3a/b/c status, and the
+> standing facts, the CLOSED/DEAD lead table (so we never re-run them), open lead status, and the
 > GitHub-Copilot-ideas triage. Read it before starting any new measurement.
+>
+> **UPDATE 2026-08-04 — E16's code-lead list above is partly SUPERSEDED. Read perf-tracking.md
+> §1/§2 before acting on E3a/E3b/E3c:**
+> - **E3a (Blake2b)** — closed by inspection: armrx is NEON, XMRig is scalar C. armrx wins.
+> - **E3c (C\* immediates)** — **CLOSED.** armrx routes all `IADD_C*`/`IXOR_C*` through a 128-slot
+>   inline literal pool (`emitCpoolImmediate`, `jit_compiler_a64.cpp:1323`) = `LDR`+ALU = **2 instr**.
+>   **XMRig does NOT use `umov` here** (see E21): its superscalar path pre-fills `num32bitLiterals=64`
+>   (`jit_compiler_a64.cpp:337`), making the `umov` branch unreachable — it falls to a **3-instr**
+>   `MOVZ`/`MOVN`+`MOVK`. So armrx is *denser* (2 vs 3), not parity. No density gap to attack.
+> - **DIFF RESULT 2026-08-04 — the density premise is DEAD, and it inverted.** A clean 500-hash
+>   `bench_armrx --perf-ready` census (saturated window, clock-consistency-checked) gives
+>   **armrx 89.5 M instr/hash @ IPC 0.547** vs **XMRig 101.4 M @ IPC 0.654**. armrx executes **12%
+>   FEWER instructions** and loses anyway: **163.5 vs 155.0 M cycles/hash**. The gap is **stalls
+>   (IPC), not code size** — every "+14% / +26% / +35% too many instructions" figure in this repo
+>   came from an unsaturated `--mine` perf window (455 MHz effective on a 765 MHz core) and is
+>   retired. See **E19**.
+> - **E19 (PMU stall breakdown) — RESULT:** the gap is **`other_interlock_stall` 2.12× XMRig**
+>   (+12.30 M cycles/hash = 154% of the gap) = A53 integer-multiplier interlocks on
+>   dependency-dense superscalar code. Cache/branches/loads/external all exonerated.
+> - **E20 (distance-3 superscalar peephole) — IMPLEMENTED, NULL (−0.2%), REVERTED.** Fires only
+>   0.73% of slots; a peephole can't move a 5% gap. **Scheduling is DEFERRED, not dead**: a full DAG
+>   list scheduler is parked until the XMRig gap closes by other means, then revisited as a *forward*
+>   lever (go-past-parity). Do not widen the peephole (distance-4/5); that family is exhausted.
+> - **E21 (`umov`/NEON vs `LDR` pool) — CLOSED as false premise.** The hypothesized emission
+>   difference does not exist: neither miner uses `umov` in the superscalar C* path. See perf-tracking
+>   §1. Combined with E19 (XMRig schedules nothing, yet 2× better interlocks), **neither emission
+>   choice nor ordering is the dominant cause** of the stall excess — the difference is elsewhere.
+> - **Region split:** a `-g` profile puts **97.89% of cycles in the JIT buffer** and only **1.84% in
+>   all armrx C++ combined**. The W1-1 "named C++ 9.5%" and a suspected "`worker_loop` 10.67%" were
+>   both artifacts of profiling a *stripped* binary (E17).
+> - **E18 (cross build) — KEEP.** The GCC 16.1.0 cross build is **+7.9%** over the GCC 15.2.0
+>   device build on identical source (4.66 vs 4.32 H/s), KATs byte-identical. LTO-off measured
+>   −1.9% and `-mtune=cortex-a53` measured null, so the compiler version is the whole effect.
+>   Deployment/toolchain lever, not a code change.
 
 ## E4 — 8-worker cluster-penalty measurement  [TODO]
 - **Question:** The 1-core number ignores the real deployment (8 workers). Cores 4–7 lose ~50%
