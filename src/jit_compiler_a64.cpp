@@ -1392,13 +1392,30 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 	if (src != dst)
 	{
 		imm &= instr.getModMem() ? (RANDOMX_SCRATCHPAD_L1 - 1) : (RANDOMX_SCRATCHPAD_L2 - 1);
-		emitAddImmediate(tmp_reg, src, imm, code, k);
 
 		constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
 		constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 		constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
 
-		emit32(instr.getModMem() ? andInstrL1 : andInstrL2, code, k);
+		if (imm != 0)
+		{
+			// address base = src + imm  (general case)
+			emitAddImmediate(tmp_reg, src, imm, code, k);
+			emit32(instr.getModMem() ? andInstrL1 : andInstrL2, code, k);
+		}
+		else
+		{
+			// E25 (2026-08-04): offset == 0 -> base is just src; skip the redundant
+			// ADD and mask src directly into tmp_reg. Equivalence-safe (same address,
+			// same ldr, no memory-order / CBRANCH-replay change). Saves 1 instruction.
+			// AND (immediate) encoding: opcode 0x927d0000, Rd=tmp_reg, Rn=src,
+			// imm12 shift field = (Log2(size)-4) << 10.
+			constexpr uint32_t andBase = 0x927d0000 | tmp_reg; /* Rd = tmp_reg */
+			emit32((instr.getModMem()
+			            ? (andBase | (src << 5) | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10))
+			            : (andBase | (src << 5) | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10)))
+			           , code, k);
+		}
 
 		// ldr tmp_reg, [x2, tmp_reg]
 		emit32(0xf8606840 | tmp_reg | (tmp_reg << 16), code, k);
