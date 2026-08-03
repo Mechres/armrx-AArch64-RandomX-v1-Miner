@@ -738,6 +738,154 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 	return order;
 }
 
+// Dependence-graph list scheduler for the main VM path.  Unlike the legacy
+// scheduler above, this planner starts from the complete original-order
+// hazard graph and only emits a topologically ready instruction.  Multiply
+// nodes stay at their original output positions; a ready non-anchor may fill
+// the one instruction slot immediately after a multiply when the original
+// successor is still interlocked on that multiply.
+std::vector<uint32_t> JitCompilerA64::scheduleProgramDag(Program& program, uint32_t size) const {
+	std::vector<InstrFootprint> fp(size);
+	std::vector<bool> is_anchor(size, false);
+	std::vector<bool> is_fixed(size, false);
+	std::vector<bool> src_eq_dst(size, false);
+	for (uint32_t i = 0; i < size; ++i) {
+		const Instruction& instr = program(i);
+		const InstructionType type = resolveInstructionType(instr.opcode);
+		fp[i] = computeFootprint(instr, type);
+		// Keep this list explicit: *_M must never become a DAG anchor even if
+		// its footprint is changed in a future experiment.
+		is_anchor[i] = type == InstructionType::IMUL_R ||
+		               type == InstructionType::IMULH_R ||
+		               type == InstructionType::ISMULH_R ||
+		               type == InstructionType::IMUL_RCP;
+		is_fixed[i] = is_anchor[i] || fp[i].is_barrier;
+		src_eq_dst[i] = instr.src == instr.dst;
+	}
+
+	// Preserve the replay anchor selected by h_CBRANCH: it must retain its
+	// position relative to the rest of its CBRANCH domain, just as in the
+	// adjacent-swap scheduler.
+	{
+		uint32_t domain_start = 0;
+		for (uint32_t i = 0; i < size; ++i) {
+			if (fp[i].is_cbranch) {
+				const std::uint8_t creg = program(i).dst;
+				for (uint32_t j = i; j-- > domain_start; ) {
+					if (fp[j].int_write & (1u << creg)) {
+						is_fixed[j] = true;
+						break;
+					}
+				}
+				domain_start = i + 1;
+			}
+		}
+	}
+
+	std::vector<std::vector<uint32_t>> successors(size);
+	std::vector<uint32_t> indegree(size, 0);
+	for (uint32_t i = 0; i < size; ++i) {
+		for (uint32_t j = i + 1; j < size; ++j) {
+			// This is the sole dependence oracle.  In particular, memory ops
+			// retain the existing conservative memory-memory ordering rule.
+			if (hasHazard(fp[i], fp[j])) {
+				successors[i].push_back(j);
+				++indegree[j];
+			}
+		}
+	}
+
+	std::vector<uint32_t> identity;
+	identity.reserve(size);
+	for (uint32_t i = 0; i < size; ++i) identity.push_back(i);
+	if (g_swap_budget.load() == 0) return identity;
+
+	std::vector<bool> emitted(size, false);
+	std::vector<uint32_t> order;
+	order.reserve(size);
+	int32_t active_anchor = -1;
+
+	auto ready = [&](uint32_t index) { return !emitted[index] && indegree[index] == 0; };
+	auto commit = [&](uint32_t index) {
+		emitted[index] = true;
+		for (uint32_t successor : successors[index]) --indegree[successor];
+		order.push_back(index);
+	};
+
+	for (uint32_t slot = 0; slot < size; ++slot) {
+		uint32_t candidate = slot;
+		bool reordered = false;
+
+		// Fixed nodes (multiply anchors, replay anchors, and barriers) are
+		// emitted at their original output position.  This prevents a DAG
+		// choice from changing CBRANCH loop geometry or moving an anchor.
+		if (!is_fixed[slot] && ready(slot) && active_anchor >= 0 &&
+		    hasHazard(fp[static_cast<uint32_t>(active_anchor)], fp[slot])) {
+			for (uint32_t j = slot + 1; j < size && !is_fixed[j]; ++j) {
+				if (!ready(j) || src_eq_dst[j] || is_anchor[j]) continue;
+
+				// Every original instruction crossed by j must remain movable.
+				bool crosses_src_eq_dst = false;
+				for (uint32_t k = slot; k < j; ++k) {
+					if (!emitted[k] && (is_fixed[k] || src_eq_dst[k])) {
+						crosses_src_eq_dst = true;
+						break;
+					}
+				}
+				if (crosses_src_eq_dst) break;
+
+				// Explicitly re-check every inverted pair.  The graph makes
+				// these checks redundant for ordinary data dependencies, but
+				// keeping hasHazard() at the reorder gate is intentional.
+				bool safe = !hasHazard(fp[static_cast<uint32_t>(active_anchor)], fp[j]);
+				for (uint32_t k = slot; safe && k <= j; ++k) {
+					if (!emitted[k] && k != j) safe = !hasHazard(fp[k], fp[j]);
+				}
+				for (uint32_t prior : order) {
+					if (prior > j && hasHazard(fp[prior], fp[j])) {
+						safe = false;
+						break;
+					}
+				}
+				if (!safe) continue;
+
+				candidate = j;
+				reordered = true;
+				break;
+			}
+		}
+
+		// A node at the current slot is normally ready.  If an earlier DAG
+		// choice already emitted it, choose the earliest remaining ready node;
+		// this is the ordinary list-scheduler fallback and should not occur
+		// across a fixed node.
+		if (!ready(candidate)) {
+			candidate = size;
+			for (uint32_t j = slot; j < size && !is_fixed[j]; ++j) {
+				if (ready(j) && !src_eq_dst[j]) {
+					candidate = j;
+					break;
+				}
+			}
+			if (candidate == size) {
+				// The original order is always a valid fallback for this graph.
+				return identity;
+			}
+		}
+
+		if (reordered) {
+			if (g_swap_budget.load() != 0) {
+				if (g_swap_budget.load() > 0) g_swap_budget.fetch_sub(1);
+			} else {
+				return identity;
+			}
+		}
+		commit(candidate);
+		active_anchor = is_anchor[candidate] ? static_cast<int32_t>(candidate) : -1;
+	}
+	return order;
+}
+
 // See the doc comment above computeSuperscalarFootprint() (anonymous
 // namespace, above) for the full correctness argument -- no barriers, no
 // memory ops, no anchors needed here, but IMUL_RCP must never be Q or R
@@ -794,7 +942,11 @@ void JitCompilerA64::emitPrologueMix(Program& program, uint32_t& codePos) {
 		instr.dst %= RegistersCount;
 	}
 
-	const std::vector<uint32_t> emit_order = scheduleProgram(program, size);
+	const char* dag_env = std::getenv("ARMRX_DAG_SCHED");
+	const bool use_dag_scheduler = dag_env != nullptr && std::string(dag_env) == "1";
+	const std::vector<uint32_t> emit_order = use_dag_scheduler
+		? scheduleProgramDag(program, size)
+		: scheduleProgram(program, size);
 
 	for (uint32_t idx : emit_order)
 	{

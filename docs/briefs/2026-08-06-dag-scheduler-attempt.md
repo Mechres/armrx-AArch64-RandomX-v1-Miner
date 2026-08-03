@@ -140,14 +140,30 @@ Out of scope: memory-op anchoring, changing *_M emission, PGO, literal-pool chan
 - Reuse hasHazard() for every pair in every emitted sequence.
 
 == VERIFICATION (you must run before claiming success) ==
-Cross build: cmake -S . -B build-cross -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64-musl.cmake
-  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -DARMRX_DISABLE_LTO=ON && cmake --build build-cross -j
-Ship the cross-built binary to the device (mechres@192.168.10.156).
-Correctness on device (authoritative): test_jit_equivalence 16/16; test_jit_scheduler_stress
-450+200 pairs byte-identical; test_jit_determinism; test_jit_dataset_2way; test_mining (real shares).
-Perf A/B (device, taskset -c 3, B-M-B-M, 500-hash gated, bench_armrx --full-hash-only --perf-ready,
-perf stat -e cycles,instructions): adopt only if cycles improve >=0.5% in BOTH modified runs;
-record instr/hash, IPC, binary md5.
+CRITICAL DEVICE-SAFETY RULE (cost the user a device reboot last time):
+- NEVER run the full test suite in one shot. The on-device JIT stress suites
+  (test_jit_scheduler_stress = 450 pairs ~20min + 200 pairs ~35min; test_mining
+  KAT ~7min; plus --perf-ready 500-hash windows) will peg the weak Cortex-A53 and
+  make the device unresponsive — it had to be hard-rebooted. Run ONE test at a time,
+  with a cooldown, and NEVER all together.
+- qemu-aarch64 is FORBIDDEN for verification. qemu does NOT model the A53's in-order
+  pipeline / memory-latency wall, so perf numbers are meaningless AND the slow tests
+  just cook the host. Use qemu ONLY for a fast host-x86_64 compile sanity check if you
+  must, never for the AArch64 target or for any perf claim.
+- Keep the device alive: cap concurrent miners, leave headroom, one long test per session.
+
+Staged gate (do in THIS order, one step at a time, stop if anything fails):
+1. Cross build (host): cmake -S . -B build-cross -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain-aarch64-musl.cmake
+   -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF -DARMRX_DISABLE_LTO=ON && cmake --build build-cross -j
+2. FAST correctness first (device, ONE test, never the stress suite): test_jit_equivalence (16/16).
+   This is the gate that caught W3-2 — run it ALONE first. Then, separately: test_jit_determinism,
+   test_jit_dataset_2way. Each as its own invocation.
+3. Stress test ONLY on demand / last: test_jit_scheduler_stress (450+200 pairs) is SLOW (~20-35 min
+   each) — run it as a SEPARATE session, alone, only after steps 1-2 pass. Do NOT bundle it with
+   anything else. test_mining (real shares) is also slow (~7 min) — run alone, separately.
+4. Perf A/B (device, taskset -c 3, B-M-B-M, 500-hash gated, bench_armrx --full-hash-only --perf-ready,
+   perf stat -e cycles,instructions): adopt only if cycles improve >=0.5% in BOTH modified runs;
+   record instr/hash, IPC, binary md5.
 If test_jit_equivalence or the stress test diverge: use ARMRX_MAX_SWAPS=<k> to binary-search the
 first divergent swap, root-cause, fix narrowly OR revert. DO NOT SHIP a change that fails a
 correctness gate. If the win is null, REVERT — do not ship a dead change.

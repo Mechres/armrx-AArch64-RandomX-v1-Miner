@@ -132,6 +132,7 @@ namespace armrx {
 		// above scheduleProgram()'s definition.
 		InstructionType resolveInstructionType(uint8_t opcode) const;
 		std::vector<uint32_t> scheduleProgram(Program& program, uint32_t size) const;
+		std::vector<uint32_t> scheduleProgramDag(Program& program, uint32_t size) const;
 
 		// Extension (2026-07-25): same idea applied to the superscalar
 		// dataset-derivation region, where item 14's dominant IMUL cost
