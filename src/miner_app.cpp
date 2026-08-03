@@ -19,6 +19,7 @@
 #include <memory>
 #include <thread>
 #include <csignal>
+#include <signal.h>
 #include <sys/mman.h>
 #include <cstdlib>
 
@@ -61,10 +62,20 @@ std::string hash_to_hex(const std::array<std::byte, 32>& hash) {
 MinerApp::MinerApp(MinerOptions options) : opts_(std::move(options)) {}
 
 void MinerApp::install_signal_handlers() {
-    std::signal(SIGINT, signal_handler);
-    std::signal(SIGTERM, signal_handler);
+    // Use sigaction (not std::signal) so SA_RESTART is explicitly cleared.
+    // With SA_RESTART=0, blocking syscalls in the run loops (sleep_for's
+    // nanosleep, the MetricsExporter accept()) are interrupted by the signal
+    // instead of auto-restarting, so the keep_running loop exits promptly on
+    // Ctrl-C. A plain SIGINT handler is async-signal-safe (only an atomic
+    // store), so it is safe to run inside the signal context.
+    struct sigaction sa{};
+    sa.sa_handler = signal_handler;
+    sa.sa_flags = 0;  // SA_RESTART intentionally NOT set
+    ::sigemptyset(&sa.sa_mask);
+    ::sigaction(SIGINT, &sa, nullptr);
+    ::sigaction(SIGTERM, &sa, nullptr);
 #ifdef SIGPIPE
-    std::signal(SIGPIPE, SIG_IGN);
+    ::signal(SIGPIPE, SIG_IGN);
 #endif
 }
 
@@ -191,7 +202,12 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
                                        : opts_.warmup_secs;
 
     while (keep_running && (opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Interruptible 1s cadence: sleep in short 100ms slices that re-check
+        // keep_running, so a SIGINT (which only sets the flag) is observed
+        // promptly. std::this_thread::sleep_for swallows EINTR and re-sleeps,
+        // so a single 1s sleep would ignore the signal until it elapsed.
+        for (int i = 0; i < 10 && keep_running; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start_time).count());
 
@@ -396,7 +412,11 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     unsigned elapsed_sec = 0;
 
     while (keep_running && (!opts_.pool_test || opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // Interruptible 1s cadence (see run_local_benchmark for rationale):
+        // sleep in 100ms slices that re-check keep_running so SIGINT is seen
+        // promptly instead of being swallowed by sleep_for's EINTR restart.
+        for (int i = 0; i < 10 && keep_running; ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
         ++elapsed_sec;
 
         // Pool failover handled internally by PoolManager

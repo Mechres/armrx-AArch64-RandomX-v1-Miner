@@ -17,6 +17,13 @@ namespace armrx {
 /// Lightweight Prometheus metrics HTTP endpoint.
 /// Listens on localhost:{port}, serves GET /metrics with Prometheus text format.
 /// Header-only implementation — no .cpp file needed.
+///
+/// Ownership note: the listening socket is created, used, and closed entirely
+/// inside the worker thread — the constructor hands the fd to the thread and
+/// never reads it back. This avoids a data race on the socket fd between the
+/// worker thread (which accepts) and the destructor (which would otherwise
+/// inspect/close it). The destructor only flips `running_` to false and joins,
+/// letting the worker close the socket as it exits the accept loop.
 class MetricsExporter {
 public:
     using MetricProvider = std::function<std::string()>;
@@ -28,7 +35,7 @@ public:
     {
         thread_ = std::thread([this, port, prov = std::move(provider)]() {
             int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) { return; }
+            if (fd < 0) { running_ = false; return; }
             int opt = 1;
             ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
             struct sockaddr_in addr{};
@@ -43,7 +50,6 @@ public:
                 ARMRX_LOG_WARN << "Metrics listen() failed";
                 ::close(fd); running_ = false; return;
             }
-            server_fd_ = fd;
             ARMRX_LOG_INFO << "Metrics listening on http://127.0.0.1:" << port << "/metrics";
             while (running_) {
                 struct sockaddr_in client{};
@@ -72,14 +78,13 @@ public:
                 }
                 ::close(cfd);
             }
+            // Socket owned solely by this thread: close it here on exit.
             ::close(fd);
-            server_fd_ = -1;
         });
     }
 
     ~MetricsExporter() {
         running_ = false;
-        if (server_fd_ >= 0) ::shutdown(server_fd_, SHUT_RDWR);
         if (thread_.joinable()) thread_.join();
     }
 
@@ -88,7 +93,6 @@ public:
 
 private:
     std::atomic<bool> running_{false};
-    std::atomic<int> server_fd_{-1};
     std::thread thread_;
 };
 

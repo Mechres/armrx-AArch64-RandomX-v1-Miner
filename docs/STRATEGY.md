@@ -114,12 +114,19 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
 ---
 
 ## Known bugs to fix alongside (not perf, but real)
-- **SIGINT/Ctrl-C ignored during pool mining** (user-confirmed). Worker loop checks
-  `running_.load()` only at the top of each ~210ms hash; likely the signal isn't delivered to
-  the blocked stratum reader thread. Fix: `sigaction` with `SA_RESTART=0` + ensure reader thread
-  has SIGINT unblocked. (GLM §5.7-C.)
+- **SIGINT/Ctrl-C ignored during pool mining** — FIXED (2026-08-06). Root cause was twofold:
+  `std::signal()` was used (no `SA_RESTART` control) and, more importantly, the run loops used a
+  single `std::this_thread::sleep_for(1s)` which **swallows EINTR and re-sleeps**, so the
+  `keep_running` flag set by the handler was never re-checked until the full second elapsed (and
+  libstdc++'s `sleep_for` re-loops on EINTR regardless of `SA_RESTART`). Fixed by: `sigaction` with
+  `sa_flags=0` (SA_RESTART explicitly cleared) + replacing the 1s sleep with ten 100ms slices that
+  re-check `keep_running`. Verified: `armrx --mine --mode=light` now exits cleanly within ~2s of
+  SIGINT (graceful teardown, no `kill -9`). The worker threads already poll `running_` once per
+  hash (~200ms), so `engine.stop()` joins promptly. (GLM §5.7-C.)
 - **MetricsExporter data race** (`server_fd_` read in dtor without fence, written by bg thread) —
-  one-line `std::atomic` fix, TSAN-catchable. (GLM §5.7-E.)
+  FIXED (2026-08-06). `server_fd_` removed entirely; the listening socket is now created, used, and
+  `close()`d solely inside the worker thread, so the destructor only flips `running_` + joins —
+  no shared fd access. (GLM §5.7-E.)
 
 ## Entry points for the next agent / session
 1. `docs/TESTING.md` — how to measure (the only valid commands).
