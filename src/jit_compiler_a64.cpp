@@ -745,6 +745,7 @@ std::vector<uint32_t> JitCompilerA64::scheduleProgram(Program& program, uint32_t
 // the one instruction slot immediately after a multiply when the original
 // successor is still interlocked on that multiply.
 std::vector<uint32_t> JitCompilerA64::scheduleProgramDag(Program& program, uint32_t size) const {
+	armrx_init_swap_budget_once();
 	std::vector<InstrFootprint> fp(size);
 	std::vector<bool> is_anchor(size, false);
 	std::vector<bool> is_fixed(size, false);
