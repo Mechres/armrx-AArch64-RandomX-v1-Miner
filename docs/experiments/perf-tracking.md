@@ -78,6 +78,27 @@
   CPU steady 59°C, no crash/divergence). Matches the E24 26.65 baseline (run-to-run noise). Confirms
   E25 is stable + correctness-preserving on live pool work. `^C` did NOT stop it (reproduced the
   KNOWN BUG). E25 is cleared for shipping.
+- **E26 (Approach A, `*_M` load-latency hoist) — FAILED, REVERTED (2026-08-05, Reasonix).** Attempted
+  to hide the `ldr → op` 3-cycle bubble by hoisting each `*_M` op's address `add`/`and` into the
+  slack of the PRECEDING VM instruction (new `emitMemLoadAddr<>`; `memAddrHoisted_` flag; backward
+  scan with CBRANCH-anchor/replay-domain guards so the `ldr` never moves). Built + gated on device
+  (cross): `test_jit_equivalence` **16/16 PASS**, but `test_jit_scheduler_stress` (450 pairs) **SEGFAULT
+  (exit 139)** ~5 min in — crash inside the RWX JIT buffer (generated-code corruption, not a value
+  divergence). The pre-E26 baseline passes the same 450-pair gate. So the crash is E26, caught by the
+  exact W3-2 death gate. Reverted (`git checkout`), tree clean at `beeeeef`. **This is the W3-2 trap in
+  a new form: "safe by register/anchor analysis" `*_M` changes keep failing on-device** (W3-2 diverged;
+  E26 segfaulted). The 16-pair KAT passes; the 450-pair stress catches it. Root cause not identified
+  (crash, not divergence — likely a liveness subtlety in the hoist vs CBRANCH replay). **Approach A in
+  this hoist-across-handler form is EXHAUSTED.** Do NOT retry this shape blindly.
+- **CORRECTION to Reasonix's stall analysis (2026-08-05):** the claim "per-hash ld_dep_stall implies
+  ~30+ cycles/op = L2/DRAM, not the 3-cycle L1 bubble, so a hoist can't hide it" is arithmetically
+  wrong. 8w ld_dep_stall = 25.9M/hash × ~26 H/s ≈ 673M stalls/s ≈ 0.88 stall-cycles per core-cycle —
+  i.e. load-dependency stalls saturate ~88% of cycles. That is consistent with the 3-cycle L1 load-use
+  bubble multiplied across ~35% `*_M` ops at high issue rate, NOT a DRAM-bound per-op latency. A correct
+  hoist COULD in principle hide part of it; we never measured a correct version because E26 crashed.
+  So the residual gap remains unexplained-as-unfixable — the only evidence is that this specific hoist
+  shape breaks equivalence. **Parity stands at 95.2% (8w 26.65 vs XMRig 28); the last ~4.8% is a real
+  in-order-A53 memory-latency tax that two audits + E26 could not recover without breaking equivalence.**
 - **Instruction census — DEFINITIVE 2026-08-04 (supersedes W1-4 "+26%", the "+14%" figure, AND
   this session's own earlier "~1.35× / +35%" claim).** Measured with `bench_armrx
   --full-hash-only --perf-ready`, which gates `perf stat` on an **exactly 500-hash** steady-state
