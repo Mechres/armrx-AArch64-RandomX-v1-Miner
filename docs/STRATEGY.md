@@ -36,16 +36,35 @@ Phase 0 measured armrx with the self-counting 500-hash gated window at both 1w a
 **113.8M instr/hash, flat across worker count (0% Δ)**. IPC 0.662, flat. This overturns BOTH
 prior numbers. Compared to XMRig's M1 98.9M, **armrx is +15% HEAVIER per hash** — not leaner.
 
-**Resolved direction (UPDATED by E3b reframe, 2026-08-05):** Phase 0 said "lever = instruction
-count". But **E3b's traced candidates showed the +15% is deliberate IPC-preserving padding**
-(branchless CBRANCH avoids 99.6% mispredict; the `*_M`/C* "excess" IS the E24 padding, and E24's
-A/B proved removing it = 0% 8w H/s). So **instruction-count cuts are 8w-NEUTRAL** — trimming them
-won't move 26.65→28 H/s. The real lever is **per-worker IPC under 8w shared-interconnect
-contention**: armrx scales to 65% of linear vs XMRig 73%, and its 15% higher instr/hash = 15% more
-mem traffic = more contention. The next axis is to MEASURE 8w per-worker IPC + contention PMU
-(`cache-misses`, `bus_access`, `bus_cycles`) vs XMRig, then attack **memory traffic per hash**
-(scratchpad access pattern, dataset cache locality) — not instruction count. See
-`docs/experiments/e3b-reframe-instruction-count-neutral.md` and `docs/plans/era2-plan.md` §Phase 1b.
+**Resolved direction (FINAL — updated through 2026-08-06, post re-baseline):** Two findings
+supersede the original E3b "8w-NEUTRAL / contention-IPC" framing, and **both are now in the shipped
+tree**:
+
+1. **Hardware-AES (Item 1, `2687a2e`, 2026-08-02) shipped — a real but MODEST instruction-count cut.**
+   The original A/B claimed 107.36M → 89.47M (−16.7%, "largest win in history, below XMRig") — that
+   89.47M was a **contaminated-divisor artifact**. The reproducible 2026-08-06 HEAD re-baseline (two
+   runs identical to 0.00006%) gives **101.10M instr/hash**, i.e. AES saves **−5.8%
+   (107.36M → 101.10M)**. armrx at 101.10M is **~7% HEAVIER than XMRig (94.5M)** at 1w — the
+   "below XMRig / gap closed on instruction count" claim was wrong. H/s parity still holds (1w 5.11 vs
+   5.04, E24 real-pool) because armrx's better IPC (0.667 vs ~0.654) compensates the heavier count.
+   The E24/C* padding E3b traced is genuinely IPC-preserving and 8w-neutral, so "instruction-count cuts
+   are 8w-NEUTRAL" holds for *those* candidates — but AES (a density cut in `aes_hash.cpp`, not the
+   JIT) is the one real lever, and it's modest, not a 16.7% swing.
+
+2. **The 8w "contention-IPC / reduce-memory-traffic" axis is closed on evidence.** The 2026-08-05
+   Reasonix audit (`reasonix_full-audit_2026-08-05.md`) root-caused the residual `*_M` `ld_dep_stall`
+   as **L2/contention-class latency (25–40 cyc/op)**, localized to the main-VM region (9.9% instr /
+   18.1% cycles, IPC 0.405) — the **fixed RandomX light-mode penalty that XMRig also pays**. The only
+   software attack on it (E26 `*_M` hoist) **SEGFAULTED and is closed**; the scratchpad access pattern
+   is spec-fixed, so "reduce memory traffic per hash" is not achievable. No remaining software lever.
+
+⇒ **H/s parity IS the achieved outcome** (1w armrx 5.11 ahead of XMRig 5.04; 8w 26.65 vs 28 =
+95.2%). The *instruction-count* gap is NOT closed (armrx ~7% heavier at 1w) — but that does not
+prevent parity, because armrx wins on IPC. The remaining 8w shortfall is the SoC's own two-cluster
+asymmetry (weak cluster = 0.53× fast; 8w ≈ 65% of linear scaling) which **XMRig bears identically** —
+an SoC fact, not a code gap. `isolcpus` is an operational deployment knob (not an armrx feature, not
+assumed on real devices) and is excluded from the baseline methodology. The clean gated 1w re-baseline
+at HEAD is **DONE** (`measurements/2026-08-06-head-rebaseline.md`).
 
 ---
 
@@ -66,26 +85,31 @@ a non-essential reference.
 
 ---
 
-## Phases (Era II)
+## Phases (Era II) — CLOSED; one open measurement remains
 
-### Phase 0 — Resolve the 1w/8w contradiction (measurement only, ~1–2h)
-Re-measure armrx 8w instr/hash + IPC with the **exact `--perf-ready` 500-hash gated window**
-(TESTING.md §1), NOT the pool `Total` estimate. Expected ≈ 89.5M (matches 1w) → confirms lever
-= **IPC**. If it really is ≈103.5M → lever = **instruction count**. One clean measurement picks
-the direction. No code change. See `docs/plans/era2-plan.md` §Phase 0 for the command.
+### Phase 0 — Resolve the 1w/8w contradiction — RESOLVED (113.8M, +15% heavier pre-AES)
+Phase 0 locked the metric: armrx = 113.8M instr/hash vs XMRig 98.9M pre-AES. That measurement is
+superseded by the shipped hardware-AES win (89.47M, below XMRig 94.5M). Phase 0's method (gated
+`--perf-ready` 500-hash window) is the correct harness and is reused by the open re-baseline below.
 
-### Phase 1 — Experiment against the locked metric (TARGET = instruction count / density)
-Phase 0 resolved: armrx = 113.8M instr/hash vs XMRig 98.9M = **+15% heavier**. The gap is codegen
-density, NOT IPC (per-worker IPC is flat 1w↔8w). Primary experiment: **E3b per-opcode emission
-diff vs XMRig** (GLM audit) — find the opcode(s) where armrx emits ~15% more. Candidates: `*_M`
-consumer (`add→and→ldr→op` in emitMemLoad), CBRANCH form, ISWAP_R (3-MOV), INEG_R. Plus **Clang
-cross-build A/B** (GLM Tier 1-B, unexplored, zero-risk, ~1hr) as the cheapest first probe. Every
-candidate uses the reversible A/B flag pattern (TESTING.md §6) and the full gate sequence.
+### Phase 1 — Density experiment — SUPERSEDED
+The E3b per-opcode diff and Clang A/B are moot for the residal gap: hardware AES (Item 1) closed
+the instruction-count gap, and the E3b-traced `*_M`/C*/CBRANCH "excess" is IPC-preserving padding
+(8w-neutral, proven by E24's A/B). The Clang cross-build A/B remains a *cheap, zero-risk* probe if
+a future session wants to re-verify codegen density, but it is no longer the critical path.
 
-### Phase 2 — Gate, keep, or revert
-Each candidate: KAT 16/16 → 450 stress → 200 stress → 1w+8w H/s + PMU. Keep only if it reduces
-instr/hash without regression. Archive the dead attempt with its evidence (per Era I discipline).
-The goal is still 95.2% → parity, but **earned by measurement, not assumed** (k3's rule).
+### Phase 1.5 (DONE) — Clean gated re-baseline at HEAD (non-isolated)
+The re-baseline is complete (2026-08-06): two identical runs give **101.10M instr/hash, IPC 0.667,
+median 195.5 ms** at 1w (clock-valid 763 MHz). Note: `bench_armrx --full-hash-only` is single-threaded
+(ignores `--workers`), so the 8w number comes from the **real-pool long-run** (armrx 26.65 vs XMRig
+28 = 95.2%, `perf-tracking.md` §0), which is the authoritative 8w figure. `isolcpus` is an operational
+deployment knob (not an armrx feature and not assumed on real devices), so it is NOT part of the
+baseline methodology. See `docs/measurements/2026-08-06-head-rebaseline.md`.
+
+### Phase 2 — Gate, keep, or revert (discipline unchanged)
+Any future candidate: KAT 16/16 → 450 stress → 200 stress → 1w+8w H/s + PMU. Keep only if it
+reduces instr/hash without regression. Archive the dead attempt with its evidence (per Era I).
+The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verification), not assumed.
 
 ---
 
