@@ -18,11 +18,14 @@ confirmed by a 1w→8w growth-delta measurement:
 | `other_interlock_stall` (E24 multiply) | 10.3 M | 10.5 M | flat (E24 holds) |
 | `ld_dep_stall` (`*_M` load-use) | 15.9 M | **25.9 M** | **+63%** under 8w contention |
 
-Load-dependency stalls at 8w: 25.9M/hash × 26 H/s ≈ **673M/s ≈ 0.88 stall-cycles per
-core-cycle** — i.e. the `*_M` `ldr → op` load-use bubble saturates ~88% of core cycles.
-This is the 3-cycle A53 integer L1 load-use latency multiplied across ~35% of main-VM
-ops being `*_M` at high issue rate — NOT a DRAM latency (don't let "it's just memory
-latency" become an excuse to stop; the stall is real and large).
+|Load-dependency stalls at 8w: 25.9M/hash × 26 H/s ≈ **690M/s total across 8 workers**.
+Dividing by aggregate core cycles (8 × 765 MHz = 6,120M/s) gives **≈0.11 (≈11% of all
+core cycles)** — a real but MODEST tax, NOT "saturating 88%" (that earlier 0.88 figure was
+an 8× error: aggregate stalls were divided by one core's cycles). The +63% growth
+(15.9→25.9M/hash) is a per-hash count delta and is correct. Whether the stall is
+L1-bubble-accumulated or L2/contention cannot be settled from the committed numbers (they
+came from 60 s `--mine` windows, which this project's own discipline flags as
+non-authoritative). The stall is real; its magnitude-per-op is not precisely characterized.
 
 The lever: hide the 3-cycle load-use stall (or reduce `*_M` memory traffic) WITHOUT
 breaking correctness.

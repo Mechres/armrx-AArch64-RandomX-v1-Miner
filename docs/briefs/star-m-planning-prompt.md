@@ -36,7 +36,9 @@ Cortex-A53 @ 765 MHz, MSM8929, two 4-core clusters). The repo is at
 
 armrx is at 95.2% of XMRig at 8 workers (26.65 vs 28 H/s). The residual ~4.8% is a
 single PMU stall class: `ld_dep_stall` on the main-VM `*_M` scratchpad path
-(`ldr → op` 3-cycle A53 load-use bubble, saturating ~88% of core cycles at 8w). The
+(`ldr → op` 3-cycle A53 load-use bubble; `ld_dep_stall` is a MODEST ~11% of core cycles at
+8w — the earlier "saturates 88%" figure was an 8× arithmetic error and has been corrected in
+perf-tracking.md; verify the current number there before quoting). The
 stall is real and large — this is NOT a measurement artifact and NOT a DRAM latency.
 
 ## Hard constraints (violating any of these repeats a known failure — do not)

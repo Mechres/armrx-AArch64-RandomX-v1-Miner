@@ -47,9 +47,12 @@ remaining gap vs XMRig at 8 workers (armrx 26.65 vs XMRig 28 H/s = 95.2% parity)
   vs the imm!=0 path.
 
 ### B. The `ld_dep_stall` attribution — is it real?
-- Re-derive the 1w→8w PMU numbers from `perf-tracking.md`. Check the arithmetic: 25.9M/hash
-  at 8w × ~26 H/s ≈ 0.88 stall-cycles/core-cycle. Is the claim "this is the 3-cycle L1
-  load-use bubble, not DRAM" defensible? Flag if the measurement window, core pinning, or
+- Re-derive the 1w→8w PMU numbers from `perf-tracking.md`. NOTE: the file's current stall
+  fraction is ~11% of core cycles (an earlier "0.88 / 88%" figure was an 8× arithmetic error
+  and has been corrected). Re-derive it yourself: 25.9M/hash × 26.65 H/s ≈ 690M/s aggregate
+  across 8 workers; divide by 8 × 765 MHz = 6,120M cycles/s → ~0.11. Is the remaining claim
+  "this is the 3-cycle L1 load-use bubble, not DRAM" defensible given the corrected fraction?
+  Flag if the measurement window, core pinning, or
   per-hash normalization is unsound (note: the original 8w number was first mis-measured at
   23.6 H/s due to a short window + wrong core pin — confirm the corrected 26.65 is the one
   used).

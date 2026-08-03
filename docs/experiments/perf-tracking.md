@@ -90,15 +90,19 @@
   E26 segfaulted). The 16-pair KAT passes; the 450-pair stress catches it. Root cause not identified
   (crash, not divergence — likely a liveness subtlety in the hoist vs CBRANCH replay). **Approach A in
   this hoist-across-handler form is EXHAUSTED.** Do NOT retry this shape blindly.
-- **CORRECTION to Reasonix's stall analysis (2026-08-05):** the claim "per-hash ld_dep_stall implies
-  ~30+ cycles/op = L2/DRAM, not the 3-cycle L1 bubble, so a hoist can't hide it" is arithmetically
-  wrong. 8w ld_dep_stall = 25.9M/hash × ~26 H/s ≈ 673M stalls/s ≈ 0.88 stall-cycles per core-cycle —
-  i.e. load-dependency stalls saturate ~88% of cycles. That is consistent with the 3-cycle L1 load-use
-  bubble multiplied across ~35% `*_M` ops at high issue rate, NOT a DRAM-bound per-op latency. A correct
-  hoist COULD in principle hide part of it; we never measured a correct version because E26 crashed.
-  So the residual gap remains unexplained-as-unfixable — the only evidence is that this specific hoist
-  shape breaks equivalence. **Parity stands at 95.2% (8w 26.65 vs XMRig 28); the last ~4.8% is a real
-  in-order-A53 memory-latency tax that two audits + E26 could not recover without breaking equivalence.**
+- **STALL ARITHMETIC — CORRECTED (2026-08-05, verified vs two audits):** the prior
+  "0.88 stall-cycles/core-cycle (saturates 88% of cycles)" claim was an **8× error** — it
+  divided aggregate stalls (690M/s across 8 workers) by ONE core's cycles (765M/s). Correct
+  denominator = 8 cores × 765 MHz = 6,120M cycles/s → 690/6,120 ≈ **0.11 (≈11% of all core
+  cycles)**. (Gemini's audit repeated the 0.88 error; Reasonix caught it.) The +63% per-hash
+  growth (15.9→25.9M/hash) is unaffected (it's a per-hash count delta). A second, separate
+  error in Reasonix's audit: it computed per-op stall as 25.9M/639K loads ≈ 40 cyc/op, but
+  639K omitted the /256 weight (true `*_M` loads/hash = 16,384×39/256 ≈ 2,496), so the
+  "L2 not L1" per-op latency claim is NOT established — only the ~11% *fraction* is. Whether
+  the stall is L1-bubble-accumulated or L2/contention cannot be settled from the committed
+  numbers (they came from 60 s `--mine` windows, which this project's own discipline flags as
+  non-authoritative; re-measure with `--perf-ready` if quoted again). **Net: the residual
+  `ld_dep_stall` is a real but MODEST ~11% core-cycle tax at 8w, not a core-saturating bubble.**
 - **IN PARALLEL (2026-08-05):** Kimi k3 is planning the next `*_M` attempt (prompt:
   `docs/briefs/star-m-planning-prompt.md`, gated on the 450-pair stress suite); a second independent
   agent is running a FULL AUDIT of the whole effort (prompt: `docs/briefs/star-m-audit-prompt.md`,
