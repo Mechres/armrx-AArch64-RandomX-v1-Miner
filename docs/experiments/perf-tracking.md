@@ -99,6 +99,12 @@
   So the residual gap remains unexplained-as-unfixable — the only evidence is that this specific hoist
   shape breaks equivalence. **Parity stands at 95.2% (8w 26.65 vs XMRig 28); the last ~4.8% is a real
   in-order-A53 memory-latency tax that two audits + E26 could not recover without breaking equivalence.**
+- **IN PARALLEL (2026-08-05):** Kimi k3 is planning the next `*_M` attempt (prompt:
+  `docs/briefs/star-m-planning-prompt.md`, gated on the 450-pair stress suite); a second independent
+  agent is running a FULL AUDIT of the whole effort (prompt: `docs/briefs/star-m-audit-prompt.md`,
+  saves to `docs/audits/AGENTNAME_AUDITNAME_DATE.md`). Both route to Hermes for gate-review before any
+  code lands. The audit must root-cause the E26 segfault (CBRANCH replay invariant) — that's the crux
+  the prior attempts never pinned down.
 - **Instruction census — DEFINITIVE 2026-08-04 (supersedes W1-4 "+26%", the "+14%" figure, AND
   this session's own earlier "~1.35× / +35%" claim).** Measured with `bench_armrx
   --full-hash-only --perf-ready`, which gates `perf stat` on an **exactly 500-hash** steady-state
