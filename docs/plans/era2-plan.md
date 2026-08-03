@@ -45,10 +45,21 @@ in `docs/experiments/p0-instruction-count-resolution.md`.
 
 ---
 
-## Phase 1b — Instruction-count / density lever (THE path — Phase 0 resolved to this)
-
-Phase 0: armrx = 113.8M instr/hash vs XMRig 98.9M = **+15% heavier**. The gap is codegen density.
-Find and fix the opcode(s) where armrx emits ~15% more instructions.
+## Phase 1b — INSTRUCTION-COUNT REDUCTION IS 8w-NEUTRAL — reframed
+**Reframe (`e3b-reframe-instruction-count-neutral.md`):** E3b's per-opcode map found armrx
+heavier than structural-min, but tracing the top candidates showed the "excess" is **deliberate
+IPC-preserving padding**:
+- `h_CBRANCH` (5 instr) is intentional — a naive `beq` would mispredict 99.6% (CBRANCH taken
+  ~0.4%); tightening it costs IPC.
+- The `*_M` / C* "over-emission" IS the E24 padding; **E24's A/B proved removing it = 0% 8w H/s**
+  (instr 103.8 vs 103.5M, IPC 0.599 vs 0.598).
+- `h_CFROUND` is negligible (rare).
+**So trimming instructions will NOT close 26.65→28 H/s.** The lever is **per-worker IPC under
+8w shared-interconnect contention** (Phase 0: armrx scales to 65% of linear vs XMRig 73%; per-
+worker IPC flat 1w↔8w). Next axis = measure 8w per-worker IPC vs XMRig with contention PMU events
+(`cache-misses`, `l2d_cache_refill`, `bus_access`, `bus_cycles`); hypothesis: armrx's 15% higher
+instr/hash → 15% more mem traffic → more contention. Real win = **reduce memory traffic per hash**
+(scratchpad access pattern, dataset cache locality), not instruction count.
 
 ### Experiment P1.1 — Per-opcode emission diff vs XMRig (GLM E3b, 1–2d, medium)
 M1 localized the gap to instruction *mix*, not stalls. Diff the JIT buffer (`--jit-dump`) against

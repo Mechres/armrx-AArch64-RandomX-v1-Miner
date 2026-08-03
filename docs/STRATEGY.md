@@ -36,11 +36,16 @@ Phase 0 measured armrx with the self-counting 500-hash gated window at both 1w a
 **113.8M instr/hash, flat across worker count (0% Δ)**. IPC 0.662, flat. This overturns BOTH
 prior numbers. Compared to XMRig's M1 98.9M, **armrx is +15% HEAVIER per hash** — not leaner.
 
-**Resolved direction:** the lever is **instruction count / codegen density** (armrx heavier),
-NOT IPC. Per-worker IPC/stalls are identical 1w↔8w, so the 95.2% gap is cluster-contention
-throughput loss (armrx scales to 65% of linear vs XMRig 73%) — which the +15% instruction count
-likely *causes* (more instr/hash = more interconnect traffic). Fixing density (E3b) is the path.
-See `docs/plans/era2-plan.md` §Phase 0 for the exact verdict and the corrected decision tree.
+**Resolved direction (UPDATED by E3b reframe, 2026-08-05):** Phase 0 said "lever = instruction
+count". But **E3b's traced candidates showed the +15% is deliberate IPC-preserving padding**
+(branchless CBRANCH avoids 99.6% mispredict; the `*_M`/C* "excess" IS the E24 padding, and E24's
+A/B proved removing it = 0% 8w H/s). So **instruction-count cuts are 8w-NEUTRAL** — trimming them
+won't move 26.65→28 H/s. The real lever is **per-worker IPC under 8w shared-interconnect
+contention**: armrx scales to 65% of linear vs XMRig 73%, and its 15% higher instr/hash = 15% more
+mem traffic = more contention. The next axis is to MEASURE 8w per-worker IPC + contention PMU
+(`cache-misses`, `bus_access`, `bus_cycles`) vs XMRig, then attack **memory traffic per hash**
+(scratchpad access pattern, dataset cache locality) — not instruction count. See
+`docs/experiments/e3b-reframe-instruction-count-neutral.md` and `docs/plans/era2-plan.md` §Phase 1b.
 
 ---
 
