@@ -57,6 +57,17 @@
   `test_jit_equivalence` 16/16 + BOTH stress suites (450 + 200 pairs) against the failing seed, not
   just the 16-pair equivalence test. See `docs/audits/opencode_20260803_audit.md` and
   `github_copilot_2026-08-03_audit.md`.
+- **CONFIRMED MEASUREMENT (2026-08-04, post-E24 PMU growth-delta, E24 binary, device):** ran
+  `perf stat` at 1w (core 3) and 8w (all cores), 60 s `--mine`, per-hash attribution:
+  | stall/hash | 1w | 8w | Δ |
+  |---|---:|---:|---:|
+  | `other_interlock_stall` (E24 multiply) | 10.3 M | 10.5 M | **flat** (E24 holds) |
+  | `ld_dep_stall` (`*_M` load-use) | 15.9 M | **25.9 M** | **+63%** under 8w contention |
+  This confirms the audits' Hypothesis #1: the residual ~4.8% (1.35 H/s) at 8w is the `*_M`
+  scratchpad `ldr → op` 3-cycle load-use stall, and it scales with worker/memory contention
+  while the multiply interlock (E24) does not. XMRig bears the same SoC, so the win is in how
+  armrx lowers `*_M` vs XMRig (audits: XMRig has address-fast-paths / different surrounding order;
+  armrx always materializes the address). **This is now the confirmed, localized target.**
 - **KNOWN BUG (2026-08-04, user-observed):** `armrx` does **not respond to Ctrl-C / SIGINT**
   during pool mining — the process must be killed (e.g. `pkill -f armr[x]` or `kill -9`). Seen on
   the 1209 s real-pool run. Not yet root-caused; likely the worker loop / stratum thread does not
