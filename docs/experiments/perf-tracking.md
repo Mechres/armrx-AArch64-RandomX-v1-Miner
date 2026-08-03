@@ -73,6 +73,11 @@
   the 1209 s real-pool run. Not yet root-caused; likely the worker loop / stratum thread does not
   install a signal handler or blocks the default SIGINT termination. Add a `SIGINT` handler that
   flushes stats and `std::_Exit(0)` (mirror the `--pool-test` self-terminate path). Track separately.
+- **E25 real-pool soak (2026-08-05, user):** ran `/tmp/armrx_e25` (committed HEAD `a2685ad`) on the
+  real pool, all 8 cores, **1263 s**. Converged at **26.24 H/s** (multiple job rotations, blob 76/77,
+  CPU steady 59°C, no crash/divergence). Matches the E24 26.65 baseline (run-to-run noise). Confirms
+  E25 is stable + correctness-preserving on live pool work. `^C` did NOT stop it (reproduced the
+  KNOWN BUG). E25 is cleared for shipping.
 - **Instruction census — DEFINITIVE 2026-08-04 (supersedes W1-4 "+26%", the "+14%" figure, AND
   this session's own earlier "~1.35× / +35%" claim).** Measured with `bench_armrx
   --full-hash-only --perf-ready`, which gates `perf stat` on an **exactly 500-hash** steady-state
