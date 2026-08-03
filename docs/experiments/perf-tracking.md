@@ -14,20 +14,46 @@
 - **Cooling:** fan present throughout (6cm moved 2026-08-02; 12cm added after). Steady-state
   under RandomX load ≈ **60°C**. Both armrx AND XMRig run at the same temp on the same silicon.
 - **Benchmark numbers — UPDATED 2026-08-04 (per-core re-measured cool, 39-43°C, `taskset -c 3`):** after
-  E24 (C* immediate padding), armrx **beats XMRig at 1 worker**. 8w projected via per-core × cluster
-  scaling.
-  | Miner / build | 1w (core 3) | 8w |
+  E24 (C* immediate padding), armrx **beats XMRig at 1 worker**. 8w measured on the **real pool**
+  (herominers, `--pool-test`, 120 s, cores 1-7 pinned) and via `bench_armrx --full-hash-only`.
+  | Miner / build | 1w (core 3) | 8w (cores 1-7) |
   |---------------|------------:|----:|
-  | XMRig | **5.04 H/s** | **28 H/s** |
+  | XMRig | **5.04 H/s** | **28 H/s** (isolcpus) |
   | armrx (stock device build, GCC 15.2.0) | **4.32 H/s** | 21.85 H/s |
-  | armrx (cross build, GCC 16.1.0 — E18) | **4.66 H/s** | ~23.6 H/s (extrapolated) |
-  | armrx (cross + E24 C* padding) | **5.11 H/s** | ~25.8 H/s (extrapolated, +7% on fast cluster) |
-  armrx cross + E24 = **101%** of XMRig per-core; was 92.5% before E24. The older "XMRig 4.53 /
-  armrx ~4.0 / ~88% per-core" row was a warm/settled reading; 5.04 vs 4.32 is the cool, repeated,
-  same-conditions pair and supersedes it. 8w rows are extrapolated (not re-measured this session);
-  the 1w figure is the measured, gated number.
-- **The gap is CODE, not thermal/hardware.** Both miners on identical silicon+cooling → the
-  difference is instruction efficiency.
+  | armrx (cross build, GCC 16.1.0 — E18) | **4.66 H/s** | ~23.6 H/s |
+  | armrx (cross + E24 C* padding) | **5.11 H/s** | **23.6 H/s** (real-pool, non-isolcpus) |
+  armrx cross + E24 = **101.6%** of XMRig per-core (5.11 vs 5.04). At 8w non-isolcpus = 23.6 H/s =
+  **84%** of XMRig's 28. The 8w gap is the **weak-cluster tax** (cores 4-7 run at 53% of cores 0-3:
+  real-pool per-worker = fast 3.82-3.90, weak 2.04-2.07 H/s — both miners bear it). **The remaining
+  lever to reach XMRig at 8w is `isolcpus=1-7 rcu_nocbs=1-7`** (kernel cmdline + reboot): AGENTS.md
+  measures +14-20% at 8w from OS-jitter removal → armrx 8w would reach ~28 H/s (= XMRig). This
+  device does NOT currently have isolcpus set (verified `/proc/cmdline`), so 23.6 is the
+  non-isolated number; enabling isolcpus is a deployment change, not a code change.
+  **Pool-measurement caveat:** the pool's reported "Speed" is a *share-acceptance* rolling rate, not
+  an instantaneous hashrate — at 1w it under-reported (2.15 vs true 5.12) because it had not
+  converged in 120 s; at 8w it converged (23.60 = sum of per-worker true rates). Trust `bench_armrx
+  --full-hash-only` for authoritative per-worker H/s; trust the per-worker pool split for the
+  fast/weak cluster ratio. The 1w "XMRig 4.53 / armrx ~4.0 / ~88%" row was a warm/settled reading
+  and is superseded. The 1w figure (5.11) is the measured, gated number.
+- **Real-pool verification (2026-08-04, E24 binary):** ran against herominers
+  (`--pool=tr.monero.herominers.com:1111`, CryptoNote stratum, GPU-temps 41°C) at **1 worker**
+  and **8 workers** (`--pool-test --seconds=120`, cores 1-7 pinned). 1w pool "Speed" under-reported
+  (2.15 H/s, not converged in 120 s — it's a share-acceptance rate, not hashrate) but `bench_armrx
+  --full-hash-only` gives the true **5.12 H/s** (beats XMRig 5.04). 8w pool split: fast cluster
+  (cores 1-3) **3.82-3.90 H/s**, weak cluster (cores 4-7) **2.04-2.07 H/s**, total **23.6 H/s** —
+  this is the non-isolcpus number (device has NO `isolcpus` in `/proc/cmdline`). The weak cluster
+  runs at 53% of the fast cluster (both miners bear this SoC tax). **Next lever to reach XMRig's 28
+  H/s at 8w: enable `isolcpus=1-7 rcu_nocbs=1-7`** (kernel cmdline + reboot) — AGENTS.md measures
+  +14-20% at 8w from OS-jitter removal → ~28 H/s. This is a deployment change, not code.
+- **Remaining CODE lever: the `*_M` main-VM scratchpad path (E13/W3-2).** Scratchpad loads are
+  64.3% serial (`ldr x2 → immediate consume`); the `emitMemLoad` sequence is `add → and → ldr →
+  op`, with the load result consumed immediately (3-cycle stall). The W3-2 scheduler extension that
+  tried to reorder `*_M` **diverged** (JIT≠interpreter, stress-suite caught it) and was reverted
+  unidentified. It is a *solved-unknown*: the divergence mechanism was never root-caused, so any
+  re-attempt must be gated by the full stress suite (`test_jit_scheduler_stress` 450 + `test_jit_
+  superscalar_scheduler_stress` 200 pairs) AND `test_jit_equivalence` 16/16. **Not attempted
+  blindly** — flagged as the one remaining code lever after E24, lower priority than the isolcpus
+  deployment win (which is risk-free and larger at 8w).
 - **Instruction census — DEFINITIVE 2026-08-04 (supersedes W1-4 "+26%", the "+14%" figure, AND
   this session's own earlier "~1.35× / +35%" claim).** Measured with `bench_armrx
   --full-hash-only --perf-ready`, which gates `perf stat` on an **exactly 500-hash** steady-state
