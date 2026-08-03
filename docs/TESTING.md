@@ -145,7 +145,13 @@ in Era II.
 | 1w H/s | 5.11 | 5.04 | cross build + E24 |
 | 8w H/s | 26.65 | 28.0 | real pool, 1209s |
 | 8w parity | **95.2%** | 100% | — |
-| 1w instr/hash | 89.5M | 101.4M | w11 census (perf-ready) |
-| 1w IPC | 0.547 | 0.654 | w11 census |
+| **instr/hash (gated 500-hash window, 1w AND 8w)** | **113.8M** | 98.9M (M1 est ±5%) | p0-instruction-count-resolution.md / m1-miner-to-miner-pmu-diff.md |
+| 1w IPC (gated) | 0.662 | 0.654 | p0 / w11 census |
 
-See STRATEGY.md for which of these is the *real* lever (still to be locked by Phase 0).
+NOTE: the w11 census figure "armrx 89.5M / IPC 0.547" is **superseded** by Phase 0's gated-window
+measurement (113.8M, IPC 0.662) — the census used a mis-divided hash count. armrx is **+15%
+heavier** than XMRig on instructions; the 95.2% gap is cluster-contention throughput loss, not a
+per-worker instr/IPC difference. See STRATEGY.md / p0-instruction-count-resolution.md.
+
+See STRATEGY.md / p0-instruction-count-resolution.md — Phase 0 resolved the lever to
+**instruction count** (armrx +15% heavier); the IPC branch is deprioritized.

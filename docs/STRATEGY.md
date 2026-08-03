@@ -23,25 +23,24 @@ was heat-shimmer. We had been optimizing a metric that was never the differentia
 - PRFM scratchpad hints, hugepages, PGO, dual-issue alignment, Track C, CSEL CBRANCH,
   FDIV/FSQRT, `-mtune=cortex-a53` — all measured null/regression. Closed with evidence.
 
-### The contradiction we left unresolved (the hinge of Era II)
-Our own numbers disagree on whether armrx emits *more* or *fewer* instructions than XMRig:
+### The contradiction — RESOLVED (Phase 0, `p0-instruction-count-resolution.md`)
+Our own numbers disagreed on whether armrx emits *more* or *fewer* instructions than XMRig:
 
-| source | armrx instr/hash | XMRig | who's leaner |
-|---|---:|---:|---|
-| 1w census (w11, `--perf-ready` 500-hash, authoritative) | **89.5M** | 101.4M | **armrx −12%** |
-| 8w M1 (pool `Total`, estimate) | **103.5M** | 98.9M | armrx **+4.6%** |
+| source | armrx instr/hash | trust |
+|---|---:|---|
+| 1w census (w11) | 89.5M | **WRONG** (mis-divided/non-500 window) |
+| 8w M1 (pool `Total`) | 103.5M | artifact (pool hash-count undercount) |
+| **Phase 0 gated `--perf-ready` (1w AND 8w)** | **113.8M** | **authoritative** |
 
-Instruction count per hash cannot jump +15% with worker count. The 1w census is the trustworthy
-one (exact gated window); the 8w M1 number is likely a measurement artifact (pool hash-count
-undercount, or window includes re-init). **This contradiction must be resolved before any
-optimization**, because it decides the entire direction:
-- If armrx is genuinely *leaner* (1w census right) → the gap is **IPC** (0.547 vs 0.654) →
-  lever = stall-hiding / scheduling, broadened beyond C* immediates.
-- If armrx is *heavier* at 8w (M1 right) → the gap is **instruction count** → lever = codegen
-  density.
+Phase 0 measured armrx with the self-counting 500-hash gated window at both 1w and 8w:
+**113.8M instr/hash, flat across worker count (0% Δ)**. IPC 0.662, flat. This overturns BOTH
+prior numbers. Compared to XMRig's M1 98.9M, **armrx is +15% HEAVIER per hash** — not leaner.
 
-The E24 A/B (removing C* padding changed 8w instr by +0.3%, stalls 0%) already hints the
-lever is IPC, not density — but we won't bet on a hint.
+**Resolved direction:** the lever is **instruction count / codegen density** (armrx heavier),
+NOT IPC. Per-worker IPC/stalls are identical 1w↔8w, so the 95.2% gap is cluster-contention
+throughput loss (armrx scales to 65% of linear vs XMRig 73%) — which the +15% instruction count
+likely *causes* (more instr/hash = more interconnect traffic). Fixing density (E3b) is the path.
+See `docs/plans/era2-plan.md` §Phase 0 for the exact verdict and the corrected decision tree.
 
 ---
 
@@ -70,22 +69,18 @@ Re-measure armrx 8w instr/hash + IPC with the **exact `--perf-ready` 500-hash ga
 = **IPC**. If it really is ≈103.5M → lever = **instruction count**. One clean measurement picks
 the direction. No code change. See `docs/plans/era2-plan.md` §Phase 0 for the command.
 
-### Phase 1 — Experiment against the locked metric (trial-and-error, targeted)
-- *If lever = IPC:* stall-hiding / scheduling experiments across the **whole program** (the
-  superscalar body is 80.5% of instructions per the region census; main-VM JIT is the worst
-  region at IPC 0.405). Build on E24's proven technique, broaden it. Candidates: Clang
-  cross-build A/B (GLM Tier 1-B, unexplored, zero-risk, ~1hr), per-opcode emission diff vs
-  XMRig (GLM E3b: `*_M` consumer, CBRANCH, ISWAP_R, INEG_R), interleave-of-independent-ops
-  in the main-VM body.
-- *If lever = instruction count:* codegen-density experiments (instruction selection, constant
-  materialization, register allocation) on the same candidate opcodes.
-Every candidate uses the reversible A/B flag pattern (TESTING.md §6) and the full gate sequence.
+### Phase 1 — Experiment against the locked metric (TARGET = instruction count / density)
+Phase 0 resolved: armrx = 113.8M instr/hash vs XMRig 98.9M = **+15% heavier**. The gap is codegen
+density, NOT IPC (per-worker IPC is flat 1w↔8w). Primary experiment: **E3b per-opcode emission
+diff vs XMRig** (GLM audit) — find the opcode(s) where armrx emits ~15% more. Candidates: `*_M`
+consumer (`add→and→ldr→op` in emitMemLoad), CBRANCH form, ISWAP_R (3-MOV), INEG_R. Plus **Clang
+cross-build A/B** (GLM Tier 1-B, unexplored, zero-risk, ~1hr) as the cheapest first probe. Every
+candidate uses the reversible A/B flag pattern (TESTING.md §6) and the full gate sequence.
 
 ### Phase 2 — Gate, keep, or revert
-Each candidate: KAT 16/16 → 450 stress → 200 stress → 1w+8w H/s + PMU. Keep only if it improves
-the *target* metric without regression elsewhere. Archive the dead attempt with its evidence
-(per Era I discipline). The goal is still 95.2% → parity, but **earned by measurement, not
-assumed** (k3's rule).
+Each candidate: KAT 16/16 → 450 stress → 200 stress → 1w+8w H/s + PMU. Keep only if it reduces
+instr/hash without regression. Archive the dead attempt with its evidence (per Era I discipline).
+The goal is still 95.2% → parity, but **earned by measurement, not assumed** (k3's rule).
 
 ---
 

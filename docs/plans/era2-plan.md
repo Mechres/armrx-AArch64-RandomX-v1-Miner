@@ -33,28 +33,24 @@ ssh mechres@192.168.10.156 'taskset -c 3 /tmp/b_armrx --full-hash-only --perf-re
   > /tmp/p0_1w.out 2>&1
 ```
 
-**Expected:** 8w instr/hash ≈ 1w (89.5M) if the M1 103.5M was an artifact. The window is
-self-counting (500 hashes), so no `Total` parsing needed — read `instructions:u / 500`.
+**Decision (RESOLVED by the run):** armrx = **113.8M instr/hash** at BOTH 1w and 8w (flat, 0% Δ).
+The M1 103.5M was a pool-`Total` artifact; the w11 census 89.5M was a mis-divided window. Both
+wrong. Compared to XMRig's 98.9M, **armrx is +15% HEAVIER per hash**. Per-worker IPC (0.662) and
+stalls are also flat 1w↔8w, so the 95.2% gap is cluster-contention throughput loss (armrx scales
+to 65% of linear vs XMRig 73%), which the +15% instruction count likely causes.
 
-**Decision:**
-- If 8w ≈ 89.5M → **lever = IPC**. Go to Phase 1-IPC.
-- If 8w ≈ 103.5M → **lever = instruction count**. Go to Phase 1-density.
-- (Either way, record the number in `perf-tracking.md` and close the contradiction.)
+**→ Lever = instruction count / codegen density (armrx heavier). Go to Phase 1b.** Do NOT pursue
+the IPC branch (Phase 1a) — per-worker IPC is not the differentiator; the density gap is. Recorded
+in `docs/experiments/p0-instruction-count-resolution.md`.
 
 ---
 
-## Phase 1a — IPC lever (if Phase 0 says IPC)
+## Phase 1b — Instruction-count / density lever (THE path — Phase 0 resolved to this)
 
-The 1w census already shows armrx LEANER (89.5M vs 101.4M) but LOWER IPC (0.547 vs 0.654).
-So we emit fewer instructions but stall more. The fix is hiding latency, broadly — not just C*
-immediates (E24 already did that at 1w).
+Phase 0: armrx = 113.8M instr/hash vs XMRig 98.9M = **+15% heavier**. The gap is codegen density.
+Find and fix the opcode(s) where armrx emits ~15% more instructions.
 
-### Experiment P1.1 — Clang cross-build A/B (GLM Tier 1-B, ~1h, zero risk)
-GCC 16.1.0 gave +7.9% over GCC 15.2.0 with zero source change. Clang's AArch64 codegen may
-differ again. Build with a Clang cross toolchain, KAT 16/16 on-device, bench 1w+8w, compare to
-GCC-16-cross baseline (5.11 / 26.65). Cheapest non-zero-leverage experiment.
-
-### Experiment P1.2 — Per-opcode emission diff vs XMRig (GLM E3b, 1–2d, medium)
+### Experiment P1.1 — Per-opcode emission diff vs XMRig (GLM E3b, 1–2d, medium)
 M1 localized the gap to instruction *mix*, not stalls. Diff the JIT buffer (`--jit-dump`) against
 XMRig's emitted code per opcode. GLM's flagged candidates:
 - `*_M` consumer: armrx `add→and→ldr→op` (emitMemLoad) vs XMRig's equivalent.
@@ -63,20 +59,18 @@ XMRig's emitted code per opcode. GLM's flagged candidates:
 - INEG_R (`sub dst,xzr,dst`, 1 instr — already minimal, verify).
 For each delta found, implement behind an `ARMRX_*` flag (TESTING.md §6), gate, measure.
 
-### Experiment P1.3 — Broaden stall-hiding to the main-VM body
-The superscalar body is 80.5% of instructions (IPC 0.800, already good). The **main-VM JIT is
-the worst region (IPC 0.405)** — the `*_M` load-stall lives here, but M1 says total stalls are
-~equal to XMRig, so the issue is *how armrx interleaves*, not the absolute stall. Explore
-independent-op interleaving in the main-VM emission (NOT cross-handler byte relocation — that's
-the dead W3-2/E26 path). Must clear the 450+200 stress gates.
+### Experiment P1.2 — Clang cross-build A/B (GLM Tier 1-B, ~1h, zero risk)
+GCC 16.1.0 gave +7.9% over GCC 15.2.0 with zero source change. Clang's AArch64 codegen may
+reduce instruction count differently. Build with a Clang cross toolchain, KAT 16/16 on-device,
+bench 1w+8w, compare to GCC-16-cross baseline (5.11 / 26.65). Cheapest non-zero-leverage
+experiment; run alongside P1.1.
 
 ---
 
-## Phase 1b — Instruction-count lever (if Phase 0 says density)
-
-If armrx is genuinely heavier at 8w, the gap is codegen density. Same candidate opcodes as P1.2
-(per-opcode diff), but the fix is *fewer instructions per VM opcode* (selection / constant
-materialization / reg-alloc), not interleaving. Implement behind flags, gate, measure.
+## Phase 1a — IPC lever (DEPRIORITIZED — not the differentiator)
+Phase 0 showed per-worker IPC (0.662) and stalls are FLAT 1w↔8w. The 95.2% gap is cluster
+contention, not per-worker IPC. Do NOT pursue stall-hiding/scheduling for IPC — it cannot close a
+gap that isn't there per-worker. (If P1b's density fix also improves 8w scaling, revisit.)
 
 ---
 
