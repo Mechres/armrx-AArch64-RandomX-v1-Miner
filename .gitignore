@@ -28,3 +28,7 @@ AGENTS.md
 /build-cross
 /build-cross-off
 HANDOFF_GEMINI.md
+
+build-cross/
+build-clang/
+build/
