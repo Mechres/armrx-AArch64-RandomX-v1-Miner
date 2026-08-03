@@ -1333,6 +1333,19 @@ void JitCompilerA64::emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* /*c
 	// hiding the multiply latency. Measured: +7.1% H/s (4.77->5.11) and
 	// other_interlock_stall 23.3M->6.2M/hash at 1 worker — below even XMRig
 	// (10.96M). KATs 16/16 byte-identical (identical constant, slower form).
+	//
+	// ARMRX_NO_E24_PAD (A/B gate, 2026-08-05): when defined, restore the
+	// pre-E24 1-instruction fast path for small immediates (imm < 2^16), which
+	// is the actual density difference vs E24. Used to measure E24's 8w cost.
+#ifdef ARMRX_NO_E24_PAD
+	if (imm < (1u << 16))
+	{
+		emit32(ARMV8A::MOVZ | dst | (imm << 5), code, k);
+		codePos = k;
+		return;
+	}
+	// fall through to the 2-instr form below for large immediates
+#endif
 	if (static_cast<int32_t>(imm) < 0)
 		emit32(ARMV8A::MOVN | dst | (1 << 21) | ((~imm >> 16) << 5), code, k);
 	else
