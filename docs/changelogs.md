@@ -6,6 +6,35 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Fix `PartialDataset` out-of-order publish (wrong-hash window during background fill)
+
+**Files:** `src/mining_engine.cpp`, `docs/STRATEGY.md` (Known bugs)
+
+- Fill workers publish `item_count_` as the **max** of completed chunk bounds
+  across workers (`partial_dataset.cpp:150-155`). A lagging chunk stays
+  uninitialized while `item_count_` has jumped past it, so the JIT's
+  `item_number < item_count` check could read an uninitialized item in the hole
+  and emit a **wrong hash**. The audit called this "latent" assuming
+  `wait_for_fill()` ran before mining — but the code did NOT (only teardown +
+  unit test called it); mining read the partial dataset *while fill ran in the
+  background*, so the race was reachable (masked: pool rejects wrong shares, fill
+  is fast).
+- Fix: `partial_dataset_->wait_for_fill()` at the end of the one-shot
+  `start_fill()` path inside `MiningEngine::set_job()`. Workers only hash once
+  `set_job` sets `has_job_`, which now returns only after fill completes — no
+  hash reads a partially-filled dataset. One-time startup cost only
+  (`start_fill` gated by `partial_dataset_fill_started_`), not per seed rotation.
+
+**Verification (on-device, MSM8929, cross-built):**
+
+- `test_partial_dataset` — ALL PASSED (cached items match reference, large
+  dataset spot-checked, incremental fill consistent).
+- `test_mining` — ALL PASSED (engine lifecycle produces valid shares via the
+  `set_job`+wait path; bad-nonce recovery OK). No deadlock from the new wait.
+- `armrx` cross-builds clean.
+
+---
+
 ## 2026-08-07 — Fix IPv6 bare-address `--pool=` parse
 
 **Files:** `src/cli_parser.cpp`, `docs/STRATEGY.md` (Known bugs)

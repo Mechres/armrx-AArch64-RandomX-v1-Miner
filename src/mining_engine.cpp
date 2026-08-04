@@ -238,6 +238,15 @@ void MiningEngine::set_job(const Job& job) {
             std::sort(mining_cores.begin(), mining_cores.end());
             mining_cores.erase(std::unique(mining_cores.begin(), mining_cores.end()), mining_cores.end());
             partial_dataset_->start_fill(shared_cache_, core_order_, mining_cores);
+            // Wait for the one-shot background fill to finish BEFORE any hash can
+            // run. The JIT reads partial_dataset_data_[item_number] for
+            // item_number < item_count_, and item_count_ is published as the MAX
+            // of completed chunk bounds (out-of-order across workers). Without
+            // this wait, a worker hashing during fill could read an uninitialized
+            // item in a not-yet-filled chunk and emit a wrong hash. start_fill is
+            // gated by partial_dataset_fill_started_ (one-shot), so this adds a
+            // single startup delay only — it does NOT recur per seed rotation.
+            partial_dataset_->wait_for_fill();
         }
 
         if (mode_ == RandomXMode::fast) {

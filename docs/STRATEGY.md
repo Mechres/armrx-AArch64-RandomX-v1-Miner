@@ -189,11 +189,26 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   `host:port`, bare host, `2001:db8::1`, `[2001:db8::1]:3333`, `[2001:db8::1]`
   all resolve to the correct host/port (the bare-v6 case now yields
   host=`2001:db8::1`, port=3333). (`src/cli_parser.cpp`)
-- **`PartialDataset` latent out-of-order publish (OPEN, LOW, NOT active mis-hash).** Fill workers advance
-  `item_count_` via CAS to `start_item + total_items` (`partial_dataset.cpp:150-155`) — later chunk
-  finishing first publishes earlier unfinished chunk as done. **Latent only:** dataset is fully built via
-  `wait_for_fill()` before mining starts, so no hash reads mid-fill in normal flow. Real race smell;
-  verify no path reads during fill. (2026-08-07 audit; downgraded from "correctness bug".)
+- **`PartialDataset` out-of-order publish — FIXED (2026-08-07).** Fill workers advance
+  `item_count_` via CAS to `start_item + total_items` (`partial_dataset.cpp:150-155`),
+  storing the **max** of completed chunk bounds across workers. A lagging chunk
+  (e.g. worker A `[0,100)`) stays uninitialized while `item_count_` has already
+  jumped to a higher worker's end (e.g. B `[100,200)` done), so the JIT's
+  `item_number < item_count` check would read an uninitialized/garbage item in
+  the hole `[k_A, K)` and emit a **wrong hash**. The audit downgraded this to
+  "latent" on the assumption `wait_for_fill()` ran before mining — but the code
+  did **not** (the only `wait_for_fill()` calls were at teardown + in the unit
+  test); mining read the partial dataset *while fill ran in the background*, so
+  the race was reachable, just masked (pool rejects wrong shares; fill is fast).
+  Fix: call `partial_dataset_->wait_for_fill()` at the end of the one-shot
+  `start_fill()` path inside `MiningEngine::set_job()` (mining_engine.cpp:240).
+  Workers only hash once `has_job_` is set by `set_job`, which now returns only
+  after fill completes — so no hash ever reads a partially-filled dataset. Cost
+  is one-time startup only (`start_fill` is gated by `partial_dataset_fill_started_`),
+  not per seed rotation. Verified on-device: `test_partial_dataset` (cached
+  items match reference, incremental fill consistent) + `test_mining` (engine
+  lifecycle produces valid shares via the `set_job`+wait path) both PASS, no
+  deadlock. (`src/mining_engine.cpp`)
 - **`--pool-test --tui` skips cursor restore (OPEN, LOW).** `std::_Exit(0)` (`miner_app.cpp:520-525`)
   skips destructors → `Tui::~Tui()` never restores hidden cursor. (2026-08-07 audit.)
 
