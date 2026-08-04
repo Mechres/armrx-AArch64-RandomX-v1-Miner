@@ -20,10 +20,8 @@ For any instruction-count, cycles, or IPC number, use the **gated 500-hash windo
 bench_armrx --full-hash-only --perf-ready --workers=<N>
 ```
 
-- `--perf-ready` gates an *exactly 500-hash* window (deterministic, replay-invariant).
-- `--workers=N` runs N worker threads but the window is **per-worker-equivalent** (the
-  500-hash count is the harness's own count — do NOT divide by N for "total"; the reported
-  median hash time already accounts for it). For a TRUE N-worker per-hash number, see §3.
+- `--perf-ready` gates a *per-worker exactly-500-hash* window (deterministic, replay-invariant) — each worker hashes 500 times, so with N workers ~500×N hashes run; the measured wall covers all of them.
+- `--workers=N` (Lever 3, implemented 2026-08-07) runs N parallel worker threads, each with its **own `VirtualMachine`** but a **SHARED `Argon2dCache`** (RandomX threading model: cache is read-only after init). It reports **aggregate hash/s = total hashes across all workers / real wall time** — this is the true N-worker throughput number (e.g. 8w ≈ 12.3 H/s pinned to 0-3 on MSM8929, vs 5.12 H/s @1w). For per-worker instr/cycle, wrap in `perf stat` (counts all threads); aggregate IPC = total_instr/total_cycles, per-worker ≈ total/N. Requires `--full-hash-only`.
 - This is the ONLY authoritative source for instr/hash, cyc/hash, IPC. The 1w census
   (`docs/experiments/w11-instruction-census.md`) used exactly this and is the reference
   baseline: **armrx 89.5M instr/hash @ IPC 0.547 vs XMRig 101.4M @ 0.654 (1 worker)**.

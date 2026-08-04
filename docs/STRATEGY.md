@@ -100,9 +100,10 @@ a future session wants to re-verify codegen density, but it is no longer the cri
 
 ### Phase 1.5 (DONE) — Clean gated re-baseline at HEAD (non-isolated)
 The re-baseline is complete (2026-08-06): two identical runs give **101.10M instr/hash, IPC 0.667,
-median 195.5 ms** at 1w (clock-valid 763 MHz). Note: `bench_armrx --full-hash-only` is single-threaded
-(ignores `--workers`), so the 8w number comes from the **real-pool long-run** (armrx 26.65 vs XMRig
-28 = 95.2%, `perf-tracking.md` §0), which is the authoritative 8w figure. `isolcpus` is an operational
+median 195.5 ms** at 1w (clock-valid 763 MHz). `bench_armrx --full-hash-only --workers=N` (Lever 3,
+implemented 2026-08-07) now reports TRUE N-worker aggregate hash/s (shared cache, per-thread VM) — e.g.
+8w ≈ 12.3 H/s pinned to 0-3 on MSM8929 vs 5.12 H/s @1w. The authoritative **real-pool** 8w figure
+remains armrx 26.65 vs XMRig 28 = 95.2% (`perf-tracking.md` §0). `isolcpus` is an operational
 deployment knob (not an armrx feature and not assumed on real devices), so it is NOT part of the
 baseline methodology. See `docs/measurements/2026-08-06-head-rebaseline.md`.
 

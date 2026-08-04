@@ -47,6 +47,8 @@
 #include <cfenv>
 #include <poll.h>
 #include <unistd.h>
+#include <thread>
+#include <vector>
 
 #ifdef ARMRX_HAVE_JIT
 #include <sys/mman.h>
@@ -791,6 +793,7 @@ int main(int argc, char** argv) {
     bool bench_d2_pipeline = false;
     std::string d2_only;    // "--d2-only=" value: "sequential" or "interleaved"
     unsigned perf_ready_timeout = 300;
+    unsigned workers = 1;   // Lever 3 (2026-08-07): parallel full-hash workers
 
     for (int i = 1; i < argc; ++i) {
         std::string arg(argv[i]);
@@ -799,6 +802,10 @@ int main(int argc, char** argv) {
         else if (arg == "--perf-ready") { perf_ready = true; }
         else if (arg.rfind("--perf-ready-timeout=", 0) == 0) {
             perf_ready_timeout = static_cast<unsigned>(std::stoul(arg.substr(21)));
+        }
+        else if (arg.rfind("--workers=", 0) == 0) {
+            workers = static_cast<unsigned>(std::stoul(arg.substr(10)));
+            if (workers < 1) workers = 1;
         }
         else if (arg == "--micro-only") { run_all = false; micro_only = true; }
         else if (arg == "--argon2-only") { run_all = false; argon2_only = true; }
@@ -831,6 +838,8 @@ int main(int argc, char** argv) {
                       << "                       no timing (perf-stat-friendly; requires --bench-d2-pipeline)\n"
                       << "  --perf-ready         Signal PERF_READY on stdout and block on stdin before full hash loop\n"
                       << "  --perf-ready-timeout=N Timeout for --perf-ready in seconds (default 300)\n"
+                      << "  --workers=N          Run --full-hash-only with N parallel workers; reports aggregate\n"
+                      << "                       hash/s (each worker gets its own cache+VM). Requires --full-hash-only.\n"
                       << "  --help               Show this message\n";
             return 0;
         }
@@ -844,6 +853,11 @@ int main(int argc, char** argv) {
     if (!d2_only.empty() && d2_only != "sequential" && d2_only != "interleaved") {
         std::cerr << "error: unknown --d2-only value '" << d2_only
                   << "' (expected sequential|interleaved)\n";
+        return 1;
+    }
+    // --workers only applies to the full-hash throughput path.
+    if (workers > 1 && !full_hash_only) {
+        std::cerr << "error: --workers requires --full-hash-only\n";
         return 1;
     }
 
@@ -911,6 +925,7 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (workers == 1) {
         // Steady-state: 500 hashes collecting individual samples
         constexpr unsigned kSamples = 500;
         std::vector<double> ns_samples;
@@ -952,7 +967,74 @@ int main(int argc, char** argv) {
                   << "  99th pctl: " << report_percentile(99)  << " μs\n"
                   << "  max:       " << report_percentile(100) << " μs\n"
                   << "  mean:      " << mean / 1000.0          << " μs\n";
-    }
+        } else {
+            // Multi-worker aggregate throughput (Lever 3, 2026-08-07).
+            // RandomX threading model: the Argon2dCache/dataset is read-only
+            // after init and SHARED across workers (computed once, many VMs
+            // hash against it); only the VirtualMachine (scratchpad + JIT code)
+            // is per-thread. Sharing the cache keeps memory at ~256 MiB total
+            // instead of N*256 MiB (which OOMs at high N). Each worker also
+            // gets its own block_template/hash_out (the nonce byte at [39] is
+            // mutated per hash, so per-thread copies avoid a race).
+            // Aggregate hash/s = total hashes across all workers / real wall
+            // time. For per-worker instr/cycle, wrap this in `perf stat` (it
+            // counts all threads of the process); aggregate IPC =
+            // total_instr / total_cycles, per-worker instr = total / workers.
+            const unsigned kTotal = 500;
+            const unsigned per_worker = kTotal / workers;
+            const unsigned remainder  = kTotal % workers;
+
+            std::vector<std::thread> threads;
+            threads.reserve(workers);
+            std::vector<unsigned long long> counts(workers, 0);
+
+            const auto t_start = bench_clock::now();
+            for (unsigned w = 0; w < workers; ++w) {
+                threads.emplace_back([&, w] {
+                    armrx::VirtualMachine wvm(jit_flags);
+                    wvm.set_cache(&cache);   // shared, read-only after init
+                    alignas(16) std::array<std::byte, 32> wout{};
+                    std::array<std::byte, 76> wtmpl{};
+                    for (size_t i = 0; i < wtmpl.size(); ++i)
+                        wtmpl[i] = static_cast<std::byte>(i & 0xff);
+
+                    const unsigned n = per_worker + (w < remainder ? 1u : 0u);
+                    // Per-worker warmup: JIT compile + cache residency before
+                    // the timed window (mirrors a real worker's first-hash cost).
+                    for (unsigned warm = 0; warm < 30; ++warm) {
+                        wtmpl[39] = static_cast<std::byte>(warm + w * 100);
+                        armrx::randomx_calculate_hash(&wvm, wtmpl.data(),
+                                                       wtmpl.size(), wout.data());
+                    }
+                    unsigned long long done = 0;
+                    for (unsigned i = 0; i < n; ++i) {
+                        wtmpl[39] = static_cast<std::byte>((1000 + w * 100000 + i) & 0xff);
+                        armrx::randomx_calculate_hash(&wvm, wtmpl.data(),
+                                                       wtmpl.size(), wout.data());
+                        ++done;
+                    }
+                    counts[w] = done;
+                });
+            }
+
+            unsigned long long total_done = 0;
+            for (auto& th : threads) th.join();
+            for (auto c : counts) total_done += c;
+
+            const auto t_end = bench_clock::now();
+            double wall_s = std::chrono::duration<double>(t_end - t_start).count();
+            double agg_hps = (wall_s > 0.0) ? static_cast<double>(total_done) / wall_s : 0.0;
+
+            std::cout << "\n  ── multi-worker aggregate (--workers=" << workers << ") ──\n"
+                      << "  total hashes:       " << total_done << "\n"
+                      << "  wall time:          " << std::fixed << std::setprecision(3)
+                      << wall_s << " s\n"
+                      << "  aggregate hash/s:   " << std::setprecision(2) << agg_hps << "\n"
+                      << "  (run under `perf stat -e cycles,instructions` for per-worker IPC;\n"
+                      << "   aggregate IPC = total_instr / total_cycles, per-worker = total / "
+                      << workers << ")\n";
+        }
+    } // end if (run_all || full_hash_only)
 
     // Flag-gated only -- deliberately NOT part of run_all, so the default
     // benchmark output stays unchanged.
