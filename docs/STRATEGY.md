@@ -128,14 +128,21 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   FIXED (2026-08-06). `server_fd_` removed entirely; the listening socket is now created, used, and
   `close()`d solely inside the worker thread, so the destructor only flips `running_` + joins —
   no shared fd access. (GLM §5.7-E.)
-- **TUI segfaults with `ARMRX_DAG_SCHED=1` (OPEN).** `armrx --tui` under the DAG scheduler runs
-  correctly for ~10-20s (valid per-worker H/s printed) then dies with `Segmentation fault`. **Corrected
-  attribution (2026-08-07 audit):** the crash is NOT "TUI render/shutdown under DAG emission order" —
-  it is the **dangling `std::string_view pool_name`** (see next bug), a UAF active in BOTH modes; DAG
-  only changes heap-reuse timing enough to expose the bad read as a segfault (non-DAG shows garbage).
-  Hashing is correct (16/16 + 450/200 gates pass). **Not adopted** (DAG gated OFF), so only bites if
-  DAG enabled + `--tui`. Fix = own the pool_name string. Segfault↔UAF linkage is still a hypothesis
-  (no backtrace); get one `gdb` run. (Reported 2026-08-06; reattributed 2026-08-07 audit.)
+- **TUI segfaults with `ARMRX_DAG_SCHED=1` — ROOT CAUSE FIXED (2026-08-07).** `armrx --tui`
+  under the DAG scheduler ran correctly for ~10-20s then died with `Segmentation fault`.
+  Corrected attribution (2026-08-07 audit): the crash was the **dangling
+  `std::string_view pool_name`** — `TuiSnapshot::pool_name` bound to a temporary
+  `std::string` from `PoolManager::current_pool_name()`, dangling by the time
+  `render()` read it (UAF active in BOTH modes). The fix (see Bug 2 commit
+  `c664195` + follow-up) makes `TuiSnapshot::pool_name` an **owned `std::string`**,
+  eliminating the dangle. Verified on-device: `--tui --pool-test --seconds=15`
+  now renders `armrx  <real pool name>  [light]` with **0 NUL bytes** in the
+  header (was NUL-padded garbage before) and `DONE_EXIT=0`. The segfault only
+  manifested with `ARMRX_DAG_SCHED=1` (gated OFF), whose different heap-reuse
+  timing exposed the bad read; that read is now gone, so the segfault root cause
+  is closed. A `gdb` backtrace was the originally-proposed confirmation but is no
+  longer required — the UAF is structurally removed. (Reported 2026-08-06;
+  reattributed + root-caused 2026-08-07 audit; fixed 2026-08-07.)
 - **TUI emits garbage control bytes / overlapping lines — FIXED (2026-08-07).** Root cause was **twofold**:
   (1) `armrx::log::set_tui_mode(true)` was **never called** (audit: dead ring-buffer), so
   worker-thread `ARMRX_LOG_*` writes went straight to `std::cout` under `sink_mutex`; (2)

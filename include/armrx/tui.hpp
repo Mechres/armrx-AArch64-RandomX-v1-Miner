@@ -18,8 +18,11 @@ namespace armrx {
  */
 struct TuiSnapshot {
     // Identity / mode
-    std::string_view pool_name;
-    std::string_view mode;            // "light" | "fast"
+    std::string pool_name;            // owned (current_pool_name() returns a
+                                      // temporary; a string_view would dangle
+                                      // by the time render() reads it)
+    std::string_view mode;            // "light" | "fast" — points at a
+                                      // mode_name() string literal, lifetime-safe
 
     // Status
     enum class Status { mining, connecting, reconnecting, disconnected };

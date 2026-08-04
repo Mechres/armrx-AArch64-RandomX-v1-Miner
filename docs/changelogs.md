@@ -6,6 +6,31 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Fix TUI dangling `string_view pool_name` (UAF → empty header + DAG segfault root cause)
+
+**Files:** `include/armrx/tui.hpp`, `docs/STRATEGY.md` (Known bugs)
+
+- `TuiSnapshot::pool_name` was `std::string_view` bound to a **temporary**
+  `std::string` returned by `PoolManager::current_pool_name()` (miner_app.cpp:448).
+  It dangled by the time `render()` read it seconds later — a use-after-free
+  active in BOTH TUI modes. This is the shared root cause the 2026-08-07 audit
+  attributed to: (a) the non-DAG garbage/empty TUI header, and (b) the
+  `ARMRX_DAG_SCHED=1` `--tui` segfault (DAG's different heap-reuse timing
+  merely exposed the bad read as a crash).
+- Fix: change `TuiSnapshot::pool_name` to an **owned `std::string`**. (`mode`
+  stays `string_view` — it binds to a lifetime-safe `mode_name()` string literal.)
+  This also closes the deferred `--tui` segfault (no bad read remains to crash;
+  `ARMRX_DAG_SCHED` is gated OFF, so the segfault path is gone structurally).
+
+**Verification (on-device, MSM8929, cross-built `armrx`):**
+
+- `--tui --pool-test --seconds=15 --pool=dummy.invalid:1111` → header now renders
+  `armrx  dummy.invalid:1111  [light]` with **0 NUL bytes** (was NUL-padded
+  garbage before the fix). Frames remain clean (no interleave from the Bug-2
+  fix). `DONE_EXIT=0`, no SIGSEGV/abort. The empty-header UAF is gone.
+
+---
+
 ## 2026-08-07 — Fix TUI garbage control bytes / overlapping lines (Bug 2)
 
 **Files:** `src/tui.cpp`, `src/miner_app.cpp`, `docs/STRATEGY.md` (Known bugs)
