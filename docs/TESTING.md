@@ -78,9 +78,11 @@ This is how M1 was done. It is valid **only** when both miners run the identical
 1. **`/tmp` is `noexec` and a 512M tmpfs.** Ship binaries to a writable exec dir (e.g.
    `/tmp/ab_off_test/` created by scp as a dir). A bare `/tmp/<name>` may also end up a
    directory if you scp multiple sources to one target. Verify with `ls -la` before running.
-2. **The pool miner ignores SIGINT** (known bug, see STRATEGY §bugs). `perf stat` only prints
-   at child exit, so to flush perf you must `kill -9 <child_pid>`. Killing the parent `perf`
-   wrapper also works.
+2. **The pool miner used to ignore SIGINT — FIXED (2026-08-06, `1e5fc52`).** It now exits
+   cleanly on Ctrl-C / `kill -INT` (graceful teardown, no `kill -9` needed). If a process
+   genuinely won't die, `kill -9 <pid>` still works. `perf stat` still only prints at child
+   exit, so to flush perf you may still need `kill -9 <child_pid>` (or kill the parent `perf`
+   wrapper).
 3. **XMRig console is block-buffered** — no output until exit. Run it under perf and `kill -9`
    the child to flush; its hash count is then estimated from H/s × elapsed (±5%).
 4. **Cross-build `build-cross` gets poisoned by stale objects** after any E2x session where a
@@ -96,6 +98,71 @@ This is how M1 was done. It is valid **only** when both miners run the identical
 7. **Timing math:** 765 MHz fixed clock. For a sanity check, `cycles ≈ 765M × seconds`. If
    `cycles/elapsed` is far from 765M (e.g. ~315M), the worker was idle (you used `--mine`) —
    discard the run.
+
+---
+
+## 8. Device execution discipline (learned the hard way — 2026-08-06)
+
+These rules exist because violating them **wedged the device** (unresponsive, hard reboot
+required) and because an SSH mistake spawned **two** copies of a 20-minute stress test that
+competed for the weak A53. Every on-device run must follow them.
+
+### 8.1 Run tests ONE AT A TIME — confirm the previous one is FINISHED, not still running
+- The slow gates (`test_jit_scheduler_stress` 450 pairs ~20 min, `test_jit_superscalar_scheduler_stress`
+  200 pairs ~35 min, `test_mining` KAT ~7 min, `--perf-ready` 500-hash windows) **peg all 8 cores**.
+  Running two at once (or starting the next while the prior is still going) oversubscribes the
+  box and can make it unresponsive.
+- **Before launching any test, confirm nothing from the prior run is alive:**
+  ```sh
+  ssh mechres@192.168.10.156 'pgrep -af "test_jit|bench_armrx|armrx|miner"'
+  ```
+  If anything is still running, wait or `kill -9` it first (see §8.3). Only then start the next.
+- Do NOT bundle the suite: `ctest` / "run all tests" is forbidden on-device. One binary, one
+  invocation, per session.
+
+### 8.2 scp and ssh are SEPARATE commands — never chain them
+- **WRONG (this is what wedged things):** `ssh host 'mkdir ...' && scp build/* host:/dir/`
+  The `&&` joins `ssh` and `scp` as one host-side line; `scp` is a separate program, not an
+  argument to `ssh`. The leading `ssh` opens a dangling session (seen on-device as a stuck
+  `sshd-session ... mechres@notty`) that lingers after the command "times out".
+- **RIGHT — one `scp` per binary, no leading `ssh`:**
+  ```sh
+  scp -o ConnectTimeout=20 build-cross/test_jit_equivalence mechres@192.168.10.156:/tmp/cross-dag/
+  ```
+  Create the target dir in its own quick `ssh` first if needed (not chained with `&& scp`):
+  ```sh
+  ssh -o ConnectTimeout=20 mechres@192.168.10.156 'mkdir -p /tmp/cross-dag && rm -rf /tmp/cross-dag/*'
+  ```
+- Ship **one binary at a time**. The full test set is ~8 binaries; pushing them in one `scp`
+  is unnecessary load and a single point of failure.
+
+### 8.3 An SSH *timeout* does NOT kill the remote process
+- When a foreground `ssh ... ./test_...` "times out" (client drops after N seconds), the
+  **remote `ash -c` + binary keep running on the device** — the connection drop does not send
+  SIGINT/SIGTERM to the remote process. If you then launch a second `ssh` run, you get **two**
+  copies competing for cores.
+- If a run "timed out" on your side, assume it is STILL RUNNING on-device. Verify, then kill,
+  before restarting:
+  ```sh
+  ssh mechres@192.168.10.156 'pgrep -af test_jit_scheduler_stress'   # is it still there?
+  ssh mechres@192.168.10.156 'pkill -9 -f test_jit_scheduler_stress' # kill ALL copies
+  ```
+  ⚠️ `pkill -f <pattern>` also matches your own `ssh` command line if it contains the pattern —
+  run the `pkill` as its own bare `ssh` (no other mention of the binary in the same command),
+  or it will drop your own session.
+- Preferred pattern for long tests: redirect output to a device-side log and run in the
+  background, then `ssh ... 'cat /tmp/cross-dag/stress450.log'` to read the result — avoids a
+  hung foreground pipe:
+  ```sh
+  ssh mechres@192.168.10.156 'cd /tmp/cross-dag && ./test_jit_scheduler_stress > /tmp/cross-dag/stress450.log 2>&1; echo DONE_EXIT=$? >> /tmp/cross-dag/stress450.log'
+  ```
+
+### 8.4 qemu is NOT a substitute for on-device verification
+- qemu-aarch64 does **not** model the Cortex-A53 in-order pipeline / memory-latency wall. Perf
+  numbers from qemu are meaningless, and the slow JIT tests just cook the host. qemu may catch
+  a *compile* error or a *crash*, but it does **not** clear any correctness or perf gate —
+  especially the `*_M` hazard class, where qemu and silicon diverge (that is exactly the W3-2
+  trap). All four gates in §5 must run on the real device.
 
 ---
 
