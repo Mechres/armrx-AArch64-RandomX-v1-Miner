@@ -6,6 +6,27 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Fix IPv6 bare-address `--pool=` parse
+
+**Files:** `src/cli_parser.cpp`, `docs/STRATEGY.md` (Known bugs)
+
+- `--pool=` split on the **last** `:` (`addr.rfind(':')`), so a bare IPv6 like
+  `2001:db8::1` mis-parsed to host `2001:db8:`, port `1`. `[v6]:port` worked only
+  because the bracketed host has no `:` outside `]:`.
+- Fix: detect the bracket form `[host]:port` (host may contain `:`); otherwise a
+  single `:` with a numeric port and no other `:` before it is `host:port`, and a
+  multi-`:` address (bare IPv6) or non-numeric trailing segment is host/IPv6 with
+  the default port (3333).
+
+**Verification (host, linked cli_parser.cpp + crafted argv):**
+
+- `host:port` → (pool.example.com, 3333); bare host → (pool.example.com, 3333);
+  `2001:db8::1` → (**2001:db8::1**, 3333) [was 2001:db8: / 1]; `[2001:db8::1]:3333`
+  → (2001:db8::1, 3333); `[2001:db8::1]` → (2001:db8::1, 3333). All PASS.
+  `armrx` cross-builds clean with the change.
+
+---
+
 ## 2026-08-07 — Fix `MetricsExporter` shutdown blocks behind idle HTTP client
 
 **Files:** `include/armrx/metrics.hpp`, `docs/STRATEGY.md` (Known bugs)

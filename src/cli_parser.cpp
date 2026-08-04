@@ -183,21 +183,56 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
             // Multiple --pool flags are accepted for failover
             o.should_connect_pool = true;
             std::string addr{argument.substr(7)};
-            const auto colon = addr.rfind(':');
             std::string host;
             std::uint16_t port = 3333;
-            if (colon != std::string::npos) {
-                host = addr.substr(0, colon);
-                try {
-                    port = static_cast<std::uint16_t>(parse_bounded_ull(addr.substr(colon + 1), 65535));
-                } catch (...) {
-                    std::cerr << "Invalid --pool port: " << addr.substr(colon + 1) << '\n';
-                    result.should_exit = true;
-                    result.exit_code = 64;
-                    return result;
+
+            // IPv6-aware split of host[:port].
+            // Bracket form [host]:port — host may itself contain ':'.
+            if (addr.size() >= 3 && addr.front() == '[') {
+                auto close = addr.find(']');
+                if (close != std::string::npos) {
+                    host = addr.substr(1, close - 1);
+                    if (close + 1 < addr.size() && addr[close + 1] == ':') {
+                        try {
+                            port = static_cast<std::uint16_t>(
+                                parse_bounded_ull(addr.substr(close + 2), 65535));
+                        } catch (...) {
+                            std::cerr << "Invalid --pool port: " << addr.substr(close + 2) << '\n';
+                            result.should_exit = true;
+                            result.exit_code = 64;
+                            return result;
+                        }
+                    }
+                    // else: [host] with no port -> default port
+                } else {
+                    host = std::move(addr); // malformed '[...' without ']' -> whole as host
                 }
             } else {
-                host = std::move(addr);
+                // Unbracketed. A single ':' followed by a numeric port, with no
+                // other ':' before it, means host:port. Multiple ':' (an IPv6
+                // address) or a non-numeric trailing segment means a bare
+                // host/IPv6 with no port (default 3333). This fixes the
+                // 2001:db8::1 -> host="2001:db8:", port=1 mis-parse.
+                const auto colon = addr.rfind(':');
+                bool is_host_port = false;
+                if (colon != std::string::npos) {
+                    std::string maybe_port = addr.substr(colon + 1);
+                    std::string before = addr.substr(0, colon);
+                    if (!before.empty() && before.find(':') == std::string::npos) {
+                        try {
+                            std::uint16_t p = static_cast<std::uint16_t>(
+                                parse_bounded_ull(maybe_port, 65535));
+                            port = p;
+                            host = std::move(before);
+                            is_host_port = true;
+                        } catch (...) {
+                            // not a valid port -> fall through to bare host/IPv6
+                        }
+                    }
+                }
+                if (!is_host_port) {
+                    host = std::move(addr); // bare IPv6 or bare hostname, default port
+                }
             }
             o.pool_list.emplace_back(std::move(host), port);
             continue;

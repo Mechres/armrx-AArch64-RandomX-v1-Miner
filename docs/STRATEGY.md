@@ -178,9 +178,17 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   on-host with a header-only regression test: start exporter, open an idle connection, destroy it →
   teardown completes in ~2.0 s (was infinite hang); `/metrics` still serves the Prometheus body.
   (`include/armrx/metrics.hpp`)
-- **IPv6 bare-address pool parse wrong (OPEN, LOW).** `cli_parser.cpp:181-202` splits on last `:`;
-  bare `2001:db8::1` mis-parsed (host `2001:db8:`, port `1`). `[v6]:port` handled. Fix: detect `:` count /
-  bracket form. (2026-08-07 audit.)
+- **IPv6 bare-address pool parse wrong — FIXED (2026-08-07).** `cli_parser.cpp`
+  split `--pool=` on the **last** `:` (`addr.rfind(':')`), so a bare IPv6 like
+  `2001:db8::1` mis-parsed to host `2001:db8:`, port `1`. `[v6]:port` worked only
+  because the bracketed part has no `:` outside `]:`. Fix: detect the bracket
+  form `[host]:port` (host may contain `:`); otherwise treat a single `:` with a
+  numeric port and no other `:` before it as `host:port`, and a multi-`:` address
+  (bare IPv6) or non-numeric trailing segment as host/IPv6 with the default port
+  (3333). Verified on-host by linking `cli_parser.cpp` and parsing crafted argv:
+  `host:port`, bare host, `2001:db8::1`, `[2001:db8::1]:3333`, `[2001:db8::1]`
+  all resolve to the correct host/port (the bare-v6 case now yields
+  host=`2001:db8::1`, port=3333). (`src/cli_parser.cpp`)
 - **`PartialDataset` latent out-of-order publish (OPEN, LOW, NOT active mis-hash).** Fill workers advance
   `item_count_` via CAS to `start_item + total_items` (`partial_dataset.cpp:150-155`) — later chunk
   finishing first publishes earlier unfinished chunk as done. **Latent only:** dataset is fully built via
