@@ -19,45 +19,39 @@ multiply-interlock latency dominates. Any density reduction that packs multiplie
 tighter regresses. The gap to XMRig (~+19.5% instr) is real but the single-thread
 codegen levers are exhausted/negative.
 
-## New lead (untested, 2026-08-07): dataset-buffer hugepages / TLB thrash
+## RETRACTED lead (2026-08-07 → corrected 2026-08-07): dataset-buffer hugepages / TLB thrash
 
-Device `HugePages_Total: 0` (no hugepages configured); THP `[always]` but
-`AnonHugePages: 0`. armrx attempts `MAP_HUGETLB` for the Argon2d cache
-(`argon2.cpp:270`) and `MADV_HUGEPAGE` for the partial dataset
-(`partial_dataset.cpp:43`), but on this device both silently fall back to 4K. The
-**RandomX dataset buffer (256 MiB light) is therefore 4K-mapped** → 65,536 TLB
-entries needed for the random 16,384 dataset reads/hash, vs a tiny A53 DTLB →
-**TLB thrashing on the single hottest structure per hash**. XMRig credits hugepages
-with "up to 50%" on this exact access pattern.
+**This lead was WRONG — retracted.** Initial belief: device `HugePages_Total: 0`
++ `sysctl -w vm.nr_hugepages=64` → `Permission denied` meant no hugepage backing,
+so the 256 MiB dataset was 4K-mapped → TLB thrash. User ran XMRig which reported
+`HUGE PAGES supported`, prompting a real measurement.
 
-**Deployment lever (NOT a code change) — code already supports it.** `allocLargePagesMemory`
-(virtual_memory.c:235) uses `MAP_HUGETLB|MAP_POPULATE`; if the system has
-configured hugepages, armrx's dataset/Argon2d buffers use them automatically (no
-recompile). Blocked on-device: writing `/proc/sys/vm/nr_hugepages` returns
-`Permission denied` even as root from the pmOS shell (BusyBox `ash` sysctl-write
-quirk / dropped caps), and `HugePages_Total` is 0 at runtime. Same class of
-operational win as `isolcpus=1-7` — the user must enable it at boot (init script
-or kernel cmdline, e.g. `hugepagesz=2M hugepages=N` / a startup
-`sysctl -w vm.nr_hugepages=N` with `CAP_SYS_ADMIN`), exactly like the isolcpus
-precedent. Once enabled, armrx picks it up with no code change. **Not measurable
-from this agent session** (can't allocate hugepages here); left as a user-actionable
-deployment recommendation.
+**Measurement (on-device, `bench_armrx --full-hash-only --workers=1`, 15s into
+run):** `AnonHugePages: 264,192 kB` and the bench process smaps shows
+`Size=264192kB AnonHugePages=264192kB` — i.e. the **dataset buffer IS fully backed
+by 2 MB transparent huge pages (THP)**. armrx's `MADV_HUGEPAGE` hints
+(`partial_dataset.cpp:43`, `argon2.cpp:278`) ARE being promoted because the THP
+sysctl is `[always]`. The `nr_hugepages` denial was only for *explicit* hugepages;
+XMRig's "supported" is THP, which armrx already gets. **There is no TLB thrash to
+fix and no hugepage gap vs XMRig — both use THP equally.** DO NOT pursue this.
 
 ## Web/agent sweep (2026-08-07) — no further code lever found
 
 Searched: XMRig RandomX ARMv8 JIT opt, RandomX prefetch tuning, XMRig 5.1.0
 "+6-7%", AArch64 hugepages/TLB. Outcome: the only published non-codegen wins are
-x86/Intel-specific (MSR, hardware-prefetcher disable, THP) — not applicable to
-AArch64 in-order A53. The canonical RandomX `calc_dataset_item_aarch64` prefetch
-geometry is what armrx already mirrors. **No unexploited AArch64 codegen lever
-remains.** Single-thread codegen levers are exhausted/negative (E24 proved density
-reductions regress the MAC interlock); the only remaining real perf is deployment
-(hugepages) + cluster placement (user-ruled-out).
+x86/Intel-specific (MSR, hardware-prefetcher disable, explicit 1GB pages) — not
+applicable to AArch64 in-order A53, and THP (the only path available here) is
+already in use. The canonical RandomX `calc_dataset_item_aarch64` prefetch geometry
+is what armrx already mirrors. **No unexploited AArch64 codegen lever remains.**
 
-**Conclusion:** the proposed immediate-materialization lever is CLOSED (regression);
-hugepages is the one real remaining lever but is a deployment change the user must
-enable (like isolcpus), not shippable code. Recommend documenting it in TESTING.md
-§8 / RETROSPECTIVE as a deployment prerequisite and stopping codegen pursuit.
+**Final conclusion:** both investigated levers are dead ends — (1) C* immediate
+pooling is CLOSED (regresses 7.1% via MAC interlock); (2) hugepages is a RED HERRING
+(already THP-backed). The ~+19.5% instruction-count gap to XMRig is real but its
+single-thread codegen levers are exhausted/negative. The only remaining real perf
+axis is **cluster efficiency / worker placement** (user-ruled-out) — i.e. the gap
+is effectively structural at the single-thread level on this in-order A53.
+Recommend stopping codegen perf pursuit; the project is at parity with XMRig on
+every lever that applies to this hardware.
 
 armrx is ~+19.5% instructions/hash vs XMRig (118.96M vs 99.57M). The gap is
 **instruction-count, not stalls** — IPC is already *better* than XMRig (0.731
