@@ -7,7 +7,9 @@
 #include <functional>
 #include <iostream>
 #include <netinet/in.h>
+#include <poll.h>
 #include <string>
+#include <sys/time.h>
 #include <thread>
 #include <unistd.h>
 #include "armrx/log.hpp"
@@ -51,11 +53,30 @@ public:
                 ::close(fd); running_ = false; return;
             }
             ARMRX_LOG_INFO << "Metrics listening on http://127.0.0.1:" << port << "/metrics";
+            // poll() on the listen socket with a short timeout so a shutdown
+            // (dtor sets running_=false) unblocks even with no incoming
+            // connection. Without this, accept() blocks forever and join()
+            // hangs teardown (audit: "shutdown blocks behind idle HTTP
+            // client" / no-connection hang when --metrics-port is enabled).
+            struct pollfd pfd{};
+            pfd.fd = fd;
+            pfd.events = POLLIN;
             while (running_) {
+                int pr = ::poll(&pfd, 1, 250);
+                if (pr < 0) break;
+                if (pr == 0) continue;            // timeout: re-check running_
+                if (!(pfd.revents & POLLIN)) continue;
                 struct sockaddr_in client{};
                 socklen_t client_len = sizeof(client);
                 int cfd = ::accept(fd, (struct sockaddr*)&client, &client_len);
-                if (cfd < 0) { if (running_) break; break; }
+                if (cfd < 0) break;
+                // Bound the per-request read so a connected-but-idle client
+                // cannot pin the worker (and thus block teardown) in read()
+                // forever. On timeout read() returns -1 and we just close.
+                struct timeval rcv_to{};
+                rcv_to.tv_sec = 2;
+                rcv_to.tv_usec = 0;
+                ::setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &rcv_to, sizeof(rcv_to));
                 char req[1024];
                 ssize_t n = ::read(cfd, req, sizeof(req) - 1);
                 if (n > 0) {

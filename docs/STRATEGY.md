@@ -168,10 +168,16 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   stalled `send()` returns and releases the mutex. **Verified on-device 2026-08-07:**
   `kill -INT <pid>` from a 2nd SSH session prints `Pool mining stopped.` + totals
   and returns to the prompt within ~2s. See changelogs.md (2026-08-07).
-- **`MetricsExporter` shutdown blocks behind idle HTTP client (OPEN, LOW).** Worker handles one
-  blocking `read()` per accepted connection (`metrics.hpp:57-79`); idle client → `read()` blocks →
-  destructor (flip `running_` + join) can't unblock (fd worker-owned by design). Teardown hangs only
-  when `--metrics-port` enabled + connection idle. Fix: `SO_RCVTIMEO` or self-pipe wakeup. (2026-08-07 audit.)
+- **`MetricsExporter` shutdown blocks behind idle HTTP client — FIXED (2026-08-07).** The
+  worker did a blocking `accept()` then a blocking `read()` per connection. An idle client
+  (connected, sent nothing) pinned `read()` forever, and even *no* incoming connection left the
+  worker stuck in `accept()` — so the destructor's `join()` hung teardown whenever `--metrics-port`
+  was enabled. Fix: `poll()` the listen socket with a 250 ms timeout (shutdown unblocks even with
+  no connection) + `SO_RCVTIMEO` (2 s) on the accepted client fd (idle `read()` returns and the
+  worker loops). The listening fd stays worker-owned, preserving the prior data-race fix. Verified
+  on-host with a header-only regression test: start exporter, open an idle connection, destroy it →
+  teardown completes in ~2.0 s (was infinite hang); `/metrics` still serves the Prometheus body.
+  (`include/armrx/metrics.hpp`)
 - **IPv6 bare-address pool parse wrong (OPEN, LOW).** `cli_parser.cpp:181-202` splits on last `:`;
   bare `2001:db8::1` mis-parsed (host `2001:db8:`, port `1`). `[v6]:port` handled. Fix: detect `:` count /
   bracket form. (2026-08-07 audit.)

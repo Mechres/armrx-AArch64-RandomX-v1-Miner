@@ -6,6 +6,28 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Fix `MetricsExporter` shutdown blocks behind idle HTTP client
+
+**Files:** `include/armrx/metrics.hpp`, `docs/STRATEGY.md` (Known bugs)
+
+- The worker thread did a blocking `accept()` then a blocking `read()` per
+  connection. An idle client (connected, sent nothing) pinned `read()`
+  forever; even *no* incoming connection left the worker stuck in `accept()`.
+  So the destructor's `join()` hung teardown whenever `--metrics-port` was set.
+- Fix: `poll()` the listen socket with a 250 ms timeout (shutdown unblocks even
+  with no connection) + `SO_RCVTIMEO` (2 s) on the accepted client fd (idle
+  `read()` returns, worker loops). The listen fd stays worker-owned, preserving
+  the prior `server_fd_` data-race fix.
+
+**Verification (host, header-only regression test — portable C++, no device):**
+
+- Start exporter, open an **idle** connection, destroy it → teardown completed
+  in **2.024 s** (the SO_RCVTIMEO read timeout) and exited cleanly. Before the
+  fix this hung forever. `/metrics` still serves the correct Prometheus body
+  (HTTP 200 + body). `armrx` cross-builds clean with the header change.
+
+---
+
 ## 2026-08-07 — Fix TUI dangling `string_view pool_name` (UAF → empty header + DAG segfault root cause)
 
 **Files:** `include/armrx/tui.hpp`, `docs/STRATEGY.md` (Known bugs)
