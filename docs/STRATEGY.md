@@ -127,6 +127,24 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   FIXED (2026-08-06). `server_fd_` removed entirely; the listening socket is now created, used, and
   `close()`d solely inside the worker thread, so the destructor only flips `running_` + joins —
   no shared fd access. (GLM §5.7-E.)
+- **TUI segfaults with `ARMRX_DAG_SCHED=1` (OPEN).** `armrx --tui` under the DAG scheduler runs
+  correctly for ~10-20s (valid per-worker H/s printed) then dies with `Segmentation fault`. The
+  crash is in the **TUI render/shutdown path under DAG emission order**, not in hashing (hashing is
+  correct — consistent with the on-device 16/16 + 450/200 stress gates). Repro:
+  `ARMRX_DAG_SCHED=1 armrx --pool=... --tui`. Happens with 8 workers. Non-TUI (`--mine`, no `--tui`)
+  is fine under DAG. Likely the TUI's redraw/thread-teardown races a DAG-reordered code path (or a
+  stale pointer the legacy scheduler's emission order happened to mask). **Not adopted** (DAG is
+  gated OFF by default), so this only bites if someone enables `ARMRX_DAG_SCHED=1` + `--tui`.
+  (Reported 2026-08-06.)
+- **TUI emits garbage control bytes / overlapping lines (OPEN, scheduler-INDEPENDENT).** `--tui`
+  (WITHOUT DAG, i.e. default scheduler) prints the binary name `armrx` followed by raw control
+  bytes inline in the terminal, interleaved with duplicate/overlapping TUI lines — the display is
+  unusable. Repro: `armrx --pool=... --tui` (no env var). This is a **pre-existing TUI rendering
+  bug** (terminal escape-sequence / line-buffering / multi-thread write-to-fd without
+  serialization), independent of the scheduler. Non-TUI runs are unaffected. Likely needs:
+  single-threaded TUI redraw (or a mutex around the TUI fd writes) + correct clear/redraw escape
+  sequence. (Reported 2026-08-06; observed on the user's `lenovo` terminal emulator — may be
+  terminal-specific, but the inline `armrx`+control-byte dump is a real code-side write bug.)
 
 ## Entry points for the next agent / session
 1. `docs/TESTING.md` — how to measure (the only valid commands).
