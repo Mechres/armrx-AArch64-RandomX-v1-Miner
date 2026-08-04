@@ -5,6 +5,29 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 (pm) — Live `Speed:` now uses a rolling window (XMRig-parity display)
+- **The cumulative-average `Speed:` was the wrong comparison metric vs XMRig.**
+  `MiningEngine::hash_rate()` returns whole-run `total_hashes/elapsed`, so after
+  the ~164 s dataset dead-start the live `Speed:` "ramped" for minutes even
+  though instantaneous throughput was flat ~29 H/s — making our numbers
+  apples-to-oranges against XMRig's rolling-window `Speed:`. Fixed: the live
+  pool `Speed:` line now uses a **10 s rolling-window rate** computed from
+  `engine.snapshot()` deltas (same mechanism as the `--pool-test` `INST agg=`
+  dump). It holds 0 during the dead-start (honest: no stable rate yet), then
+  jumps to the true rate (~29 H/s) within ~10 s of fill completion and stays
+  flat — matching XMRig's near-instant settle. The computed window rate is
+  HELD between window closes (no fallback to cumulative, or the ramp returns).
+  Cumulative `hash_rate()` is still used for `/metrics` and the `--mine`
+  benchmark (legitimately whole-run there). Verified on-device: `Speed:` holds
+  0.00 at t=20–120 s, then 28.85→28.91 H/s flat at t=200–240 s. (`src/miner_app.cpp`)
+- **Tier 2(a) (drop-NEON fill interpreter) REVERTED — negative A/B.** Delegated
+  to an external agent; the scalar-GPR fill regressed the dataset fill from
+  **164 s → 207 s** (~27% slower), not faster. The NEON lane-extract was NOT
+  the bottleneck; the scalar path lost the genuinely-parallel vector
+  ISUB/IXOR/IADD. `execute_superscalar_neon` in `dataset.cpp` restored. The
+  remaining fill gap to XMRig's ~10 s is a separate, harder problem (across-item
+  SIMD or a different fill algorithm) — not pursued this session.
+
 ## 2026-08-07 — Warmup "ramp" root-cause + Tier 1 `wait_for_fill` (SHIPPED)
 - **The ~20-min H/s "ramp" is a measurement artifact, not JIT/VM warmup.** The
   printed rate is a cumulative average (`total_hashes / elapsed`); under the old

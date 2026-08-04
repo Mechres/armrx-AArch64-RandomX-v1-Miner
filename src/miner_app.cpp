@@ -419,6 +419,18 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     // INSTANTANEOUS (per-window) rate instead of the cumulative average.
     armrx::MiningEngine::HashSnapshot prev_dump_snap{};
     bool prev_dump_valid = false;
+    // Rolling-window rate for the live Speed: line. hash_rate() is a
+    // whole-run CUMULATIVE average, which (like armrx's earlier behavior)
+    // "ramps" for minutes after a slow startup and is NOT comparable to
+    // XMRig's rolling-window Speed:. We compute the rate over a short window
+    // from snapshot deltas instead, so the displayed Speed: matches XMRig's
+    // near-instant settling. The computed window rate is HELD between window
+    // closes (we do NOT fall back to the cumulative hash_rate() in between,
+    // or the ramp returns).
+    armrx::MiningEngine::HashSnapshot prev_speed_snap{};
+    bool prev_speed_valid = false;
+    double window_speed = 0.0;
+    static constexpr double kSpeedWindowSec = 10.0;
 
     while (keep_running && (!opts_.pool_test || opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
         // Interruptible 1s cadence (see run_local_benchmark for rationale):
@@ -431,7 +443,29 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
         // Pool failover handled internally by PoolManager
         pool_mgr->tick();
 
-        const double speed  = engine.hash_rate();
+        // Live Speed: = rolling-window rate (XMRig-style), NOT the whole-run
+        // cumulative hash_rate(). Computed from snapshot deltas over the last
+        // ~kSpeedWindowSec. Between window closes we HOLD the last window rate
+        // (window_speed); we never fall back to the cumulative hash_rate(), or
+        // the multi-minute "ramp" returns. Before the first window elapses we
+        // show 0 (honest: no stable rate yet) rather than the ramping average.
+        const auto speed_snap = engine.snapshot();
+        double speed = window_speed; // hold last window rate
+        if (prev_speed_valid) {
+            const double win = std::chrono::duration<double>(
+                speed_snap.ts - prev_speed_snap.ts).count();
+            if (win >= kSpeedWindowSec) {
+                const std::uint64_t d = (speed_snap.total >= prev_speed_snap.total)
+                    ? speed_snap.total - prev_speed_snap.total : 0;
+                window_speed = static_cast<double>(d) / win;
+                speed = window_speed;
+                prev_speed_snap = speed_snap; // advance window
+            }
+        } else {
+            prev_speed_snap = speed_snap;
+            prev_speed_valid = true;
+        }
+
         const auto total    = engine.total_hashes();
         const auto shares   = shares_submitted.load();
         const bool online   = pool_mgr->is_connected();
