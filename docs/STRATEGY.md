@@ -189,26 +189,34 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   `host:port`, bare host, `2001:db8::1`, `[2001:db8::1]:3333`, `[2001:db8::1]`
   all resolve to the correct host/port (the bare-v6 case now yields
   host=`2001:db8::1`, port=3333). (`src/cli_parser.cpp`)
-- **`PartialDataset` out-of-order publish — FIXED (2026-08-07).** Fill workers advance
-  `item_count_` via CAS to `start_item + total_items` (`partial_dataset.cpp:150-155`),
-  storing the **max** of completed chunk bounds across workers. A lagging chunk
-  (e.g. worker A `[0,100)`) stays uninitialized while `item_count_` has already
-  jumped to a higher worker's end (e.g. B `[100,200)` done), so the JIT's
-  `item_number < item_count` check would read an uninitialized/garbage item in
-  the hole `[k_A, K)` and emit a **wrong hash**. The audit downgraded this to
-  "latent" on the assumption `wait_for_fill()` ran before mining — but the code
-  did **not** (the only `wait_for_fill()` calls were at teardown + in the unit
-  test); mining read the partial dataset *while fill ran in the background*, so
-  the race was reachable, just masked (pool rejects wrong shares; fill is fast).
-  Fix: call `partial_dataset_->wait_for_fill()` at the end of the one-shot
-  `start_fill()` path inside `MiningEngine::set_job()` (mining_engine.cpp:240).
-  Workers only hash once `has_job_` is set by `set_job`, which now returns only
-  after fill completes — so no hash ever reads a partially-filled dataset. Cost
-  is one-time startup only (`start_fill` is gated by `partial_dataset_fill_started_`),
-  not per seed rotation. Verified on-device: `test_partial_dataset` (cached
-  items match reference, incremental fill consistent) + `test_mining` (engine
-  lifecycle produces valid shares via the `set_job`+wait path) both PASS, no
-  deadlock. (`src/mining_engine.cpp`)
+- **`PartialDataset` background 512 MiB fill stalls on-device (OPEN, MED, NOT a crash).**
+  The one-shot `start_fill()` (`partial_dataset.cpp`) spawns 8 fill threads that
+  call the pure-NEON `initialize_dataset()` over the 512 MiB prefix. On the
+  MSM8929 (A53@765 MHz) the fill threads **park instead of computing** — measured
+  ~13% busy CPU with 8 threads, fill never completes, no `fill complete` log, no
+  crash. So the cached-prefix fast-path (`item_number < item_count_`) never
+  engages and every hash takes the slow derivation path. **Impact:** `--dataset-mb`
+  gives no speedup on this device (correct, just not faster); pool rejects any
+  wrong share so no mis-hash reaches the chain. Root cause NOT yet identified
+  (the fill primitive itself has no locks/threads; the stall is in fill-thread
+  scheduling/completion or a thrown exception that strands `wait_for_fill`).
+  **Historical:** 2026-08-07 a serialization fix (`wait_for_fill()` before
+  hashing, to kill the out-of-order-publish wrong-hash window) was attempted and
+  then **REVERTED** — it turned this fill stall into a hard hang (workers blocked
+  on the never-completing fill). Reverted to the original "hash during fill"
+  behavior (`mining_engine.cpp` `set_job` only calls `start_fill()`, no wait),
+  which mines fine (~12 H/s at `--dataset-mb=512`) but leaves the masked
+  out-of-order-publish race during the (stalled) fill. Proper fix is a
+  **contiguous publish** of `item_count_` (advance only over the completed prefix)
+  so hashing can safely overlap the fill AND the fast-path engages once the fill
+  actually completes — but that requires first fixing the fill-stall itself.
+- **`PartialDataset` out-of-order publish (LATENT, LOW — masked, see fill-stall above).**
+  Fill workers publish `item_count_` as the **max** of completed chunk bounds
+  (`partial_dataset.cpp:150-155`), so a lagging chunk stays uninitialized while
+  `item_count_` has jumped past it; the JIT's `item_number < item_count` could
+  read a garbage item and emit a **wrong hash** during the fill window. Currently
+  masked because (a) the 512 MiB fill stalls and never completes, and (b) the
+  pool rejects wrong shares. Proper fix = contiguous publish (above).
 - **`--pool-test --tui` skips cursor restore (OPEN, LOW).** `std::_Exit(0)` (`miner_app.cpp:520-525`)
   skips destructors → `Tui::~Tui()` never restores hidden cursor. (2026-08-07 audit.)
 

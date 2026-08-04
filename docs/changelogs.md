@@ -6,6 +6,41 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Revert `PartialDataset` serialization fix; 512 MiB fill-stall is the real bug
+
+**Files:** `src/mining_engine.cpp`, `docs/STRATEGY.md` (Known bugs)
+
+- Earlier today a serialization fix added `partial_dataset_->wait_for_fill()`
+  before hashing (in `set_job`, then moved to `worker_loop`) to kill the
+  out-of-order-publish wrong-hash window. On-device testing showed it turned
+  into a **hard hang**: `--dataset-mb=512` produced 0.00 H/s for 60s+ with no
+  `fill complete` log. Measurement: the 512 MiB background fill's 8 threads
+  **park at ~13% busy CPU** — they never complete. `wait_for_fill()` joins those
+  never-completing threads, so any hashing (or the pool thread) blocks forever.
+- **Root cause is the fill stall itself, not the publish race.** `initialize_dataset`
+  is pure NEON (no locks/threads), so the stall is in fill-thread
+  scheduling/completion or a thrown exception that strands `wait_for_fill`. Because
+  the fill never completes, the cached-prefix fast-path (`item_number < item_count_`)
+  never engages and every hash takes the slow derivation path — `--dataset-mb`
+  gives no speedup on MSM8929 (correct, just not faster).
+- **Reverted** to the original "hash during fill" behavior: `set_job` only calls
+  `start_fill()`, no `wait_for_fill()` in the mining path (`wait_for_fill()` remains
+  only at teardown, `miner_app.cpp:246`). This restores mining (`--dataset-mb=512`
+  → ~12 H/s immediately, verified on-device) and leaves the masked out-of-order
+  publish race latent (pool rejects wrong shares; fill is stalled anyway).
+- **Proper fix (not yet done):** contiguous publish of `item_count_` (advance only
+  over the completed prefix) so hashing can safely overlap the fill AND the
+  fast-path engages once the fill actually completes — but that requires first
+  fixing the fill-stall. Tracked as OPEN bug in STRATEGY.md.
+
+**Verification (on-device, MSM8929, cross-built):**
+
+- `--dataset-mb=512 --mine`: Speed ramps to ~12 H/s within 1-2s (was 0.00 H/s
+  hang with the serialization fix). Fill runs in background; no hang.
+- `test_partial_dataset` ALL PASSED, `test_mining` ALL PASSED (no regression).
+
+---
+
 ## 2026-08-07 — Fix `PartialDataset` out-of-order publish (wrong-hash window during background fill)
 
 **Files:** `src/mining_engine.cpp`, `docs/STRATEGY.md` (Known bugs)
