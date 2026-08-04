@@ -164,6 +164,23 @@ competed for the weak A53. Every on-device run must follow them.
   especially the `*_M` hazard class, where qemu and silicon diverge (that is exactly the W3-2
   trap). All four gates in §5 must run on the real device.
 
+### 8.5 Core pinning (fast cluster 0-3 vs slow cluster 4-7)
+MSM8929 has two 4-core clusters: **0-3 = fast L2 domain, 4-7 = slow L2 domain (~50% throughput
+under contention)**. Both are Cortex-A53 at the same 765 MHz firmware clock (no cpufreq) — the gap
+is the L2/interconnect domain, not frequency.
+- **Correctness gates** (`test_jit_equivalence`, `test_jit_determinism`, `test_jit_dataset_2way`,
+  `test_jit_scheduler_stress`, `test_jit_superscalar_scheduler_stress`): their result is
+  **byte-identical hashes — core-invariant**. Pinning to the fast cluster (`taskset -c 0-3`) is
+  safe AND speeds the run up (avoids the slow-cluster penalty). Prefer pinning correctness tests
+  to 0-3. It never changes a pass/fail outcome.
+- **Perf A/B (§5 gate 4):** pin **both** variants **identically** — e.g. both
+  `bench_armrx --full-hash-only --perf-ready` under `taskset -c 3` (the existing methodology
+  already pins perf runs to core 3). **Never pin only one side** of an A/B: asymmetric pinning
+  measures cluster placement, not the change under test. If you pin the DAG variant to 0-3, pin
+  the default variant to 0-3 too.
+- Do NOT pin a run that is already in flight (killing + restarting risks a duplicate per §8.3).
+  Let a running test finish, then apply pinning to subsequent runs.
+
 ---
 
 ## 5. The gate sequence (every code change must pass this)
