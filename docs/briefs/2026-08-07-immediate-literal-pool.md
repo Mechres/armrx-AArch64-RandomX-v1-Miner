@@ -44,14 +44,35 @@ applicable to AArch64 in-order A53, and THP (the only path available here) is
 already in use. The canonical RandomX `calc_dataset_item_aarch64` prefetch geometry
 is what armrx already mirrors. **No unexploited AArch64 codegen lever remains.**
 
-**Final conclusion:** both investigated levers are dead ends — (1) C* immediate
-pooling is CLOSED (regresses 7.1% via MAC interlock); (2) hugepages is a RED HERRING
-(already THP-backed). The ~+19.5% instruction-count gap to XMRig is real but its
-single-thread codegen levers are exhausted/negative. The only remaining real perf
-axis is **cluster efficiency / worker placement** (user-ruled-out) — i.e. the gap
-is effectively structural at the single-thread level on this in-order A53.
-Recommend stopping codegen perf pursuit; the project is at parity with XMRig on
-every lever that applies to this hardware.
+## Investigation (a) — worker affinity vs XMRig 1:1 (2026-08-07)
+
+User ran XMRig: 8 workers, cores 0-7 1:1, **28.2 H/s** (per-core big ~4.52,
+weak ~2.35). Compared armrx's affinity path.
+
+**Finding: armrx's default affinity is CORRECT and at parity with XMRig.**
+- `cli_parser.cpp:36-40` clamps `o.workers = min(online_cpu_count(),
+  isolated_cpu_list().size())` → with `isolcpus=1-7`, default = **7 workers on
+  cores 1-7, clean 1:1** (not the 8-on-7 modulo collision I first suspected —
+  that only happens on an explicit `--threads=8` override while isolcpus is set).
+- `detect_core_order()` fallback (no cpufreq on this device) = sequential
+  `0..N-1`, matching XMRig's 0-7. `worker_loop` (AffinityMode::All) pins
+  `core_order_[thread_id % size]` → 1:1. Per-core throughput matches XMRig
+  (4.5 big / 2.35 weak).
+- isolcpus makes the 7 isolated cores run noise-free → **28.4 H/s**, which
+  *exceeds* XMRig's 28.2 (8 cores, no isolcpus). The earlier 26.65 figure was a
+  NON-isolcpus run (8×3.3 w/ OS noise) — that gap is already closed by isolcpus.
+
+**Conclusion:** no placement defect in the default path. armrx ≥ XMRig on
+throughput (28.4 ≥ 28.2). The only latent edge: an explicit `--threads=N >
+isolated_core_count` override causes a modulo collision (double-pin + idle
+core). XMRig caps to physical cores, so matching that (clamp effective workers to
+`core_order_.size()` even on override) is a safe hardening, but it does NOT
+address any measured gap — the default already clamps. **No code change needed
+for parity; offer clamp-hardening as optional.**
+
+**FINAL: both codegen levers dead (C* E24 regression; hugepages already THP),
+and placement is correct+at-parity. armrx matches/exceeds XMRig on every lever
+that applies to this in-order A53. Perf investigation closed.**
 
 armrx is ~+19.5% instructions/hash vs XMRig (118.96M vs 99.57M). The gap is
 **instruction-count, not stalls** — IPC is already *better* than XMRig (0.731
