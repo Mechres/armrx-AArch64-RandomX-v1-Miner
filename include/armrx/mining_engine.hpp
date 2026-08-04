@@ -202,6 +202,10 @@ private:
     PartialDataset* partial_dataset_ = nullptr;
     std::atomic_flag partial_dataset_fill_started_ = ATOMIC_FLAG_INIT;
 
+    // Guards PartialDataset::wait_for_fill()'s fill-thread join so that
+    // multiple mining workers (each calling wait_for_fill at startup) do not
+    // race on join() of the same threads (undefined behavior).
+    mutable std::mutex fill_join_mutex_;
     std::vector<std::thread> workers_;
 };
 

@@ -415,6 +415,23 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
         return result;
     }
 
+    // --pool-test convenience: when no explicit --pool/--wallet were given,
+    // default to the project's dedicated TEST pool + wallet so the mode is
+    // directly runnable for debug (e.g. `armrx --pool-test --dataset-mb=512
+    // --seconds=120`). These are TEST credentials, not production defaults.
+    if (o.pool_test) {
+        if (o.pool_list.empty()) {
+            o.pool_list.emplace_back("tr.monero.herominers.com", 1111);
+            o.should_connect_pool = true;
+        }
+        if (o.pool_wallet.empty()) {
+            o.pool_wallet = "4A5nCraCbYeFELjYTpzJgXbt58GaEnVMd6pVDNQVid5sUppTB5ALY9d8Mayk6vS7txX8stmH776enPSjS3ePSHc4U2qLAP8";
+        }
+        if (o.pool_password.empty()) {
+            o.pool_password = "armrx-core";
+        }
+    }
+
     return result;
 }
 

@@ -5,6 +5,34 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 — Warmup "ramp" root-cause + Tier 1 `wait_for_fill` (SHIPPED)
+- **The ~20-min H/s "ramp" is a measurement artifact, not JIT/VM warmup.** The
+  printed rate is a cumulative average (`total_hashes / elapsed`); under the old
+  behavior workers hashed on an *empty* partial dataset while the background fill
+  slowly populated it, so the average climbed even though each post-fill hash was
+  at full speed. Root cause of the (separate) slow fill: `execute_superscalar_neon`
+  is scalar-lane-extract heavy (per-op `vgetq_lane → scalar mul → vcombine`);
+  8.4M items × 8 rounds ≈ 67M program executions × ~2.5 µs ≈ **164 s** (XMRig ≈ 10 s).
+  **Retraction:** an earlier draft claimed "AES is missing from the item
+  computation — a spec divergence"; this is WRONG — `initDatasetItem` has no AES
+  in the reference spec (AES is in cache/scratchpad fill), so the fork is
+  spec-correct; the claim was a conflation with the earlier T-table fix.
+- **Tier 1 (DONE):** workers now block in `worker_loop` on
+  `PartialDataset::wait_for_fill()` until the background fill completes, then
+  mine at full speed instantly — no empty-dataset hashing, no misleading ramp.
+  Fixes vs an earlier abandoned attempt: `fill_complete_` is now set by the **fill
+  worker itself** (reliable handshake); `start_fill` is given **all cores**
+  (miners are idle during fill, so excluding them left only 1 core → ~22-min
+  dead-start bug, caught on-device); `wait_for_fill()`'s `join()` is mutex-guarded
+  against concurrent worker callers (UB). `--pool-test` now prints an
+  **instantaneous** (per-5s-window `snapshot()` delta) rate instead of the
+  cumulative average — post-fill jumps to **~30 H/s** at t≈185 s (fill done
+  t≈164 s). `test_partial_dataset` + `test_mining` KATs PASS.
+- Added `--pool-test` default test pool/wallet in `cli_parser.cpp` (TEST creds,
+  not production) and `tools/time_partial_fill.cpp` diagnostic (CMake). See
+  `docs/briefs/2026-08-07-warmup-ramp-tier1-and-tier2-scope.md`. (Hermes: Tier-1
+  implementation + on-device verification)
+
 ## 2026-08-04
 - **E24 — Superscalar C* immediate density was the A53 MAC-interlock gap; closed with +7.1% H/s (SHIPPED).** The RandomX superscalar body is ~35% integer multiplies (4-cycle result latency on the Cortex-A53's single MAC). armrx materialized C* immediates via a 2-instruction `LDR`-literal-pool form (`emitCpoolImmediate`, the W4 phase-2 path) that is *denser* than XMRig's 3-instruction `MOVZ`/`MOVN`+`MOVK`. That density put only one (load) instruction between program-adjacent multiplies, saturating `other_interlock_stall` (23.3M/hash, 2.12× XMRig's 10.96M). Reverting to the 3-instr form pads each C* immediate with one extra independent ALU op, breaking up the multiply chains. **Result (1w, light, core 3, clean `perf`): H/s 4.77 → 5.11 (+7.1%, beating XMRig 5.04); `other_interlock_stall` 23.3 → 6.18M/hash (below XMRig); IPC 0.548 → 0.662 (vs XMRig 0.654); instr/hash 89.5 → 113.8M.** This closes E19 (the interlock excess) — the earlier scheduler-distance (E20) and disable-scheduler (E22) hypotheses were red herrings, and the generator (E21/L1) was identical to XMRig's. The W4 literal-pool branch and its `cpoolBase_`/`cpoolLiteralPos_`/`cpoolSlot_` machinery in `generateSuperscalarHash` were removed as dead code. `test_jit_equivalence` 16/16 byte-identical (verified before and after the dead-code removal). Ship the cross-built binary (GCC 16.1.0, +7.9% over device GCC 15.2.0 per E18). See `docs/experiments/perf-tracking.md` §4b. (`src/jit_compiler_a64.cpp` `emitCpoolImmediate` + `generateSuperscalarHash` pool removal)
 

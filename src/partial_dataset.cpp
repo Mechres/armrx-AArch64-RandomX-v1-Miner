@@ -42,6 +42,29 @@ PartialDataset::PartialDataset(std::size_t item_count)
     // Hugepage hint (best-effort; succeeds silently if THP is available)
     ::madvise(data_, total_bytes, MADV_HUGEPAGE);
 
+    // Pre-fault the buffer so THP promotion happens NOW, at init, instead of
+    // lazily on first random write-touch during hashing. Without this, a 256 MiB
+    // (light) / 512 MiB buffer is promoted to 2 MB huge pages page-by-page under
+    // mining load -- a soft-fault storm that drags the hashrate up gradually over
+    // ~20 minutes (observed) before reaching steady state. XMRig pre-faults its
+    // dataset and is at full speed immediately. Mirrors the pre-fault already done
+    // for the scratchpad (vm.cpp) and Argon2d cache (argon2.cpp).
+    // MADV_POPULATE_WRITE (Linux 5.14+) prefaults writable pages without memset.
+#if defined(MADV_POPULATE_WRITE)
+    ::madvise(data_, total_bytes, MADV_POPULATE_WRITE);
+#else
+    // Fallback: touch every page to fault it in (mmap/MADV_HUGEPAGE anon is
+    // already zero, so writing zeros only forces the fault + THP promotion).
+    constexpr std::size_t kPage = 4096;
+    volatile std::byte* p = data_;
+    for (std::size_t off = 0; off < total_bytes; off += kPage)
+        p[off];  // read-touch faults the page; combined with MADV_HUGEPAGE the
+                  // kernel promotes to a huge page on the write that follows.
+    // Force write fault (promotes THP): write a zero to each page.
+    for (std::size_t off = 0; off < total_bytes; off += kPage)
+        p[off] = std::byte{0};
+#endif
+
     ARMRX_LOG_INFO << "PartialDataset: allocated " << item_count
                    << " items (" << (total_bytes / (1024ULL * 1024ULL))
                    << " MiB)";
@@ -156,6 +179,15 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
         // CAS failed because another thread published a higher value; that's fine
     }
 
+    // Mark the whole fill complete once the last chunk publishes the final
+    // item. This lets fill_complete()/wait_for_fill() observe completion
+    // reliably even if no caller invokes wait_for_fill() (the mining workers
+    // block on wait_for_fill() at startup, so it must be set by the fill
+    // itself, not only by wait_for_fill() polling item_count_).
+    if (completed >= allocated_items_) {
+        fill_complete_.store(true, std::memory_order_release);
+    }
+
     ARMRX_LOG_DEBUG << "PartialDataset worker on cpu " << cpu_id
                     << ": filled items [" << start_item << ", " << end_item << ")";
 }
@@ -176,7 +208,9 @@ void PartialDataset::wait_for_fill() {
         ARMRX_LOG_INFO << "PartialDataset: fill complete — workers resuming";
     }
 
-    // Join all threads
+    // Join all threads. Guarded so concurrent callers (one per mining worker)
+    // don't race on join() of the same fill threads (undefined behavior).
+    std::lock_guard<std::mutex> lock(fill_join_mutex_);
     for (auto& t : fill_threads_) {
         if (t.joinable()) t.join();
     }

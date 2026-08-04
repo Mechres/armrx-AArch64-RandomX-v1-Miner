@@ -415,6 +415,10 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     }
 
     unsigned elapsed_sec = 0;
+    // For --pool-test: previous periodic-dump snapshot, used to compute the
+    // INSTANTANEOUS (per-window) rate instead of the cumulative average.
+    armrx::MiningEngine::HashSnapshot prev_dump_snap{};
+    bool prev_dump_valid = false;
 
     while (keep_running && (!opts_.pool_test || opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
         // Interruptible 1s cadence (see run_local_benchmark for rationale):
@@ -488,6 +492,37 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
                 }
             }
             std::cout << "\r" << std::flush;
+        }
+
+        // --pool-test: periodic per-worker rate dump. Uses the INSTANTANEOUS
+        // (per-5s-window) rate from snapshot deltas, NOT the cumulative
+        // hash_rate() -- the cumulative average is diluted by the dead-start
+        // fill wait and would show a misleading "ramp" even after steady state.
+        if (opts_.pool_test && (elapsed_sec % 5 == 0)) {
+            auto now_snap = engine.snapshot();
+            if (prev_dump_valid) {
+                const double win =
+                    std::chrono::duration<double>(now_snap.ts - prev_dump_snap.ts).count();
+                if (win > 0.5) {
+                    const double agg_inst =
+                        static_cast<double>(now_snap.total - prev_dump_snap.total) / win;
+                    std::cout << "\n[pool-test t=" << elapsed_sec << "s] INST agg=" << std::fixed
+                              << std::setprecision(2) << agg_inst << " H/s | fill_items="
+                              << (partial_dataset_ ? partial_dataset_->item_count() : 0)
+                              << " | workers:";
+                    for (unsigned w = 0; w < opts_.workers; ++w) {
+                        const std::uint64_t a =
+                            (w < now_snap.per_worker.size() && w < prev_dump_snap.per_worker.size() &&
+                             now_snap.per_worker[w] >= prev_dump_snap.per_worker[w])
+                                ? now_snap.per_worker[w] - prev_dump_snap.per_worker[w] : 0;
+                        std::cout << " w" << w << "=" << std::fixed << std::setprecision(2)
+                                  << (static_cast<double>(a) / win);
+                    }
+                    std::cout << std::endl;
+                }
+            }
+            prev_dump_snap = now_snap;
+            prev_dump_valid = true;
         }
     }
     std::cout << std::endl;

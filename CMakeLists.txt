@@ -340,6 +340,12 @@ if(ARMRX_BUILD_TESTS)
     # the file's own header comment).
     add_executable(bench_dataset_2way tests/bench_dataset_2way.cpp)
     target_link_libraries(bench_dataset_2way PRIVATE armrx_core)
+
+    # Diagnostic (not a shipped test): times the PartialDataset fill for a given
+    # --dataset-mb, isolating the "20-minute warmup" hypothesis from steady-state
+    # hashing. Run on-device: ./time_partial_fill 512
+    add_executable(time_partial_fill tools/time_partial_fill.cpp)
+    target_link_libraries(time_partial_fill PRIVATE armrx_core)
     endif()
 
     # IMUL_R operand-magnitude sampler (T3-3 gate check) — interpreter-only, host-runnable

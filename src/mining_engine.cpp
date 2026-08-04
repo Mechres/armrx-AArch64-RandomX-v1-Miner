@@ -226,29 +226,22 @@ void MiningEngine::set_job(const Job& job) {
         new_cache->initialize(job.seed_key);
         shared_cache_ = new_cache;
 
-        // Start background fill of the partial dataset if configured.
-        // Only starts once (checked by partial_dataset_fill_started_ flag).
+        // Start the background fill of the partial dataset if configured.
+        // Only starts once (gated by partial_dataset_fill_started_). Workers
+        // block on wait_for_fill() in worker_loop until it completes, so the
+        // dataset is fully populated before any hash runs -- no on-the-fly
+        // derive during a slow ramp, no wrong-hash risk from reading an
+        // uninitialized chunk. fill_complete_ is now set by the fill worker
+        // itself (partial_dataset.cpp), so wait_for_fill() returns reliably.
+        //
+        // NOTE: because the mining workers are blocked (waiting) for the fill
+        // to finish, they consume no CPU during the fill -- so the fill is
+        // given ALL cores (exclude_cores = {}) to finish as fast as possible
+        // (~164s on 8 A53 cores). Passing the miner cores as exclude would
+        // leave only one core for the fill and turn the dead-start into ~20 min.
         if (partial_dataset_ && !partial_dataset_fill_started_.test_and_set(std::memory_order_relaxed)) {
-            // Collect mining worker cores to exclude fill threads from them
-            std::vector<unsigned> mining_cores;
-            for (unsigned i = 0; i < num_threads_; ++i) {
-                mining_cores.push_back(core_order_[i % core_order_.size()]);
-            }
-            // Deduplicate
-            std::sort(mining_cores.begin(), mining_cores.end());
-            mining_cores.erase(std::unique(mining_cores.begin(), mining_cores.end()), mining_cores.end());
-            partial_dataset_->start_fill(shared_cache_, core_order_, mining_cores);
-            // Start the one-shot background fill. The actual wait happens in
-            // worker_loop: each mining worker sleeps (polls every 100ms) until the
-            // fill completes, so the fill threads get all cores and finish fast,
-            // and the pool thread stays responsive. The JIT reads
-            // partial_dataset_data_[item_number] for item_number < item_count_, and
-            // item_count_ is published as the MAX of completed chunk bounds
-            // (out-of-order across workers) — so a worker must not hash until the
-            // fill is fully done, or it could read an uninitialized item in a
-            // not-yet-filled chunk and emit a wrong hash. start_fill is gated by
-            // partial_dataset_fill_started_ (one-shot), so the wait is a single
-            // startup delay only — it does NOT recur per seed rotation.
+            partial_dataset_->start_fill(shared_cache_, core_order_, /*exclude_cores=*/{});
+            ARMRX_LOG_INFO << "PartialDataset: started background fill (workers will wait_for_fill)";
         }
 
         if (mode_ == RandomXMode::fast) {
@@ -365,6 +358,18 @@ MiningEngine::HashSnapshot MiningEngine::snapshot() const {
 
 
 void MiningEngine::worker_loop(unsigned int thread_id) {
+    // Tier 1 (2026-08-07): if a partial dataset is being filled in the
+    // background, block this worker until the fill completes before hashing.
+    // This removes the misleading ~20-min ramp (workers previously hashed on
+    // an empty dataset, diluting the cumulative-average rate) and guarantees
+    // every hash reads a fully-populated dataset (no on-the-fly derive, no
+    // wrong-hash risk from uninitialized chunks). The fill runs on its own
+    // threads (started in set_job); workers simply wait. fill_complete_ is
+    // now set by the fill worker itself, so wait_for_fill() returns reliably.
+    if (partial_dataset_) {
+        partial_dataset_->wait_for_fill();
+    }
+
     if (affinity_mode_ == AffinityMode::BigOnly && !core_order_.empty()) {
         // Pin strictly to the detected big cluster (the highest
         // cpuinfo_max_freq cores in core_order_), not a hardcoded "cores

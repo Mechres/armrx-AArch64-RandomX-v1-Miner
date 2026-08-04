@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <memory>
 #include <span>
 #include <vector>
@@ -73,7 +74,10 @@ public:
         return fill_complete_.load(std::memory_order_acquire);
     }
 
-    /// Wait for fill to complete (blocking, used in tests).
+    /// Wait for fill to complete (blocking, used in tests and by the mining
+    /// workers at startup). The fill-thread join is guarded by fill_join_mutex_
+    /// so multiple concurrent callers (one per mining worker) cannot race on
+    /// join() of the same threads.
     void wait_for_fill();
 
 private:
@@ -82,6 +86,8 @@ private:
     std::atomic<std::size_t> item_count_{0};
     std::atomic<bool> fill_complete_{false};
     mutable std::vector<std::thread> fill_threads_;
+    // Guards the fill-thread join in wait_for_fill() against concurrent callers.
+    mutable std::mutex fill_join_mutex_;
     // Keeps the Argon2dCache alive while fill threads are running
     std::shared_ptr<const Argon2dCache> cache_holder_;
 
