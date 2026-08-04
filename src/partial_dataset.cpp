@@ -170,6 +170,12 @@ void PartialDataset::wait_for_fill() {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    // Log fill completion once per process (multiple workers may observe it).
+    static std::atomic<bool> logged{false};
+    if (!logged.exchange(true, std::memory_order_relaxed)) {
+        ARMRX_LOG_INFO << "PartialDataset: fill complete — workers resuming";
+    }
+
     // Join all threads
     for (auto& t : fill_threads_) {
         if (t.joinable()) t.join();
