@@ -145,6 +145,18 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   single-threaded TUI redraw (or a mutex around the TUI fd writes) + correct clear/redraw escape
   sequence. (Reported 2026-08-06; observed on the user's `lenovo` terminal emulator — may be
   terminal-specific, but the inline `armrx`+control-byte dump is a real code-side write bug.)
+- **SIGINT on `--pool` may not exit cleanly (OPEN, needs verification).** The 2026-08-06 SIGINT
+  fix (`1e5fc52`) was verified on `armrx --mine --mode=light` (host) — clean exit in ~2s. On a
+  device `--pool` run the same night, `^C` printed the final speed line but the process did NOT
+  return to the shell prompt (user had to note "we need a way to exit"). Two candidate causes,
+  NOT yet distinguished: (a) the pool-mining teardown path (`run_pool_mining`) does not fully
+  stop/clean up (worker threads may block on network/stratum during `engine.stop()`), or (b) the
+  user's terminal/SSH did not deliver SIGINT to the remote process. **Verify tomorrow:** run
+  `armrx --pool=...` on device, then from a SECOND SSH session `kill -INT <pid>` — if it exits
+  cleanly, it's terminal SIGINT delivery (not a code bug); if it hangs, it's the pool-teardown
+  path and needs a fix (likely the same 100ms-poll pattern applied to `run_pool_mining`'s loop,
+  or a forced `engine.stop()` + socket close). Do NOT use `kill -9` as the workaround in code.
+  (Reported 2026-08-06, device, 8w pool run under `ARMRX_DAG_SCHED=1` — but unrelated to DAG.)
 
 ## Entry points for the next agent / session
 1. `docs/TESTING.md` — how to measure (the only valid commands).
