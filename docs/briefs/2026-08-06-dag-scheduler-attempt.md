@@ -1,6 +1,16 @@
 # Brief: JIT DAG (dependence-graph) list scheduler — attempt after W3-2/E26
 
-**Date:** 2026-08-06 · **Author:** Hermes (skeptical gate) · **Planner:** external agent (user-chosen) · **Status:** brief + prompt, NOT yet coded
+**Date:** 2026-08-06 · **Author:** Hermes (skeptical gate) · **Planner:** external agent (user-chosen) · **Status:** ✅ CODED + gates run — **CLOSED (negative, NOT adopted)**
+
+**Result (2026-08-06, on-device silicon):** Correctness PASS on all 4 gates (16/16 equivalence, 450+200 stress pairs byte-identical, mining shares) — the different shape avoided the W3-2 trap. **Performance: REGRESSION → not adopted.** B-M-B-M, core 3, 500-hash gated window:
+
+| run | variant | cyc/hash | instr/hash | IPC | H/s |
+|---|---|---:|---:|---:|---:|
+| B1 | default | 171.63M | 113.77M | 0.663 | 5.12 |
+| M1 | DAG | 189.24M | 127.33M | 0.673 | 4.39 |
+| M2 | DAG | 189.34M | 127.33M | 0.673 | 4.38 |
+
+DAG = **+10.3% cycles, +11.9% instr, −14.3% H/s** (M1≈M2, reproducible). Adopt gate (≥0.5% cycles improvement in both M runs) → FAIL. Root cause: reorder forces a *longer emitted sequence* (order-dependent codegen), swamping any multiply-latency win. **Code kept gated** behind `ARMRX_DAG_SCHED=1` (default OFF) as a documented negative result — not enabled, not deleted. JIT scheduler reordering is now exhaustively closed (joins W3-2 / E20 / T2-1 / T2-2). See `changelogs.md` (2026-08-06 latest) + `ROADMAP.md`. Next real lever = worker-cluster placement (Idea 2), not JIT emission.
 
 ---
 
