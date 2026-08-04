@@ -181,6 +181,19 @@ is the L2/interconnect domain, not frequency.
 - Do NOT pin a run that is already in flight (killing + restarting risks a duplicate per §8.3).
   Let a running test finish, then apply pinning to subsequent runs.
 
+### 8.6 A stale SSH session can LOOK like device lag — but the device is fine
+- Symptom seen 2026-08-06: after a device reboot / wedge during a long test run, the terminal
+  "lagged when writing", htop stuttered, and `armrx` output flickered — yet `cat /proc/loadavg`
+  was ~0, CPU 97% idle, `ping` 0.2 ms, and a local command ran in 0.00s. Cause: the **SSH
+  session had survived the reboot** and its forwarded-output channel went partly stale; the
+  device executed instantly but bytes crawled through the old pipe. Closing ALL SSH connections
+  and opening a **fresh** terminal/session made it snappy immediately.
+- **Do NOT diagnose this as a device/perf problem.** Before suspecting the box, confirm with:
+  `cat /proc/loadavg` (should be ~0.00), `top -bn1 | head -3` (CPU ~97% idle, 0% io),
+  `ping` from the laptop (no loss/spikes), and a **fresh** SSH session. If a new session is
+  snappy while the old one lags, it was the stale session — just reconnect. Reboot the device
+  only if load/IO/ping all show real trouble.
+
 ---
 
 ## 5. The gate sequence (every code change must pass this)
