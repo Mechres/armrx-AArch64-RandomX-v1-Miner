@@ -136,15 +136,18 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   Hashing is correct (16/16 + 450/200 gates pass). **Not adopted** (DAG gated OFF), so only bites if
   DAG enabled + `--tui`. Fix = own the pool_name string. Segfault↔UAF linkage is still a hypothesis
   (no backtrace); get one `gdb` run. (Reported 2026-08-06; reattributed 2026-08-07 audit.)
-- **TUI emits garbage control bytes / overlapping lines (OPEN, scheduler-INDEPENDENT).** `--tui`
-  (WITHOUT DAG, i.e. default scheduler) prints the binary name `armrx` followed by raw control
-  bytes inline in the terminal, interleaved with duplicate/overlapping TUI lines — the display is
-  unusable. Repro: `armrx --pool=... --tui` (no env var). This is a **pre-existing TUI rendering
-  bug** (terminal escape-sequence / line-buffering / multi-thread write-to-fd without
-  serialization), independent of the scheduler. Non-TUI runs are unaffected. Likely needs:
-  single-threaded TUI redraw (or a mutex around the TUI fd writes) + correct clear/redraw escape
-  sequence. (Reported 2026-08-06; observed on the user's `lenovo` terminal emulator — may be
-  terminal-specific, but the inline `armrx`+control-byte dump is a real code-side write bug.)
+- **TUI emits garbage control bytes / overlapping lines — FIXED (2026-08-07).** Root cause was **twofold**:
+  (1) `armrx::log::set_tui_mode(true)` was **never called** (audit: dead ring-buffer), so
+  worker-thread `ARMRX_LOG_*` writes went straight to `std::cout` under `sink_mutex`; (2)
+  `Tui::render()` / `Tui::shutdown()` wrote their ANSI escape sequences to `std::cout` **without**
+  taking `sink_mutex`. The two writers interleaved on the fd, splitting escape sequences with log
+  text → broken control bytes + overlapping lines. Fix: call `set_tui_mode(true)` when the TUI
+  comes up (worker logs → ring buffer, off stdout) and `set_tui_mode(false)` after the loop;
+  `render()`/`shutdown()` now lock `armrx::log::sink_mutex()` around their whole stdout write so
+  the escape sequence is atomic. Also restored the cursor on the `--pool-test --tui` `_Exit` path
+  (was skipping `tui->shutdown()` → hidden cursor + dashboard left on screen). Verified on-device:
+  `--tui --pool-test --seconds=15` renders clean complete frames with no interleaved log text and
+  exits `DONE_EXIT=0` (no crash). (`src/tui.cpp`, `src/miner_app.cpp`)
 - **SIGINT on `--pool` may not exit cleanly — FIXED (2026-08-07).** Root cause was a
   **self-deadlock in `PoolManager::disconnect()`**: it held `stratum_mutex_` while
   calling `StratumClient::disconnect()`, which `join()`s the reader thread, whose

@@ -403,6 +403,11 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     if (opts_.use_tui) {
         bool color = (opts_.tui_color >= 0) ? static_cast<bool>(opts_.tui_color) : armrx::Tui::detect_color();
         tui = std::make_unique<armrx::Tui>(color);
+        // Route worker-thread ARMRX_LOG_* to the ring buffer (off stdout) so
+        // they cannot interleave with Tui::render()'s escape sequences (Bug 2:
+        // "armrx" header + raw control bytes, overlapping lines). Without this,
+        // the ring buffer is dead and logs race render() on std::cout.
+        armrx::log::set_tui_mode(true);
     }
 
     if (!opts_.use_tui) {
@@ -487,6 +492,10 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     }
     std::cout << std::endl;
 
+    // TUI mode is ending: restore normal logging (logs go back to stdout)
+    // before the post-loop summary / teardown prints below.
+    if (tui) armrx::log::set_tui_mode(false);
+
     // Pool-test mode: print a per-worker steady-state summary (same shape as
     // the --mine benchmark) BEFORE teardown, so the data is captured even if
     // the pool/engine teardown hangs. Uses the full-run snapshot delta.
@@ -517,6 +526,10 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
             std::cout << "  CPU max temp: " << std::fixed << std::setprecision(1) << temp_c << "C\n";
         }
         std::cout << std::flush;
+        // Restore the terminal (clear TUI frame + show cursor) before
+        // self-terminating, otherwise --pool-test --tui leaves the cursor
+        // hidden and the dashboard on screen (audit: "skips cursor restore").
+        if (tui) tui->shutdown();
         // Self-terminate immediately after capturing the summary. Skipping the
         // pool/engine teardown on purpose: pool_mgr->disconnect()/engine.stop()
         // can block waiting on the network/worker threads, which would prevent

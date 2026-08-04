@@ -1,4 +1,5 @@
 #include "armrx/tui.hpp"
+#include "armrx/log.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -54,8 +55,13 @@ void Tui::ansi(const char* code, std::ostream& os) const {
 void Tui::shutdown() {
     if (!enabled_) return;
     enabled_ = false;
-    clear_lines(prev_lines_, std::cout);
-    if (use_color_) std::cout << "\033[?25h" << std::flush;
+    {
+        // Serialize on the shared sink mutex so a concurrent ARMRX_LOG_* write
+        // (worker threads) cannot interleave into this clear/restore sequence.
+        std::lock_guard<std::mutex> lock(armrx::log::sink_mutex());
+        clear_lines(prev_lines_, std::cout);
+        if (use_color_) std::cout << "\033[?25h" << std::flush;
+    }
     prev_lines_ = 0;
 }
 
@@ -154,10 +160,18 @@ void Tui::render(const TuiSnapshot& s, std::ostream& os) {
         new_lines += 1;
     }
 
-    // Move cursor up, clear, print new frame
-    clear_lines(prev_lines_, os);
-    os << "\033[J";  // clear from cursor to bottom
-    os << frame.str() << std::flush;
+    // Move cursor up, clear, print new frame. Serialize on the shared sink
+    // mutex so a concurrent ARMRX_LOG_* -> std::cout (worker threads) cannot
+    // interleave its bytes into the middle of this escape sequence (Bug 2:
+    // "armrx" header + raw control bytes, overlapping lines). With
+    // set_tui_mode(true) active, worker logs go to the ring buffer instead of
+    // stdout, so this lock is defense-in-depth for the general contract.
+    {
+        std::lock_guard<std::mutex> lock(armrx::log::sink_mutex());
+        clear_lines(prev_lines_, os);
+        os << "\033[J";  // clear from cursor to bottom
+        os << frame.str() << std::flush;
+    }
 
     prev_lines_ = new_lines;
 }

@@ -6,6 +6,37 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — Fix TUI garbage control bytes / overlapping lines (Bug 2)
+
+**Files:** `src/tui.cpp`, `src/miner_app.cpp`, `docs/STRATEGY.md` (Known bugs)
+
+- Root cause (twofold): (1) `armrx::log::set_tui_mode(true)` was **never called**
+  anywhere (audit: dead ring-buffer), so worker-thread `ARMRX_LOG_*` wrote to
+  `std::cout` under `sink_mutex`; (2) `Tui::render()` / `Tui::shutdown()` wrote
+  their ANSI escape sequences to `std::cout` **without** `sink_mutex`. The two
+  writers interleaved on the fd, splitting escape sequences with log text →
+  broken control bytes + overlapping lines ("armrx" + raw control bytes).
+- Fix: call `set_tui_mode(true)` when the TUI is constructed (worker logs → ring
+  buffer, off stdout) and `set_tui_mode(false)` after the main loop; `render()`
+  and `shutdown()` now lock `armrx::log::sink_mutex()` around their whole stdout
+  write so the escape sequence is atomic. Also restored the cursor on the
+  `--pool-test --tui` `_Exit` path (it skipped `tui->shutdown()` → hidden cursor
+  + dashboard left on screen).
+
+**Verification (on-device, MSM8929, cross-built `armrx`):**
+
+- `--tui --pool-test --seconds=15 --pool=dummy.invalid:1111` (connection fails,
+  but `render()` runs every second regardless of state) → captured log shows
+  **clean, complete TUI frames with no interleaved log text**, the one worker-log
+  line (`[ERROR] DNS resolution failed`) appears standalone before the frames
+  (routed to ring buffer, off stdout). `DONE_EXIT=0`, no SIGSEGV/abort.
+- The redirected-file capture cannot show visual TTY rendering (escape sequences
+  only render on a terminal), but the structural absence of broken/interrupted
+  sequences + clean self-terminating exit indicates the interleave is gone.
+  User to confirm visually with a real `--tui --pool=` run.
+
+---
+
 ## 2026-08-07 — Lever 3: `bench_armrx --workers=N` multi-worker throughput (measurement enabler)
 
 **Files:** `tests/bench_armrx.cpp`, `docs/TESTING.md` (§1), `docs/STRATEGY.md` (Phase 1.5)
