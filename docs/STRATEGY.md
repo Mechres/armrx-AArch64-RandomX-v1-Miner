@@ -128,14 +128,13 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   `close()`d solely inside the worker thread, so the destructor only flips `running_` + joins —
   no shared fd access. (GLM §5.7-E.)
 - **TUI segfaults with `ARMRX_DAG_SCHED=1` (OPEN).** `armrx --tui` under the DAG scheduler runs
-  correctly for ~10-20s (valid per-worker H/s printed) then dies with `Segmentation fault`. The
-  crash is in the **TUI render/shutdown path under DAG emission order**, not in hashing (hashing is
-  correct — consistent with the on-device 16/16 + 450/200 stress gates). Repro:
-  `ARMRX_DAG_SCHED=1 armrx --pool=... --tui`. Happens with 8 workers. Non-TUI (`--mine`, no `--tui`)
-  is fine under DAG. Likely the TUI's redraw/thread-teardown races a DAG-reordered code path (or a
-  stale pointer the legacy scheduler's emission order happened to mask). **Not adopted** (DAG is
-  gated OFF by default), so this only bites if someone enables `ARMRX_DAG_SCHED=1` + `--tui`.
-  (Reported 2026-08-06.)
+  correctly for ~10-20s (valid per-worker H/s printed) then dies with `Segmentation fault`. **Corrected
+  attribution (2026-08-07 audit):** the crash is NOT "TUI render/shutdown under DAG emission order" —
+  it is the **dangling `std::string_view pool_name`** (see next bug), a UAF active in BOTH modes; DAG
+  only changes heap-reuse timing enough to expose the bad read as a segfault (non-DAG shows garbage).
+  Hashing is correct (16/16 + 450/200 gates pass). **Not adopted** (DAG gated OFF), so only bites if
+  DAG enabled + `--tui`. Fix = own the pool_name string. Segfault↔UAF linkage is still a hypothesis
+  (no backtrace); get one `gdb` run. (Reported 2026-08-06; reattributed 2026-08-07 audit.)
 - **TUI emits garbage control bytes / overlapping lines (OPEN, scheduler-INDEPENDENT).** `--tui`
   (WITHOUT DAG, i.e. default scheduler) prints the binary name `armrx` followed by raw control
   bytes inline in the terminal, interleaved with duplicate/overlapping TUI lines — the display is
@@ -145,18 +144,31 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   single-threaded TUI redraw (or a mutex around the TUI fd writes) + correct clear/redraw escape
   sequence. (Reported 2026-08-06; observed on the user's `lenovo` terminal emulator — may be
   terminal-specific, but the inline `armrx`+control-byte dump is a real code-side write bug.)
-- **SIGINT on `--pool` may not exit cleanly (OPEN, needs verification).** The 2026-08-06 SIGINT
-  fix (`1e5fc52`) was verified on `armrx --mine --mode=light` (host) — clean exit in ~2s. On a
-  device `--pool` run the same night, `^C` printed the final speed line but the process did NOT
-  return to the shell prompt (user had to note "we need a way to exit"). Two candidate causes,
-  NOT yet distinguished: (a) the pool-mining teardown path (`run_pool_mining`) does not fully
-  stop/clean up (worker threads may block on network/stratum during `engine.stop()`), or (b) the
-  user's terminal/SSH did not deliver SIGINT to the remote process. **Verify tomorrow:** run
-  `armrx --pool=...` on device, then from a SECOND SSH session `kill -INT <pid>` — if it exits
-  cleanly, it's terminal SIGINT delivery (not a code bug); if it hangs, it's the pool-teardown
-  path and needs a fix (likely the same 100ms-poll pattern applied to `run_pool_mining`'s loop,
-  or a forced `engine.stop()` + socket close). Do NOT use `kill -9` as the workaround in code.
-  (Reported 2026-08-06, device, 8w pool run under `ARMRX_DAG_SCHED=1` — but unrelated to DAG.)
+- **SIGINT on `--pool` may not exit cleanly (OPEN, root cause = teardown deadlock).** The 2026-08-06
+  SIGINT fix (`1e5fc52`) was verified on `--mine --mode=light` (host). On `--pool`, `^C` printed the
+  final line but didn't return to prompt. **Corrected attribution (2026-08-07 audit):** the run-loop
+  already uses the 10×100ms poll (`miner_app.cpp:418-419`) — the gap is **downstream**: `pool_mgr->
+  disconnect()` waits on `stratum_mutex_`, but a worker holding that mutex can be blocked in an
+  **unbounded blocking `send()`** (no `SO_SNDTIMEO`; `stratum_client.cpp:337-357`) submitting a share →
+  teardown deadlocks → `engine.stop()` can't join. The team's `--pool-test` sidesteps this via
+  `std::_Exit(0)`. Also: SIGINT during a blocking `::connect()` (no connect timeout) delays exit by the
+  OS TCP timeout. **Verify:** `kill -INT <pid>` from a 2nd SSH session — exits = terminal delivery;
+  hangs = deadlock (fix = socket send timeouts + forced `engine.stop()` + socket close in teardown).
+  (Reported 2026-08-06; reattributed 2026-08-07 audit.)
+- **`MetricsExporter` shutdown blocks behind idle HTTP client (OPEN, LOW).** Worker handles one
+  blocking `read()` per accepted connection (`metrics.hpp:57-79`); idle client → `read()` blocks →
+  destructor (flip `running_` + join) can't unblock (fd worker-owned by design). Teardown hangs only
+  when `--metrics-port` enabled + connection idle. Fix: `SO_RCVTIMEO` or self-pipe wakeup. (2026-08-07 audit.)
+- **IPv6 bare-address pool parse wrong (OPEN, LOW).** `cli_parser.cpp:181-202` splits on last `:`;
+  bare `2001:db8::1` mis-parsed (host `2001:db8:`, port `1`). `[v6]:port` handled. Fix: detect `:` count /
+  bracket form. (2026-08-07 audit.)
+- **`PartialDataset` latent out-of-order publish (OPEN, LOW, NOT active mis-hash).** Fill workers advance
+  `item_count_` via CAS to `start_item + total_items` (`partial_dataset.cpp:150-155`) — later chunk
+  finishing first publishes earlier unfinished chunk as done. **Latent only:** dataset is fully built via
+  `wait_for_fill()` before mining starts, so no hash reads mid-fill in normal flow. Real race smell;
+  verify no path reads during fill. (2026-08-07 audit; downgraded from "correctness bug".)
+- **`--pool-test --tui` skips cursor restore (OPEN, LOW).** `std::_Exit(0)` (`miner_app.cpp:520-525`)
+  skips destructors → `Tui::~Tui()` never restores hidden cursor. (2026-08-07 audit.)
 
 ## Entry points for the next agent / session
 1. `docs/TESTING.md` — how to measure (the only valid commands).
