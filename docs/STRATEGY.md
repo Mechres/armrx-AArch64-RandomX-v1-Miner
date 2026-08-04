@@ -144,17 +144,19 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
   single-threaded TUI redraw (or a mutex around the TUI fd writes) + correct clear/redraw escape
   sequence. (Reported 2026-08-06; observed on the user's `lenovo` terminal emulator — may be
   terminal-specific, but the inline `armrx`+control-byte dump is a real code-side write bug.)
-- **SIGINT on `--pool` may not exit cleanly (OPEN, root cause = teardown deadlock).** The 2026-08-06
-  SIGINT fix (`1e5fc52`) was verified on `--mine --mode=light` (host). On `--pool`, `^C` printed the
-  final line but didn't return to prompt. **Corrected attribution (2026-08-07 audit):** the run-loop
-  already uses the 10×100ms poll (`miner_app.cpp:418-419`) — the gap is **downstream**: `pool_mgr->
-  disconnect()` waits on `stratum_mutex_`, but a worker holding that mutex can be blocked in an
-  **unbounded blocking `send()`** (no `SO_SNDTIMEO`; `stratum_client.cpp:337-357`) submitting a share →
-  teardown deadlocks → `engine.stop()` can't join. The team's `--pool-test` sidesteps this via
-  `std::_Exit(0)`. Also: SIGINT during a blocking `::connect()` (no connect timeout) delays exit by the
-  OS TCP timeout. **Verify:** `kill -INT <pid>` from a 2nd SSH session — exits = terminal delivery;
-  hangs = deadlock (fix = socket send timeouts + forced `engine.stop()` + socket close in teardown).
-  (Reported 2026-08-06; reattributed 2026-08-07 audit.)
+- **SIGINT on `--pool` may not exit cleanly — FIXED (2026-08-07).** Root cause was a
+  **self-deadlock in `PoolManager::disconnect()`**: it held `stratum_mutex_` while
+  calling `StratumClient::disconnect()`, which `join()`s the reader thread, whose
+  teardown invokes `error_callback_` → `PoolManager::current_pool_name()` →
+  `lock(stratum_mutex_)` → deadlock on every clean teardown. A secondary stall was
+  an **unbounded blocking `send()`** (no `SO_SNDTIMEO`) that could wedge a share-
+  submitting worker holding the same mutex. Fixed by: (a) `disconnect()` drops the
+  mutex before tearing down the `StratumClient`; (b) `run_pool_mining()` calls
+  `engine.stop()` *before* `pool_mgr->disconnect()` so no worker enters
+  `submit_share()` during teardown; (c) `SO_SNDTIMEO` (2s) on the socket so a
+  stalled `send()` returns and releases the mutex. **Verified on-device 2026-08-07:**
+  `kill -INT <pid>` from a 2nd SSH session prints `Pool mining stopped.` + totals
+  and returns to the prompt within ~2s. See changelogs.md (2026-08-07).
 - **`MetricsExporter` shutdown blocks behind idle HTTP client (OPEN, LOW).** Worker handles one
   blocking `read()` per accepted connection (`metrics.hpp:57-79`); idle client → `read()` blocks →
   destructor (flip `running_` + join) can't unblock (fd worker-owned by design). Teardown hangs only

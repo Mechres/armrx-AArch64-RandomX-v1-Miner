@@ -94,9 +94,25 @@ bool PoolManager::connect() {
 }
 
 void PoolManager::disconnect() {
-    std::lock_guard<std::mutex> lock(stratum_mutex_);
-    if (stratum_) {
-        stratum_->disconnect();
+    // Take the client pointer out from under the lock, then tear it down
+    // WITHOUT holding stratum_mutex_. StratumClient::disconnect() joins the
+    // reader thread, and that thread's teardown path invokes error_callback_,
+    // which calls current_pool_name() — a stratum_mutex_ reader. Holding the
+    // mutex across the join would self-deadlock: this thread waits on the
+    // reader thread to finish, while the reader thread blocks on the very
+    // mutex we hold. This was the actual SIGINT-on-`--pool` hang: hashing
+    // stopped (engine.stop() joins workers cleanly) but the process never
+    // returned to the prompt because disconnect() wedged in the reader join.
+    StratumClient* raw = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
+        raw = stratum_.get();
+    }
+    if (raw) {
+        raw->disconnect();
+    }
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
         stratum_.reset();
     }
 }

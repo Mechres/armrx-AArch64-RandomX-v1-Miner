@@ -525,8 +525,13 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
         std::_Exit(0);
     }
 
-    pool_mgr->disconnect();
+    // Stop the workers FIRST so no worker can enter submit_share() (which takes
+    // stratum_mutex_) during teardown — otherwise disconnect() deadlocks waiting
+    // on the mutex held by a worker blocked in send(). The SO_SNDTIMEO set on the
+    // socket already bounds that send, but stopping workers first makes teardown
+    // deterministic regardless of peer state.
     engine.stop();
+    pool_mgr->disconnect();
 
     std::cout << "Pool mining stopped.\n"
               << "Total hashes:     " << engine.total_hashes()     << "\n"

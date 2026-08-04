@@ -141,6 +141,16 @@ void StratumClient::connect() {
         ::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY,
                      reinterpret_cast<const char*>(&flag), sizeof(flag));
 
+        // Bound blocking send() so a stalled peer cannot wedge a worker that
+        // holds stratum_mutex_ (taken by submit_share -> send_line -> write_all)
+        // and deadlock teardown (disconnect() also takes stratum_mutex_). send_line
+        // already treats a non-EINTR send() failure as a clean drop, so on timeout
+        // the share is dropped and the mutex is released promptly. The cross build
+        // has no TLS (ARMRX_HAVE_TLS undefined), so this covers the shipping path.
+        struct timeval snd_to {2, 0};
+        ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO,
+                     reinterpret_cast<const char*>(&snd_to), sizeof(snd_to));
+
         sockfd_ = fd;
 
         // Optional TLS wrapping
