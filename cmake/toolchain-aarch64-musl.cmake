@@ -18,9 +18,13 @@
 # - Musl target matches the device libc → binaries run directly after scp.
 # - OpenSSL for aarch64 is NOT present → TLS pool connections disabled
 #   (find_package(OpenSSL QUIET) fails silently; same as device-native without openssl-dev).
-# - LTO forced OFF (ARMRX_DISABLE_LTO): matches device-native practice (GCC 15 +
-#   musl LTO crashes; see AGENTS.md) — GCC 16 + gold has a working plugin, so this
-#   must be explicit rather than relying on the auto-skip GCC 11 used to hit.
+# - LTO forced OFF (ARMRX_DISABLE_LTO): the cross GCC 16.1.0 (AUR
+#   aarch64-linux-musl-cross) ships NO liblto_plugin.so for the aarch64 target,
+#   so real LTO (cross-module inlining) is impossible on this toolchain. CMake's
+#   check_ipo_supported() probe uses -fno-fat-lto-objects (requires the plugin)
+#   and fails -> LTO silently disabled. Fat-LTO objects compile/link but the
+#   linker just uses the embedded non-LTO code (no optimization). See 2026-08-07
+#   Lever-4 attempt: cross-LTO blocked by missing plugin; not adopted.
 # - GCC 16.1.0 (vs device GCC 15.2.0) fixed the GCC 11.2.1 seed-dependent JIT
 #   codegen hang: test_jit_equivalence + test_jit_scheduler_stress now pass on
 #   device with cross binaries (verified 2026-08-01).
@@ -54,7 +58,7 @@ set(CMAKE_CXX_ARCHIVE_APPEND "/usr/bin/ar q  <TARGET> <LINK_FLAGS> <OBJECTS>")
 set(CMAKE_CXX_ARCHIVE_FINISH "/usr/bin/ranlib <TARGET>")
 
 set(ARMRX_ENABLE_NATIVE OFF CACHE BOOL "Tune for the compiler host CPU" FORCE)
-set(ARMRX_DISABLE_LTO ON CACHE BOOL "Disable LTO (GCC 15/16 + musl crash workaround)" FORCE)
+set(ARMRX_DISABLE_LTO ON CACHE BOOL "Disable LTO/IPO even if supported (cross GCC 16 has no aarch64 liblto_plugin -> real LTO impossible)" FORCE)
 
 # CRITICAL: disable host pkg-config. CMakeLists.txt runs
 # pkg_check_modules(HWLOC hwloc) which finds the HOST's hwloc.pc and adds
