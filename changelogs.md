@@ -5,6 +5,28 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 (night) — PartialDataset: contiguous-publish (closes audit C1, no behavior change yet)
+- **Why:** the fill published `item_count_ = max(completed)` = the END bound of a
+  worker's chunk. Cross-chunk, a faster chunk finishing later items could advertise
+  `[0, end)` ready while an earlier lagging chunk's bytes were still uninitialized →
+  any hashing worker reading those items (the hybrid hit/miss path) could get wrong
+  hashes. This was masked ONLY because `wait_for_fill()` blocked all workers until
+  `fill_complete_` (audit C1). To ever let workers hash during fill (killing the
+  172s dead-start on `--dataset-mb=N`), the publish must be contiguous-safe first.
+- **Fix:** `item_count_` now advances only over the *contiguous filled prefix*.
+  New `contiguous_done_` cursor + per-chunk `chunk_done_` flags (set release after
+  `initialize_dataset`); whichever worker closes the gap advances `item_count_`
+  (release) over consecutive finished chunks. `start_fill` gained a test-only
+  `chunk_delays_ms` hook (default empty = production no-op) so a test can force a
+  lagging chunk. `wait_for_fill()` UNCHANGED — current miner behavior identical
+  (workers still block); this is a pure safety upgrade enabling Part 2.
+- **Verification (host x86_64, 2026-08-07):** new KAT
+  `test_contiguous_publish_no_uninitialized_read` — 4 chunks, middle chunk lagged
+  500ms; reader samples `item_count_` and checks every published item ==
+  `generate_dataset_item`. Result: `item_count_` held at 1 chunk (64M) during the
+  lag (never exposed the unfinished middle chunk), no uninitialized reads. Full
+  `ctest` 9/9 PASS. On-device gating deferred to Part 2 (the behavior change).
+
 ## 2026-08-05 — FIX hybrid partial-dataset JIT consumed the wrong item
 - **Bug:** the AArch64 hybrid hit path compared and indexed the raw dataset
   address item before applying the light-mode dataset offset, while the miss

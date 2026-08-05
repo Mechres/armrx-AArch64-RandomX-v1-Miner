@@ -60,14 +60,23 @@ public:
         return {data_, count * kRandomXDatasetItemBytes};
     }
 
+    /// Number of fill chunks from the most recent start_fill (for the contiguous
+    /// publish cursor). 0 if no fill has started.
+    [[nodiscard]] std::size_t chunk_count() const {
+        return chunk_done_ ? chunk_done_->size() : 0;
+    }
+
     /// Start background fill of the buffer using initialize_dataset.
     /// Fills from start_item to item_count, incrementally raising item_count_ as each
     /// chunk completes. Threads are explicitly pinned mirroring worker_loop()'s
     /// AffinityMode::All pattern, skipping any CPU IDs in `exclude_cores`
     /// (e.g. cores already occupied by mining workers).
+    /// `chunk_delays_ms` (optional, test-only) injects a per-chunk startup delay so a
+    /// test can force a lagging chunk and verify contiguous-publish safety.
     void start_fill(std::shared_ptr<const Argon2dCache> cache_holder,
                     const std::vector<unsigned>& core_order,
-                    const std::vector<unsigned>& exclude_cores = {});
+                    const std::vector<unsigned>& exclude_cores = {},
+                    const std::vector<unsigned>& chunk_delays_ms = {});
 
     /// Returns true if the fill has completed (all items fully computed).
     [[nodiscard]] bool fill_complete() const {
@@ -85,6 +94,19 @@ private:
     std::size_t allocated_items_ = 0;
     std::atomic<std::size_t> item_count_{0};
     std::atomic<bool> fill_complete_{false};
+    // Contiguous-publish cursor: the highest item such that EVERY item in
+    // [0, contiguous_done_) is fully initialized. item_count_ is advanced only
+    // up to this bound, so any item < item_count_ is safe to read (no
+    // out-of-order publish of a lagging chunk's bytes). Set by whichever fill
+    // worker closes the contiguous gap after its chunk finishes.
+    std::atomic<std::uint64_t> contiguous_done_{0};
+    // Items per fill chunk (set in start_fill; last chunk may be smaller). Used
+    // by the contiguous-publish cursor to map a chunk index to its item span.
+    std::uint64_t items_per_chunk_{0};
+    // One done-flag per fill chunk (indexed by chunk id assigned in start_fill).
+    // A chunk sets its flag (release) after initialize_dataset completes, then
+    // attempts to advance contiguous_done_ over now-contiguous finished chunks.
+    std::unique_ptr<std::vector<std::atomic<bool>>> chunk_done_;
     mutable std::vector<std::thread> fill_threads_;
     // Guards the fill-thread join in wait_for_fill() against concurrent callers.
     mutable std::mutex fill_join_mutex_;
@@ -94,7 +116,9 @@ private:
     void fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
                      std::uint64_t start_item,
                      std::uint64_t end_item,
-                     unsigned cpu_id);
+                     unsigned cpu_id,
+                     std::size_t chunk_id,
+                     unsigned delay_ms);
 };
 
 } // namespace armrx

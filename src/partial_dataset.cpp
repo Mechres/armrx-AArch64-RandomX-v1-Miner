@@ -99,7 +99,8 @@ PartialDataset::~PartialDataset() {
 
 void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder,
                                  const std::vector<unsigned>& core_order,
-                                 const std::vector<unsigned>& exclude_cores)
+                                 const std::vector<unsigned>& exclude_cores,
+                                 const std::vector<unsigned>& chunk_delays_ms)
 {
     if (allocated_items_ == 0) return;
 
@@ -111,6 +112,7 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
     // at allocated_items_) and fill_complete_ would stay true — letting a
     // wait_for_fill() caller skip the re-wait entirely.
     item_count_.store(0, std::memory_order_relaxed);
+    contiguous_done_.store(0, std::memory_order_relaxed);
     fill_complete_.store(false, std::memory_order_relaxed);
 
     // Serialize with any still-running prior fill: join and drop its threads
@@ -149,6 +151,12 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
 
     const auto items_per_worker = (total_items + num_workers - 1) / num_workers;
 
+    // Contiguous-publish bookkeeping: one done-flag per fill chunk (chunk_id
+    // indexes this vector). items_per_chunk_ maps a chunk index to its item span.
+    chunk_done_ = std::make_unique<std::vector<std::atomic<bool>>>(num_workers);
+    for (auto& f : *chunk_done_) f.store(false, std::memory_order_relaxed);
+    items_per_chunk_ = items_per_worker;
+
     fill_threads_.reserve(num_workers);
     for (unsigned i = 0; i < num_workers; ++i) {
         const auto start = static_cast<std::uint64_t>(i) * items_per_worker;
@@ -156,8 +164,9 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
         if (start >= end) break;
 
         const unsigned cpu_id = avail_cores[i % avail_cores.size()];
+        const unsigned delay_ms = (i < chunk_delays_ms.size()) ? chunk_delays_ms[i] : 0;
         fill_threads_.emplace_back(&PartialDataset::fill_worker, this,
-                                   cache_holder_, start, end, cpu_id);
+                                   cache_holder_, start, end, cpu_id, i, delay_ms);
     }
 
     ARMRX_LOG_INFO << "PartialDataset: started fill with " << num_workers
@@ -167,11 +176,17 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
 void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
                                   std::uint64_t start_item,
                                   std::uint64_t end_item,
-                                  unsigned cpu_id)
+                                  unsigned cpu_id,
+                                  std::size_t chunk_id,
+                                  unsigned delay_ms)
 {
     // Keep the cache alive for the duration of this fill worker.
     // The shared_ptr is passed by value into the thread, so each worker
     // holds its own reference independently.
+
+    // Test-only artificial lag so a test can force a lagging chunk (verifies
+    // contiguous-publish safety). Production passes delay_ms == 0.
+    if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 
     // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern)
     cpu_set_t cpus{};
@@ -190,24 +205,50 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     // The cache is valid because cache_holder keeps it alive.
     initialize_dataset(span, *cache_holder, start_item, total_items);
 
-    // Atomically advance the published bound. Each worker reports its
-    // progress as the max item it has completed. The item_count_ is
-    // monotonic — once an item is published, it's fully initialized.
-    const auto completed = start_item + total_items;
-    auto prev = item_count_.load(std::memory_order_relaxed);
-    while (prev < completed &&
-           !item_count_.compare_exchange_weak(prev, completed,
-                                               std::memory_order_release,
-                                               std::memory_order_relaxed)) {
-        // CAS failed because another thread published a higher value; that's fine
+    // Mark THIS chunk done (release: its bytes are now fully initialized and
+    // visible to any reader that observes item_count_ >= end_item via acquire).
+    (*chunk_done_)[chunk_id].store(true, std::memory_order_release);
+
+    // Contiguous-publish: advance the published bound only over the prefix that
+    // is NOW fully initialized. While the chunk immediately after the current
+    // contiguous cursor is done, swallow it and keep going. This guarantees
+    // item_count_ always names a fully-filled [0, item_count_) prefix, so a
+    // hashing worker can safely read any item < item_count_ (no out-of-order
+    // publish of a lagging chunk's uninitialized bytes -- closes audit C1).
+    std::uint64_t cursor = contiguous_done_.load(std::memory_order_acquire);
+    for (;;) {
+        // Advance cursor over consecutive finished chunks. The chunk that
+        // owns item `cursor` is chunk (cursor / items_per_chunk_); it is done
+        // when its flag is set, and then the whole chunk's item span is safe.
+        while (cursor < allocated_items_ && chunk_done_) {
+            const std::size_t owning = static_cast<std::size_t>(cursor / items_per_chunk_);
+            if (owning >= chunk_done_->size()) break;
+            if (!(*chunk_done_)[owning].load(std::memory_order_acquire)) break;
+            const std::uint64_t chunk_span = (owning + 1 < chunk_done_->size())
+                ? items_per_chunk_
+                : (allocated_items_ - owning * items_per_chunk_);
+            cursor += chunk_span;
+        }
+        // Publish the new contiguous bound (release pairs with the JIT's acquire).
+        const std::uint64_t prev = contiguous_done_.exchange(cursor, std::memory_order_release);
+        // Also raise the legacy item_count_ to the contiguous bound so existing
+        // readers (span(), wait_for_fill polling) see the safe prefix.
+        std::uint64_t item_prev = item_count_.load(std::memory_order_relaxed);
+        while (item_prev < cursor &&
+               !item_count_.compare_exchange_weak(item_prev, cursor,
+                                                   std::memory_order_release,
+                                                   std::memory_order_relaxed)) {
+            // another worker published further; loop
+        }
+        // If we made no progress, another worker will handle further advances
+        // when its chunk completes. Terminate.
+        if (cursor == prev) break;
+        // Re-load and try again (a chunk after `prev` may now be done).
+        cursor = contiguous_done_.load(std::memory_order_acquire);
     }
 
-    // Mark the whole fill complete once the last chunk publishes the final
-    // item. This lets fill_complete()/wait_for_fill() observe completion
-    // reliably even if no caller invokes wait_for_fill() (the mining workers
-    // block on wait_for_fill() at startup, so it must be set by the fill
-    // itself, not only by wait_for_fill() polling item_count_).
-    if (completed >= allocated_items_) {
+    // Mark the whole fill complete once the contiguous prefix reaches the end.
+    if (contiguous_done_.load(std::memory_order_acquire) >= allocated_items_) {
         fill_complete_.store(true, std::memory_order_release);
     }
 
