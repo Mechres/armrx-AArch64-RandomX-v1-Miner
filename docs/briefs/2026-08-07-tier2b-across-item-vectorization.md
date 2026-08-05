@@ -1,8 +1,33 @@
 # 2026-08-07 — Tier 2(b): widen across-item vectorization of dataset fill
 
-**Status:** OPEN — brief + verbatim agent prompt ready. Hermes authors; user runs the
-agent; Hermes gates adopt/revert via on-device `time_partial_fill` A/B + `test_partial_dataset`
-byte-identical. One test/session (TESTING.md §8).
+**Status:** CLOSED — REVERTED (honest negative, 2026-08-07). Attempted by external agent,
+gated by the brief's kill-criterion. Result below. No code retained.
+
+## Result (agent, on-device 2026-08-07)
+- Implemented 4-wide fake-SIMD fill experimentally in src/dataset.cpp (two uint64x2_t[8]
+  arrays, amortizing the per-access serial cache-line fetch/XOR across 4 items).
+- Host CTest: 9/9 passed (byte-identical to generate_dataset_item).
+- Device fill: **165.12 s** vs 163.3 s NEON baseline — ABOVE the 164 s adoption
+  threshold. REVERTED.
+- Device test_partial_dataset + test_mining: passed.
+- The post-fill hashing phase of time_partial_fill segfaulted (full-memory VM setup in
+  that harness — separate from the fill itself, which completed successfully).
+
+## Verdict: DEAD as a lever
+The serial scalar multiply / high-multiply work (IMUL_R / IMULH_R / ISMULH_R / IMUL_RCP,
+which execute_superscalar_neon computes scalar-per-lane because AArch64 NEON has no
+u64×u64→u128 op) remains the dominant floor. Widening to 4 lanes amortizes only the
+serial cache-line fetch/XOR, which is NOT the bottleneck — the added lane-management
+overhead pushed fill time UP (165.12 > 163.3). This confirms beyond-parity_v2.md's
+warning that the 2-wide path already saturates the A53 dual-issue pipeline for this
+workload.
+
+**Conclusion:** the across-item vectorization lever is exhausted. The dataset fill speed
+is bounded by scalar high-multiplies on in-order A53; only a true NEON high-mul (not
+available) or the hardware clock/OPP unlock (~+44% at 1.1 GHz vs fixed 765 MHz) would
+move it. Tier 2(b) is closed — do not re-attempt.
+
+## Original brief below (preserved for record)
 
 ## The gap this closes
 - The hybrid partial dataset is now **correct** (rotation + hybrid-consumption fixes shipped
