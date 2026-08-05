@@ -138,13 +138,17 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 
 *   **isolcpus-aware worker pinning (audit T2-3):** ✅ Workers pin exclusively to isolated cores when `isolcpus=` is active — on all `detect_core_order()` paths including the cpufreq-less fallback. Default worker count caps to isolated-core count. On-device verified: 7 workers on cores 1-7, main/housekeeping thread on core 0, no contention. Recovers the ~14% isolcpus win for pool mining. Since 2026-08-01.
 *   **Cross-hash boundary pipelining (Track D2):** ✅ Overlaps AES finalization of hash N with AES fill of hash N+1 via interleaved read/write function. Verified correct (mining KATs) and live in the mining path; on-device A/B (2026-08-01): interleaved −2.77% AES time (IPC 1.735→1.787), ~0.34% E2E. See `docs/experiments/t11-d2-microbenchmark.md`.
-*   **Hybrid partial dataset (Track B):** ⚠️ Landed but **not adopted for production** — `--dataset-mb=N`
+*   **Hybrid partial dataset (Track B):** ✅ **Correct as of 2026-08-07** (was ⚠️). `--dataset-mb=N`
     caches a prefix of the fast-mode dataset for direct JIT loads instead of on-the-fly derivation.
-    JIT `_end_hybrid` entry point with incremental background fill. Verified differential-correct
-    (100% byte-identical) across 20 seeds. Gate B (memory contention) measured **−31% at 8 workers**
-    on this device (baseline 24.68 → hybrid 17.04 H/s) — the extra DRAM traffic saturates the
-    two-cluster interconnect. Code stays in the tree gated behind `--dataset-mb=N` (default 0, zero
-    cost when off) as reference for future targets with better memory bandwidth.
+    JIT `_end_hybrid` entry point with incremental background fill. The earlier "100% byte-identical
+    across 20 seeds" claim only covered the *buffer fill* (`test_partial_dataset`); the JIT *read* path
+    had a pre-existing bug (hit path indexed the partial buffer with the pre-offset item number while the
+    derivation path offset first → wrong end-to-end hashes for any `--dataset-mb>0` job). Fixed
+    2026-08-07: offset now applied before hit/miss selection + complete hybrid I-cache flush. Engine
+    end-to-end hash now matches the light reference (same nonce) on-device. **Still not adopted for
+    production for performance**: Gate B (memory contention) measured **−31% at 8 workers** on this
+    device (baseline 24.68 → hybrid 17.04 H/s) — the extra DRAM traffic saturates the two-cluster
+    interconnect. Code stays gated behind `--dataset-mb=N` (default 0, zero cost when off).
 
 ---
 

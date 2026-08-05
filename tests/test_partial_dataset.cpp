@@ -136,6 +136,71 @@ void test_incremental_fill_consistent() {
               << kTotalItems << " items all verified OK\n";
 }
 
+// Regression test for the light-mode seed-rotation bug: the partial dataset
+// must be re-fillable with a DIFFERENT seed and thereafter contain that new
+// seed's data. The live bug was that the partial dataset was filled exactly
+// once for the first seed and never rebuilt on rotation, so workers mined on a
+// seed-mismatched (stale) partial dataset -> silent wrong shares.
+std::shared_ptr<const armrx::Argon2dCache> get_test_cache_b() {
+    static std::shared_ptr<const armrx::Argon2dCache> cache = std::make_shared<armrx::Argon2dCache>();
+    static bool initialized = false;
+    if (!initialized) {
+        std::vector<std::byte> key;
+        const char* s = "a SECOND, different seed key for refill test";
+        for (const char* p = s; *p; ++p) key.push_back(static_cast<std::byte>(*p));
+        const_cast<armrx::Argon2dCache*>(cache.get())->initialize(key);
+        initialized = true;
+    }
+    return cache;
+}
+
+void test_refill_with_new_seed() {
+    const auto cache_a = get_test_cache();
+    const auto cache_b = get_test_cache_b();
+
+    // Different seeds must produce different dataset items.
+    {
+        const auto a0 = armrx::generate_dataset_item(*cache_a, 0ULL);
+        const auto b0 = armrx::generate_dataset_item(*cache_b, 0ULL);
+        assert(std::memcmp(a0.data(), b0.data(), armrx::kRandomXDatasetItemBytes) != 0);
+    }
+
+    constexpr std::size_t kTotalItems = 200;
+    armrx::PartialDataset pd(kTotalItems);
+    std::vector<unsigned> core_order = {0, 1, 2, 3};
+
+    // First fill with seed A.
+    pd.start_fill(cache_a, core_order);
+    pd.wait_for_fill();
+    assert(pd.item_count() == kTotalItems);
+    assert(pd.fill_complete());
+
+    // Re-fill with seed B (the operation set_job() now performs live on rotation).
+    pd.start_fill(cache_b, core_order);
+    pd.wait_for_fill();
+    assert(pd.item_count() == kTotalItems);
+    assert(pd.fill_complete());
+
+    // Every item must now match seed B, NOT stale seed A.
+    for (std::size_t i = 0; i < kTotalItems; ++i) {
+        const auto expected = armrx::generate_dataset_item(*cache_b, static_cast<std::uint64_t>(i));
+        const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
+        if (std::memcmp(expected.data(), actual, armrx::kRandomXDatasetItemBytes) != 0) {
+            std::fprintf(stderr, "MISMATCH at item %zu after refill with new seed\n", i);
+            assert(false);
+        }
+        // Explicitly confirm it is NOT the old seed's value.
+        const auto stale = armrx::generate_dataset_item(*cache_a, static_cast<std::uint64_t>(i));
+        if (std::memcmp(stale.data(), actual, armrx::kRandomXDatasetItemBytes) == 0) {
+            std::fprintf(stderr, "STALE seed A data at item %zu after refill with seed B\n", i);
+            assert(false);
+        }
+    }
+
+    std::cout << "[test_partial_dataset] test_refill_with_new_seed: "
+              << kTotalItems << " items re-filled with new seed, verified OK\n";
+}
+
 } // anonymous namespace
 
 int main() {
@@ -143,6 +208,7 @@ int main() {
     test_large_partial_dataset();
     test_partial_dataset_disabled();
     test_incremental_fill_consistent();
+    test_refill_with_new_seed();
 
     std::cout << "ALL PARTIAL DATASET TESTS PASSED SUCCESSFULLY!\n";
     return 0;

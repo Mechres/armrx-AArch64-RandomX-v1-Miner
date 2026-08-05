@@ -346,6 +346,16 @@ if(ARMRX_BUILD_TESTS)
     # hashing. Run on-device: ./time_partial_fill 512
     add_executable(time_partial_fill tools/time_partial_fill.cpp)
     target_link_libraries(time_partial_fill PRIVATE armrx_core)
+
+    # Diagnostic (not a shipped test): verifies the light-mode seed-rotation
+    # partial-dataset rebuild end-to-end, in SEPARATE PROCESSES for the engine
+    # vs reference VM so no JIT program-cache is shared. Run on-device:
+    #   ./verify_seed_rotation engine <nonce> <seedB_hex> [partial_items]
+    #   ./verify_seed_rotation ref    <nonce> <seedB_hex>
+    # Compare the HASH= lines; they must match (proving the engine rotated).
+    add_executable(verify_seed_rotation tools/verify_seed_rotation.cpp)
+    target_link_libraries(verify_seed_rotation PRIVATE armrx_core)
+    target_compile_options(verify_seed_rotation PRIVATE -UNDEBUG)
     endif()
 
     # IMUL_R operand-magnitude sampler (T3-3 gate check) — interpreter-only, host-runnable

@@ -52,6 +52,7 @@ extern "C" {
 	void randomx_program_aarch64_hybrid_cacheline_align_mask();
 	void randomx_program_aarch64_vm_instructions_end_hybrid_tweak();
 	void randomx_program_aarch64_hybrid_dataset_offset();
+	void randomx_program_aarch64_hybrid_end();
 	void randomx_program_aarch64_vm_instructions_end_light_tweak();
 	void randomx_program_aarch64_light_cacheline_align_mask();
 	void randomx_program_aarch64_light_dataset_offset();

@@ -200,7 +200,14 @@ private:
     unsigned int big_core_count_ = 1;
 
     PartialDataset* partial_dataset_ = nullptr;
-    std::atomic_flag partial_dataset_fill_started_ = ATOMIC_FLAG_INIT;
+    // Generation counter for the partial (light-mode) dataset fill. Bumped
+    // whenever the partial dataset must be re-filled — either the one-shot
+    // first fill, or a live seed rotation while running. Workers compare
+    // their local copy against this and re-wait on wait_for_fill() before
+    // hashing again, so they never read a seed-mismatched (stale) partial
+    // dataset after a job rotation. Monotonic-counter idiom (same as
+    // dataset_init_generation_) avoids any reset/race window.
+    std::atomic<std::uint64_t> partial_dataset_fill_generation_{0};
 
     // Guards PartialDataset::wait_for_fill()'s fill-thread join so that
     // multiple mining workers (each calling wait_for_fill at startup) do not

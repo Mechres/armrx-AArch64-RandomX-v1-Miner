@@ -53,6 +53,7 @@
 	.global DECL(randomx_program_aarch64_hybrid_cacheline_align_mask)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak)
 	.global DECL(randomx_program_aarch64_hybrid_dataset_offset)
+	.global DECL(randomx_program_aarch64_hybrid_end)
 	.global DECL(randomx_program_aarch64_vm_instructions_end_light_tweak)
 	.global DECL(randomx_program_aarch64_light_cacheline_align_mask)
 	.global DECL(randomx_program_aarch64_light_dataset_offset)
@@ -626,6 +627,13 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	# x2 -> raw item number (before dataset offset)
 	lsr	x2, x2, 6
 
+	# Apply the same dataset offset used by the light derivation path before
+	# either branch. The partial buffer is indexed by the item the reference
+	# path derives, not by the pre-offset address-register value.
+DECL(randomx_program_aarch64_hybrid_dataset_offset):
+	add	x2, x2, 0
+	add	x2, x2, 0
+
 	# Bound check using saved MemoryRegisters* at [sp, 152]
 	ldr	x16, [sp, 152]
 	ldr	w16, [x16, 24]
@@ -648,10 +656,7 @@ DECL(randomx_program_aarch64_vm_instructions_end_hybrid_tweak):
 	stp	x17, x0, [sp, 48]
 	b	2f
 
-1:	# ── MISS path: apply dataset offset and derive ──
-DECL(randomx_program_aarch64_hybrid_dataset_offset):
-	add	x2, x2, 0
-	add	x2, x2, 0
+1:	# ── MISS path: derive the already offset-adjusted item ──
 	mov	x0, x1
 	mov	x1, sp
 	bl	rx_calc_dataset_item
@@ -664,6 +669,8 @@ DECL(randomx_program_aarch64_hybrid_dataset_offset):
 	ldp	x2, x30, [sp, 80]
 	add	sp, sp, 112
 	b	rx_program_xor_with_dataset_line
+
+	DECL(randomx_program_aarch64_hybrid_end):
 
 DECL(randomx_program_aarch64_vm_instructions_end_v1):
 	lsr	x10, x9, 32

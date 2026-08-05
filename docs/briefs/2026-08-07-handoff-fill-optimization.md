@@ -15,26 +15,60 @@
   parallel vector ISUB/IXOR/IADD). `execute_superscalar_neon` in `dataset.cpp`
   restored. `time_partial_fill 512` back to 163.3 s.
 
-## OPEN: light-mode seed rotation does NOT rebuild the partial dataset (BUG)
+## ~~OPEN~~ SHIPPED (2026-08-07): light-mode seed rotation now rebuilds the partial dataset (BUG FIXED)
 **Severity:** correctness (produces wrong hashes / invalid shares after a pool job
 rotation). Latent — does NOT affect `--pool-test` with a single stable job.
 **Location:** `src/mining_engine.cpp` `MiningEngine::set_job()` (lines 219–245).
-**Root cause:** the partial dataset is filled exactly once, gated by the one-shot
-`partial_dataset_fill_started_` `atomic_flag` (line 242). The fill uses
+**Root cause:** the partial dataset was filled exactly once, gated by the one-shot
+`partial_dataset_fill_started_` `atomic_flag` (line 242). The fill used
 `shared_cache_` built for the *first* job's seed. On a later seed rotation
-(pool `New job`), `shared_cache_` is reinitialized (line 226) but `start_fill` is
-NOT re-triggered (flag already set). Result: partial dataset keeps the OLD seed's
-contents while the cache has the NEW seed → workers mine on a seed-mismatched
+(pool `New job`), `shared_cache_` was reinitialized (line 226) but `start_fill` was
+NOT re-triggered (flag already set). Result: partial dataset kept the OLD seed's
+contents while the cache had the NEW seed → workers mined on a seed-mismatched
 partial dataset → wrong hashes.
+**FIXED:** one-shot `atomic_flag` → monotonic `partial_dataset_fill_generation_`
+counter; `set_job()` re-runs `start_fill()` with the new cache and bumps the
+generation on any seed-key change; each mining worker re-waits on
+`wait_for_fill()` before hashing again. `PartialDataset::start_fill()` made
+re-fillable (resets progress + joins any prior fill threads). New regression test
+`test_refill_with_new_seed`. Verified host-side: `test_partial_dataset` (incl.
+refill), `armrx_tests` (JIT 16/16), `test_mining`, `test_aes_hash`, `test_config`
+all PASS. On-device rotation behavior to be confirmed under TESTING.md §8 discipline
+on next device session (one test/session).
 **Fast mode is fine** — its reinit path (`if (mode_ == RandomXMode::fast)`, line 247)
 rebuilds via the persistent workers handshake on every generation bump.
-**Fix sketch (NOT implemented):** on seed-key change in light mode, either (a) reset
-`partial_dataset_fill_started_` and re-run `start_fill` (but then workers must
-`wait_for_fill()` again — acceptable on rare job rotation, not per-hash), or (b)
-make the partial dataset hold BOTH seed datasets / keyed by seed and select at hash
-time. (a) is simplest and matches the dead-start model; (b) is more complex.
-**Verify before fixing:** confirm with a multi-job pool run (or a unit test that
-rotates the seed and checks `test_mining`-style hash KAT against the new seed).
+**Fix sketch (now SUPERSEDED — implemented as option (a)):** on seed-key change in
+light mode, reset `partial_dataset_fill_started_` and re-run `start_fill` with
+workers re-`wait_for_fill()`-ing — acceptable on rare job rotation, not per-hash.
+Option (b) (hold BOTH seed datasets keyed by seed, select at hash time) was the
+more complex alternative and is NOT needed.
+**Verify before fixing:** CONFIRMED on-device (aarch64, 2026-08-07): a new
+`test_light_mode_seed_rotation_rebuilds_partial_dataset` rotation test (in
+`tests/test_mining.cpp`) and a standalone `tools/verify_seed_rotation.cpp`
+driver both show the partial-dataset buffer is rebuilt with the NEW seed's data
+after rotation (256 items byte-verified vs `generate_dataset_item(seedB)`; not
+equal to stale seed-A). The re-fill trigger + worker re-wait handshake works on
+the AArch64 NEON path (log: "seed rotation — restarted background fill, workers
+will re-wait").
+**IMPORTANT SEPARATE FINDING (not this fix):** the RandomX *hybrid
+partial-dataset consumption path* (the JIT reading cached prefix items) produces
+WRONG end-to-end hashes on-device even for a SINGLE non-rotated job with
+`--dataset-mb>0` (verified: items=65536 hashes don't match a light-mode
+reference for the same nonce; items=0 matches correctly). This is pre-existing
+and independent of the rotation fix (the single-job fill path is observationally
+identical before/after my change) — and is the underlying reason README already
+flags the partial dataset "⚠️ not adopted for production". The rotation test
+therefore asserts the *buffer rebuild* directly (via `generate_dataset_item`),
+not the engine's end-to-end hash, to avoid conflating the two.
+**RESOLVED (2026-08-07):** the hybrid-consumption bug was fixed in a separate
+change (see root `changelogs.md` top entry — AArch64 `_end_hybrid` applied the
+dataset offset *after* the hit/miss selection, so the hit path indexed the
+wrong, pre-offset item; fix moves the offset before selection + complete I-cache
+flush). After the fix, with `--dataset-mb>0` the engine's end-to-end hash matches
+the light reference for both single-job and rotate modes on-device, and the new
+`test_light_mode_partial_dataset_matches_reference` regression test passes. The
+partial dataset is now *correct* (README status updated) but still perf-gated
+(−31% at 8 workers on this device — memory-contention, not a bug).
 **Note:** `test_mining` single-job KATs PASS — they don't exercise rotation.
 
 ## Observation (NOT a bug): `htop` shows "8 → 4 → 7" armrx threads at startup

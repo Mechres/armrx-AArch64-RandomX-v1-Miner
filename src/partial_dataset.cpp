@@ -103,6 +103,29 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
 {
     if (allocated_items_ == 0) return;
 
+    // Re-fillable: a prior fill (e.g. for an earlier seed) may have already
+    // advanced item_count_ and set fill_complete_. Reset both so this new fill
+    // (with a possibly different cache/seed) starts from zero and is observed
+    // as incomplete until the last chunk publishes the final item. Without
+    // this, a second start_fill() would publish nothing (item_count_ already
+    // at allocated_items_) and fill_complete_ would stay true — letting a
+    // wait_for_fill() caller skip the re-wait entirely.
+    item_count_.store(0, std::memory_order_relaxed);
+    fill_complete_.store(false, std::memory_order_relaxed);
+
+    // Serialize with any still-running prior fill: join and drop its threads
+    // (they would otherwise keep writing this same buffer concurrently with
+    // the new fill, corrupting it). This is what makes start_fill() safe to
+    // call repeatedly across seed rotations. The mutex guards against a
+    // concurrent wait_for_fill() also joining these threads.
+    {
+        std::lock_guard<std::mutex> lock(fill_join_mutex_);
+        for (auto& t : fill_threads_) {
+            if (t.joinable()) t.join();
+        }
+        fill_threads_.clear();
+    }
+
     // Keep the cache alive while fill threads are running
     cache_holder_ = cache_holder;
 
@@ -210,9 +233,16 @@ void PartialDataset::wait_for_fill() {
 
     // Join all threads. Guarded so concurrent callers (one per mining worker)
     // don't race on join() of the same fill threads (undefined behavior).
-    std::lock_guard<std::mutex> lock(fill_join_mutex_);
-    for (auto& t : fill_threads_) {
-        if (t.joinable()) t.join();
+    {
+        std::lock_guard<std::mutex> lock(fill_join_mutex_);
+        for (auto& t : fill_threads_) {
+            if (t.joinable()) t.join();
+        }
+        // Drop the (now-joined) handles so a subsequent start_fill() doesn't
+        // re-emplace onto a vector of stale, unjoinable threads and grow it
+        // unboundedly across many seed rotations. The next start_fill() also
+        // clears this under the same mutex; this clears the trailing ones.
+        fill_threads_.clear();
     }
 }
 

@@ -1071,6 +1071,9 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 		const uint32_t imm_hi = datasetOffset >> 12;
 		emit32(ARMV8A::ADD_IMM_LO | 2 | (2 << 5) | (imm_lo << 10), code, codePos);
 		emit32(ARMV8A::ADD_IMM_HI | 2 | (2 << 5) | (imm_hi << 10), code, codePos);
+		// The offset patch is before the hit branch, so flush through the
+		// complete hybrid template rather than stopping at that early label.
+		codePos = ((uint8_t*)randomx_program_aarch64_hybrid_end) - ((uint8_t*)randomx_program_aarch64);
 	} else {
 		// and w2, w2, CacheLineAlignMask
 		codePos = (((uint8_t*)randomx_program_aarch64_light_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));

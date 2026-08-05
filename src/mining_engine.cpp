@@ -226,22 +226,42 @@ void MiningEngine::set_job(const Job& job) {
         new_cache->initialize(job.seed_key);
         shared_cache_ = new_cache;
 
-        // Start the background fill of the partial dataset if configured.
-        // Only starts once (gated by partial_dataset_fill_started_). Workers
-        // block on wait_for_fill() in worker_loop until it completes, so the
-        // dataset is fully populated before any hash runs -- no on-the-fly
-        // derive during a slow ramp, no wrong-hash risk from reading an
-        // uninitialized chunk. fill_complete_ is now set by the fill worker
-        // itself (partial_dataset.cpp), so wait_for_fill() returns reliably.
+        // Start / refresh the background fill of the partial dataset if
+        // configured. Workers block on wait_for_fill() in worker_loop until it
+        // completes, so the dataset is fully populated before any hash runs --
+        // no on-the-fly derive during a slow ramp, no wrong-hash risk from
+        // reading an uninitialized chunk. fill_complete_ is now set by the fill
+        // worker itself (partial_dataset.cpp), so wait_for_fill() returns
+        // reliably.
+        //
+        // The fill is (re)started on two events:
+        //   (1) the very first time we get a seed (one-shot, during dead-start
+        //       or before start()), and
+        //   (2) a live seed-key ROTATION while running in light mode.
+        // Case (2) is the bug fix: the partial dataset was filled exactly once
+        // for the first seed and never rebuilt on rotation, so workers mined
+        // on a seed-mismatched (stale) partial dataset -> silent wrong shares.
+        // We now re-run start_fill() with the new cache and bump
+        // partial_dataset_fill_generation_ so each running worker re-waits on
+        // wait_for_fill() before hashing again (see worker_loop).
         //
         // NOTE: because the mining workers are blocked (waiting) for the fill
         // to finish, they consume no CPU during the fill -- so the fill is
         // given ALL cores (exclude_cores = {}) to finish as fast as possible
         // (~164s on 8 A53 cores). Passing the miner cores as exclude would
         // leave only one core for the fill and turn the dead-start into ~20 min.
-        if (partial_dataset_ && !partial_dataset_fill_started_.test_and_set(std::memory_order_relaxed)) {
+        if (partial_dataset_) {
+            const bool first_fill = (partial_dataset_fill_generation_.load(std::memory_order_relaxed) == 0);
             partial_dataset_->start_fill(shared_cache_, core_order_, /*exclude_cores=*/{});
-            ARMRX_LOG_INFO << "PartialDataset: started background fill (workers will wait_for_fill)";
+            // Bump AFTER start_fill() so a worker that observes the new
+            // generation is guaranteed to see the freshly-reset (incomplete)
+            // fill and block in wait_for_fill().
+            partial_dataset_fill_generation_.fetch_add(1, std::memory_order_release);
+            if (first_fill) {
+                ARMRX_LOG_INFO << "PartialDataset: started background fill (workers will wait_for_fill)";
+            } else {
+                ARMRX_LOG_INFO << "PartialDataset: seed rotation — restarted background fill, workers will re-wait";
+            }
         }
 
         if (mode_ == RandomXMode::fast) {
@@ -434,6 +454,11 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     auto last_flush_time = std::chrono::steady_clock::now();
     std::uint64_t local_gen = 0;
     std::uint64_t local_dataset_init_gen = 0;
+    // Mirrors local_dataset_init_gen: tracks the partial-dataset fill
+    // generation so we re-wait (see partial_dataset_fill_generation_) when a
+    // seed rotation restarts the light-mode fill. Initialized to 0 so the
+    // first loop iteration always catches generation 1 and waits.
+    std::uint64_t local_partial_fill_gen = 0;
     // Per-worker nonce: each worker gets thread_id + k * num_threads_
     std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
@@ -442,6 +467,23 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     std::uint64_t current_nonce = 0;
 
     while (running_.load(std::memory_order_relaxed)) {
+        // Live partial-dataset refill (light mode, seed rotation): if set_job()
+        // restarted the background fill for a new seed, block this worker until
+        // the fresh fill completes before hashing again. Without this, a worker
+        // would keep reading the stale (old-seed) partial dataset and emit wrong
+        // hashes / invalid shares. Checked BEFORE the job-gen check below so the
+        // re-wait always precedes any re-setup of the VM with the new seed.
+        if (partial_dataset_) {
+            std::uint64_t current_fill_gen =
+                partial_dataset_fill_generation_.load(std::memory_order_acquire);
+            if (current_fill_gen != local_partial_fill_gen) {
+                local_partial_fill_gen = current_fill_gen;
+                partial_dataset_->wait_for_fill();
+                // Fall through to the job-gen check below: it will pick up the
+                // new seed's cache/dataset and re-arm the VM before hashing.
+            }
+        }
+
         // Live dataset (re)initialization: participate directly instead of
         // letting set_job() spawn temporary threads. Checked first, ahead of
         // the active/idle branch below, so idle workers pick this up within

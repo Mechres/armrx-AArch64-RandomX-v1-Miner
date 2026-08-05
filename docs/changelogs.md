@@ -6,6 +6,56 @@ on-device claims.
 
 ---
 
+## 2026-08-07 — FIX hybrid partial-dataset consumption produced wrong end-to-end hashes (pre-existing, separate from the seed-rotation fix)
+
+**Files:** `src/jit_compiler_a64_static.S`, `src/jit_compiler_a64.cpp`,
+`include/armrx/jit_compiler_a64_static.hpp`, `tests/test_mining.cpp`,
+`tools/verify_seed_rotation.cpp`
+
+- **Bug:** in hybrid light mode (`--dataset-mb=N`), when the RandomX main loop
+  read a cached prefix item, the AArch64 `_end_hybrid` path bound-checked and
+  indexed the partial buffer using the **pre-offset** dataset item number, while
+  the light *derivation* (miss) path applied `randomx_dataset_item_count()`
+  offset first. So the hit path read the wrong (un-offset-shifted) item, and the
+  end-to-end hash diverged from the light reference for **any** `--dataset-mb>0`
+  job (single job and rotation alike). `test_partial_dataset` still passed
+  because it only checks `pd.data()[i] == generate_dataset_item(cache,i)` — the
+  *buffer fill* was always byte-correct; the defect was purely in the JIT read.
+  This is why README already flagged the partial dataset "⚠️ not adopted for
+  production".
+- **Fix:** move the `dataset_offset` application to **before** the hit/miss
+  selection in `randomx_program_aarch64_hybrid_tweak` (the partial buffer is
+  indexed by the same offset-adjusted item the reference derives), and extend the
+  JIT I-cache flush to cover the complete hybrid template (through a new
+  `randomx_program_aarch64_hybrid_end` label) so the patched offset range is
+  actually invalidated, not just the early label.
+- **Regression test:** `test_light_mode_partial_dataset_matches_reference` in
+  `tests/test_mining.cpp` drives the engine through a seed-B job with
+  `--dataset-mb` (partial) set and asserts the engine's end-to-end hash equals a
+  fresh-process light-mode reference for the same nonce — the test that was
+  impossible while the path was broken. (The earlier `…_rebuilds_partial_dataset`
+  test only byte-checks the buffer rebuild; this one checks the hash.)
+- **Harness:** `tools/verify_seed_rotation.cpp` `engine-norotate` now uses seed B
+  (it was seed A) so the single-job comparison is against the correct reference.
+
+**Verification (host x86_64 + on-device aarch64, 2026-08-07):**
+
+- Host: `armrx_tests` (JIT 16/16), `test_mining` (incl. both partial-dataset
+  tests), `test_partial_dataset` — all PASS.
+- **On-device (lenovo, aarch64, cross-built, fresh `.o`):** with `--dataset-mb`
+  (items=65536), the engine hash now equals the reference for single job
+  (`8c7c5d6169128438618971d99e43bdb28456cdba85ffee2509cc0f42a9ef2ef2`) AND for
+  rotate mode, where previously both were wrong (`241b3376…` / `cd5cc806…`).
+  `test_mining` passes including `test_light_mode_partial_dataset_matches_reference`;
+  `armrx_tests` EXIT=0. Independently re-gated by Hermes (not just the agent's
+  report).
+- **Residual:** the new regression test cannot be *negated* on host (x86_64
+  doesn't run the AArch64 hybrid JIT), so its failure-without-fix was reasoned
+  from the pre-fix device hashes rather than re-run on-device. Device time was
+  spent on the positive gate.
+
+---
+
 ## 2026-08-07 — Revert `PartialDataset` serialization fix; 512 MiB fill-stall is the real bug
 
 **Files:** `src/mining_engine.cpp`, `docs/STRATEGY.md` (Known bugs)
@@ -58,7 +108,8 @@ on-device claims.
   `start_fill()` path inside `MiningEngine::set_job()`. Workers only hash once
   `set_job` sets `has_job_`, which now returns only after fill completes — no
   hash reads a partially-filled dataset. One-time startup cost only
-  (`start_fill` gated by `partial_dataset_fill_started_`), not per seed rotation.
+  (`start_fill` gated by the one-shot `partial_dataset_fill_started_`
+  `atomic_flag` at the time), not per seed rotation.
 
 **Verification (on-device, MSM8929, cross-built):**
 
@@ -67,6 +118,70 @@ on-device claims.
 - `test_mining` — ALL PASSED (engine lifecycle produces valid shares via the
   `set_job`+wait path; bad-nonce recovery OK). No deadlock from the new wait.
 - `armrx` cross-builds clean.
+
+---
+
+## 2026-08-07 — FIX light-mode seed rotation now rebuilds the partial dataset (was a silent wrong-share bug)
+
+**Files:** `src/mining_engine.cpp`, `src/partial_dataset.cpp`,
+`include/armrx/mining_engine.hpp`, `tests/test_partial_dataset.cpp`,
+`tests/test_mining.cpp`, `tools/verify_seed_rotation.cpp`
+
+- **Bug (OPEN in the 2026-08-07 handoff brief):** in hybrid light mode the
+  partial dataset was filled exactly **once**, gated by the one-shot
+  `partial_dataset_fill_started_` `atomic_flag`. On a live pool seed-rotation
+  (`set_job` with a new `seed_key`), `shared_cache_` was rebuilt but
+  `start_fill` was never re-triggered (flag already set), so workers kept mining
+  on the OLD seed's partial dataset → silent wrong hashes / invalid shares.
+  Single-job KATs (`test_mining`, `--pool-test`) never exercised rotation, so
+  it stayed latent.
+- **Fix (matches the brief's option (a)):** replace the one-shot flag with a
+  monotonic `partial_dataset_fill_generation_` counter. `set_job()` now
+  re-runs `start_fill()` with the new cache and bumps the generation on **any**
+  seed-key change while running (still one fill before `start()`, since the
+  first job is also a rotation from no-cache). Each mining worker compares its
+  local generation in `worker_loop()` and **re-waits** on `wait_for_fill()`
+  before hashing again, so it can never read a seed-mismatched partial dataset.
+  The re-wait sits *before* the job-gen re-arm, guaranteeing the VM is
+  re-pointed at the new cache only after the fresh fill is complete.
+- **`PartialDataset` made re-fillable:** `start_fill()` now resets
+  `item_count_`/`fill_complete_` and **joins any still-running prior fill**
+  threads before spawning new ones (so a second fill can't race the first on the
+  same buffer, and the thread vector doesn't grow unbounded across rotations);
+  `wait_for_fill()` clears its joined thread handles. This is what makes
+  `start_fill()` safe to call repeatedly.
+- **New regression tests:** `test_refill_with_new_seed` in
+  `tests/test_partial_dataset.cpp` (re-fill with a different seed, byte-verify);
+  `test_light_mode_seed_rotation_rebuilds_partial_dataset` in `tests/test_mining.cpp`
+  (drives `MiningEngine` through a live seed-A→seed-B rotation while workers run,
+  then byte-verifies the partial-dataset buffer holds seed-B's items, not stale
+  seed-A). Plus a standalone `tools/verify_seed_rotation.cpp` driver that runs the
+  engine and a fresh-process light reference in **separate processes** so no JIT
+  program-cache is shared.
+
+**Verification (host x86_64 + on-device aarch64, 2026-08-07):**
+
+- Host: `test_partial_dataset` (incl. `test_refill_with_new_seed`),
+  `test_mining` (incl. the new rotation test), `armrx_tests` (JIT 16/16),
+  `test_aes_hash`, `test_config` all PASS. `test_cli_parser` fails at
+  `test_pool_flags` line 177 — **pre-existing, parser/test inconsistency,
+  unrelated** (confirmed on a clean stash tree).
+- **On-device (lenovo, aarch64, cross-built):** `test_mining` passes including
+  the rotation test — log shows "seed rotation — restarted background fill,
+  workers will re-wait" and the buffer is byte-verified rebuilt with seed-B
+  (256 items, none equal to stale seed-A). The re-fill + worker re-wait
+  handshake works on the real AArch64 NEON path.
+- **Separate pre-existing finding (NOT this fix):** the RandomX *hybrid
+  partial-dataset consumption path* (the JIT reading cached prefix items)
+  produces WRONG end-to-end hashes on-device even for a SINGLE non-rotated job
+  with `--dataset-mb>0` (verified via the verify_seed_rotation driver:
+  items=65536 hashes don't match a same-nonce light reference; items=0 matches
+  correctly). This is independent of the rotation fix (the single-job fill path
+  is observationally identical before/after this change) and is why README
+  already flags the partial dataset "⚠️ not adopted for production". The rotation
+  test asserts the *buffer rebuild* directly (via `generate_dataset_item`), not
+  the engine's end-to-end hash, to avoid conflating the two issues. Fixing the
+  hybrid consumption path is a separate task.
 
 ---
 
