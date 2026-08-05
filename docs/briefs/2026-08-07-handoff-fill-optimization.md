@@ -87,3 +87,42 @@ only thing that matches XMRig's instant start.
   NOEXEC, clears on reboot). One test/session per TESTING.md §8.
 - `--pool-test` now prints instantaneous `INST agg=` (per-5s snapshot delta) AND the
   live `Speed:` (10s rolling window). Both are the honest rate; `Speed:` no longer ramps.
+
+## Agent review synthesis (5-agent sweep, 2026-08-07 — NOT executed, for context)
+User ran Deepseek + Kimi on: would-be-better retro, performance levers, future directions.
+Filtered against THIS session's verified state. What's real vs stale vs not-for-this-project:
+
+**CONFIRMED REAL / ACT:**
+- Light-mode seed-rotation bug (this doc, OPEN) — also flagged by Deepseek audit. Silent wrong
+  shares after a pool job change. Highest-priority correctness fix.
+- TUI/cout coupling (Kimi): 4+ writers race on std::cout; `log::set_tui_mode()`+ring buffer exist
+  but unwired. Architecture smell, root of "TUI garbage" class. Refactor, not a perf win.
+- Dual-hash interleaving (Deepseek-perf #1): the ONLY novel *code* lever not on the closed list.
+  Doesn't change intra-program order → avoids the W3-2 hazard class. Premise to validate first:
+  is the A53 IMUL port throughput- or latency-bound? (1-hr mul-port microbench, decisive).
+- Clock/OPP unlock (+44% at rated 1.1GHz vs fixed 765MHz) + external cooling (prereq for the
+  60°C memory cliff, 4.7× collapse): biggest ceiling, HARDWARE track, separate from code work.
+
+**CHEAP REAL WINS (free A/Bs):**
+- Worker-local buffer reuse (kill per-hash std::vector alloc in worker_loop).
+- Cross-toolchain LTO A/B (CMakeLists already fixed the fortify-headers vs LTO crash; +1.9% when linked).
+- Main-thread/worker-0 deprioritization in pool mode (main/stratum shares core 0; +2-4% at 8w).
+
+**STALE / VERIFY BEFORE BELIEVING (agent assumptions, not confirmed at HEAD):**
+- "README ships retracted AES −16.7% claim" (Deepseek audit #5) — CHECK README vs STRATEGY.md
+  before acting; our doc-discipline may already have fixed it. 5-min doc fix if true.
+- "TESTING.md:31 41% pool-mode idle anomaly" (Deepseek-future #3) — doc claim possibly stale;
+  30-min investigation, no build. If real, job prefetch/nonce batching could be a hidden lever.
+
+**NOT FOR THIS PROJECT (scope: close gap to XMRig on 2 devices, not build a product):**
+- Fleet orchestrator / SaaS / sell-the-JIT-library / share-validation-service / academic
+  conformance positioning. Solution-looking-for-problem. armrx_core IS already a reusable target.
+- AI log-triage, structured fleet regression DB — scale problem we don't have at 2 devices.
+- Dynamic thermal GOVERNOR as shipped runtime feature — LIKELY NET LOSS: reducing workers at 55°C
+  doesn't raise memory bandwidth (the 60°C cliff is throughput collapse, not thermal throttle);
+  it just hashes slower. MEASURE the thermal knee, decide manually; don't auto-throttle hashrate.
+- Re-open JIT reordering / -mtune / cluster pinning — all correctly flagged CLOSED. Agreed.
+
+**Bottom line from the sweep:** real lever remains dual-hash interleaving (code) + clock/thermal
+(hardware). Everything else is measurement hygiene or polish. Process lesson (Deepseek audit):
+never ship a root cause the code contradicts; enforce the perf harness as the only number source.
