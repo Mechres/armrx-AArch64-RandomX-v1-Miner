@@ -1,5 +1,10 @@
 # 2026-08-07 — Hybrid path: hash during fill (kill the 172s dead-stop)
 
+**Status:** PART 1 DONE (committed `9881878`, host 9/9 PASS, C1 closed). REMAINING:
+Part 2 (relax `wait_for_fill` → hash during fill) + Part 3 (fill-worker starvation).
+Delegated to an external agent per the project's Hermes-authored-brief / user-runs-agent /
+Hermes-gates-on-device discipline. Verbatim prompt: `2026-08-07-hybrid-part2-agent-prompt.md`.
+
 **Severity:** correctness-adjacent + UX (the 172s `Speed: 0.00 H/s` dead-stop on
 `--dataset-mb=N`). Root cause of the dead-stop: Tier 1 `wait_for_fill()` blocks ALL
 mining workers until the partial dataset is 100% filled, defeating the hybrid design's
@@ -18,69 +23,70 @@ instead of instant start.
   derive on-the-fly. So per-hash, hit/miss is self-consistent with the *current* prefix.
 - Therefore workers CAN hash during fill safely — IF `item_count_` only ever advertises a
   **fully-filled contiguous prefix** [0, item_count_).
-- TODAY that invariant does NOT hold: `fill_worker` publishes `item_count_ = max(completed)`
-  = the END bound of its chunk (partial_dataset.cpp:196-203). Cross-chunk, a faster chunk B
-  finishing [1M,2M) before chunk A [0,1M) advertises [0,2M) ready while [0,1M) is
-  uninitialized → wrong hashes. This is audit C1. It is masked ONLY because `wait_for_fill`
-  blocks all workers until `fill_complete_`.
+- **This invariant NOW HOLDS** (fixed by Part 1, commit `9881878`): `fill_worker` advances
+  `item_count_` only over the contiguous filled prefix via a `contiguous_done_` cursor +
+  per-chunk `chunk_done_` flags. The old max-end-bound publish (audit C1) is eliminated and
+  verified by `test_contiguous_publish_no_uninitialized_read` (4 chunks, middle chunk
+  lagged 500ms → `item_count_` held at 1 chunk during the lag). So the safety precondition
+  for hashing during fill is satisfied. `wait_for_fill()` still blocks today, so the
+  dead-stop persists until Part 2 relaxes it.
 
-## The fix (two coupled parts — neither alone is safe)
-### Part 1 — Contiguous publish (eliminates C1; no behavior change by itself)
-`item_count_` must advance only over the contiguous filled prefix, never the max-end-bound.
-- Add `std::atomic<std::uint64_t> contiguous_done_{0}` and a `std::vector<std::atomic<bool>>
-  chunk_done_` (one per fill chunk, sized at `start_fill`).
-- In `fill_worker`, after `initialize_dataset` completes its chunk, set
-  `chunk_done_[my_chunk] = true` (release), then a small CAS loop: while
-  `chunk_done_[contiguous_done_]` is true, advance `contiguous_done_` (and publish
-  `item_count_ = contiguous_done_` with release) until the first not-yet-done chunk.
-- This makes `item_count_` ALWAYS = a fully-filled [0, item_count_) prefix → hash-during-fill
-  is safe. `wait_for_fill()` still blocks (unchanged) so existing tests are unaffected.
+## The fix (Part 1 done; Part 2+3 remaining)
+### Part 1 — Contiguous publish (DONE, committed `9881878`)
+`item_count_` now advances only over the contiguous filled prefix, never the max-end-bound
+(C1 closed). `wait_for_fill()` still blocks (unchanged) so current miner behavior is
+identical. Host `ctest` 9/9 PASS. No on-device run needed (behavior-neutral).
 
-### Part 2 — Hybrid hashes during fill (removes the dead-stop)
+### Part 2 — Hybrid hashes during fill (removes the dead-stop) — AGENT TASK
 - In `worker_loop` (mining_engine.cpp:389-391), do NOT call `wait_for_fill()` when a partial
-  dataset is active in HYBRID mode. The VM already has `set_partial_dataset` (line 560), so
-  the JIT hit/miss handles correctness as the prefix grows. Workers hash immediately; early
-  hashes mostly miss (derive on-the-fly, slightly slower), then ramp to mostly-hits as the
-  prefix fills. The rolling-window `Speed:` shows this honestly (low→steady), unlike the old
-  wrong empty-dataset ramp.
-- The seed-rotation re-wait (worker_loop:476-485) is unchanged: on rotation, `set_job` bumps
-  `partial_dataset_fill_generation_` and restarts fill; workers re-wait (the new fill's
-  prefix starts at 0, so reading the old seed's stale prefix would be wrong — re-wait is
-  still correct for rotation).
-- `miner_app.cpp:246` `wait_for_fill()` (full-memory path) is unchanged (no partial dataset
-  there in light mode items=0; for hybrid it's the same PartialDataset, so it will hash
-  during fill too — fine).
+  dataset is active in HYBRID mode (i.e. `partial_dataset_` is non-null AND mode is light with
+  `--dataset-mb>0`). The VM already has `set_partial_dataset` (line ~560), so the JIT hit/miss
+  handles correctness as the prefix grows. Workers hash immediately; early hashes mostly miss
+  (derive on-the-fly, slightly slower), then ramp to mostly-hits as the prefix fills. The
+  rolling-window `Speed:` shows this honestly (low→steady), unlike the old wrong empty-dataset
+  ramp.
+- The seed-rotation re-wait (worker_loop:476-485) is UNCHANGED: on rotation, `set_job` bumps
+  `partial_dataset_fill_generation_` and restarts fill; workers re-wait (the new fill's prefix
+  starts at 0, so reading the old seed's stale prefix would be wrong — re-wait is still correct
+  for rotation). KEEP THIS.
+- `miner_app.cpp:246` `wait_for_fill()` (full-memory / non-hybrid path) is UNCHANGED. Only the
+  per-worker `worker_loop` hybrid branch should skip the block.
+- **Guard:** only skip the block on the hybrid path. For `partial_dataset_ == nullptr` (pure
+  light, `--dataset-mb=0`) or non-hybrid, keep `wait_for_fill()` as-is.
 
-### Part 3 — Fill-worker starvation (the 75s half-stall)
+### Part 3 — Fill-worker starvation (the 75s half-stall) — AGENT TASK
 - `start_fill` is called with `exclude_cores={}` (mining_engine.cpp:255) → fill workers can
   land on the same cores as the (now hashing) miners, starving the fill on in-order A53.
 - With Part 2 miners HASH (not park), so the parked-miner stall largely resolves, but to be
-  safe: pin fill workers to a distinct core subset when `core_order_.size() > num_workers`,
-  and cap fill-worker count to `min(avail_cores, chunks)` (already done). Leave pinning as-is
-  for now; re-evaluate after on-device A/B. The 172s dead-stop is primarily Part 2; the
-  half-stall is secondary.
+  safe: pass `exclude_cores` = the set of cores the miner workers will occupy (so fill workers
+  use the remaining cores), OR cap fill-worker count and pin them to distinct cores. Concrete
+  approach: in `set_job`, compute `miner_cores` (the cores `worker_loop` will pin to under the
+  active AffinityMode) and pass them as `exclude_cores` to `start_fill`. Re-evaluate after
+  on-device A/B. The 172s dead-stop is primarily Part 2; the half-stall is secondary but the
+  log showed `fill_items` stuck at exactly HALF (4,194,304) for ~75s, so it is real.
 
 ## Correctness gate (MUST pass before Part 2 ships)
-- **New KAT `test_partial_dataset_contiguous_publish`**: force one chunk to finish LATE (e.g.
-  sleep in that chunk's `fill_worker` via a test hook, or run chunks with artificial delays),
-  and while the fill is in progress, have a reader thread call the JIT hit/miss path (or
-  directly read `item_count_` + `data_`) asserting that EVERY item `< item_count_` equals
-  `generate_dataset_item(cache, i)` — i.e. no uninitialized byte is ever observable. This is
-  the C1 regression guard.
+- **Part 1 KAT `test_contiguous_publish_no_uninitialized_read`** already PASSES host-side
+  (C1 closed). The agent must NOT regress it.
 - Host: `test_partial_dataset` + `test_mining` + `armrx_tests` (JIT 16/16) PASS.
-- On-device: `time_partial_fill 512` (fill time) + `--pool-test --dataset-mb=512 --workers=7`
-  should now show H/s > 0 IMMEDIATELY (within the first ~10s window), not after 172s. Compare
-  steady-state H/s vs the post-fill 29.8 baseline (should match; hybrid perf gate −31%@8w
-  still applies, but 7w should be ~29-30).
+- On-device (lenovo, cross-built): `time_partial_fill 512` (fill time) +
+  `--pool-test --dataset-mb=512 --workers=7` should now show H/s > 0 IMMEDIATELY (within the
+  first ~10s window), not after 172s. Compare steady-state H/s vs the post-fill 29.8 baseline
+  (should match; hybrid perf gate −31%@8w still applies, but 7w should be ~29-30). Also confirm
+  `fill_items` no longer stalls at half for 75s (Part 3).
 
 ## Kill criterion
-- Adopt Part 1 + Part 2 only if: (a) contiguous-publish KAT passes (no uninitialized read
-  possible), (b) host ctest 9/9 + JIT 16/16 pass, (c) on-device `--dataset-mb=512` shows H/s
-  > 0 within first 10s AND steady-state H/s matches the post-fill baseline (no regression).
-- If the contiguous-publish KAT reveals a hole, fix Part 1 before Part 2.
+- Adopt Part 2 + Part 3 only if: (a) host `test_partial_dataset` (incl. contiguous-publish KAT)
+  + `test_mining` + `armrx_tests` JIT 16/16 PASS, (b) on-device `--dataset-mb=512 --workers=7`
+  shows H/s > 0 within first 10s AND steady-state H/s matches the post-fill baseline (no
+  regression), (c) `fill_items` no longer stalls at half for ~75s.
+- If the on-device run shows H/s still 0 for the full fill, or wrong hashes, REVERT (the
+  contiguous publish is the safety net; if it holds, no wrong hashes — so a 0 H/s that isn't a
+  stall is a different bug, report it).
 
 ## Discipline
-- Part 1 (contiguous publish) is behavior-neutral (wait_for_fill still blocks) → can verify
-  host-only first.
-- Part 2 (relax wait_for_fill) is the behavior change → ONE device session, gated by the KAT.
-- Do NOT touch the JIT `_end_hybrid` hit/miss logic (just fixed 2026-08-07; it's correct).
+- Part 1 is DONE (behavior-neutral, host-verified). Do NOT re-touch contiguous publish unless
+  the KAT fails.
+- Part 2+3 are the behavior change → ONE device session, gated by the KAT + on-device A/B.
+- Do NOT touch the JIT `_end_hybrid` hit/miss logic (fixed 2026-08-07; correct, verified).
+- One test per session on-device; separate scp and ssh; never qemu.
