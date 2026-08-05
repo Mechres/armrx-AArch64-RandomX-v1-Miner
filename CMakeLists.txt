@@ -362,6 +362,13 @@ if(ARMRX_BUILD_TESTS)
     add_executable(bench_imul_magnitudes tests/bench_imul_magnitudes.cpp)
     target_link_libraries(bench_imul_magnitudes PRIVATE armrx_core)
     add_test(NAME bench_imul_magnitudes COMMAND bench_imul_magnitudes 8 20)
+
+    # Dual-hash premise microbench (experiment tool, NOT shipped): measures whether the
+    # A53 MAC port has spare throughput to exploit by interleaving a 2nd independent hash
+    # stream in one thread. Decision rule documented in the source header. On-device only
+    # (the port behavior is device-specific); wrap in perf stat for other_interlock_stall.
+    add_executable(bench_dualhash_premise tools/bench_dualhash_premise.cpp)
+    target_link_libraries(bench_dualhash_premise PRIVATE armrx_core)
 endif()
 
 # LibFuzzer harness for armrx::json (PLAN.md §3.1). Opt-in and Clang-only —
