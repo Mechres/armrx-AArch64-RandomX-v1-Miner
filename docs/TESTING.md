@@ -24,7 +24,9 @@ bench_armrx --full-hash-only --perf-ready --workers=<N>
 - `--workers=N` (Lever 3, implemented 2026-08-07) runs N parallel worker threads, each with its **own `VirtualMachine`** but a **SHARED `Argon2dCache`** (RandomX threading model: cache is read-only after init). It reports **aggregate hash/s = total hashes across all workers / real wall time** — this is the true N-worker throughput number (e.g. 8w ≈ 12.3 H/s pinned to 0-3 on MSM8929, vs 5.12 H/s @1w). For per-worker instr/cycle, wrap in `perf stat` (counts all threads); aggregate IPC = total_instr/total_cycles, per-worker ≈ total/N. Requires `--full-hash-only`.
 - This is the ONLY authoritative source for instr/hash, cyc/hash, IPC. The 1w census
   (`docs/experiments/w11-instruction-census.md`) used exactly this and is the reference
-  baseline: **armrx 89.5M instr/hash @ IPC 0.547 vs XMRig 101.4M @ 0.654 (1 worker)**.
+  baseline: **armrx 101.10M instr/hash @ IPC 0.667 vs XMRig 94.5M @ 0.654 (1 worker,
+  gated 500-hash re-baseline 2026-08-06 — NOTE the earlier 89.5M figure was a
+  contaminated-divisor artifact and is superseded).**
 
 **NEVER use `--mine` for measurement.** The pool miner idles ~41% of the time (worker
 waiting on stratum/accept, not hashing) so cycles/elapsed ≠ 765 MHz and every derived rate
@@ -240,13 +242,15 @@ in Era II.
 | 1w H/s | 5.11 | 5.04 | cross build + E24 |
 | 8w H/s | 26.65 | 28.0 | real pool, 1209s |
 | 8w parity | **95.2%** | 100% | — |
-| **instr/hash (gated 500-hash window, 1w AND 8w)** | **113.8M** | 98.9M (M1 est ±5%) | p0-instruction-count-resolution.md / m1-miner-to-miner-pmu-diff.md |
-| 1w IPC (gated) | 0.662 | 0.654 | p0 / w11 census |
+| **instr/hash (gated 500-hash window, 1w)** | **101.10M** | 94.5M (M1 est ±5%) | 2026-08-06 HEAD re-baseline (`measurements/2026-08-06-head-rebaseline.md`) — NOTE the earlier 113.8M here was pre-AES and is superseded |
+| 1w IPC (gated) | 0.667 | 0.654 | 2026-08-06 re-baseline |
 
-NOTE: the w11 census figure "armrx 89.5M / IPC 0.547" is **superseded** by Phase 0's gated-window
-measurement (113.8M, IPC 0.662) — the census used a mis-divided hash count. armrx is **+15%
-heavier** than XMRig on instructions; the 95.2% gap is cluster-contention throughput loss, not a
-per-worker instr/IPC difference. See STRATEGY.md / p0-instruction-count-resolution.md.
+NOTE: the w11 census figure "armrx 89.5M / IPC 0.547" was a contaminated-divisor
+artifact and is **superseded** by the 2026-08-06 gated-window re-baseline (101.10M,
+IPC 0.667). The intermediate "113.8M / IPC 0.662" figure was pre-AES and is also
+superseded. armrx is **~7% heavier** than XMRig on instructions (101.10M vs 94.5M at
+1w); the 95.2% 8w-parity gap is cluster-contention throughput loss, not a per-worker
+instr/IPC difference. See STRATEGY.md / p0-instruction-count-resolution.md.
 
 See STRATEGY.md / p0-instruction-count-resolution.md — Phase 0 resolved the lever to
-**instruction count** (armrx +15% heavier); the IPC branch is deprioritized.
+**instruction count** (armrx ~7% heavier at 1w: 101.10M vs 94.5M); the IPC branch is deprioritized.

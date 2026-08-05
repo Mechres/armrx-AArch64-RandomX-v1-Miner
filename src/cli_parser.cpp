@@ -215,9 +215,11 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
                 // 2001:db8::1 -> host="2001:db8:", port=1 mis-parse.
                 const auto colon = addr.rfind(':');
                 bool is_host_port = false;
+                std::string maybe_port;
+                std::string before;
                 if (colon != std::string::npos) {
-                    std::string maybe_port = addr.substr(colon + 1);
-                    std::string before = addr.substr(0, colon);
+                    maybe_port = addr.substr(colon + 1);
+                    before = addr.substr(0, colon);
                     if (!before.empty() && before.find(':') == std::string::npos) {
                         try {
                             std::uint16_t p = static_cast<std::uint16_t>(
@@ -231,6 +233,19 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
                     }
                 }
                 if (!is_host_port) {
+                    // A single ':' with a non-numeric trailing segment that is NOT an
+                    // IPv6 address (no ':' in the part before the colon) is a malformed
+                    // host:port (e.g. "pool.example.com:notaport"), not a bare host.
+                    // Reject it — silently connecting to a garbage default port is a
+                    // footgun for a mining tool. True IPv6 (a ':' present before the
+                    // final colon) still falls through to a bare host with the default
+                    // port, as intended.
+                    if (before.find(':') == std::string::npos && !maybe_port.empty()) {
+                        std::cerr << "Invalid --pool port: " << maybe_port << '\n';
+                        result.should_exit = true;
+                        result.exit_code = 64;
+                        return result;
+                    }
                     host = std::move(addr); // bare IPv6 or bare hostname, default port
                 }
             }
