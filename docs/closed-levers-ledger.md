@@ -70,9 +70,17 @@ for armrx itself — omitted from this ledger on purpose).
   (bench_armrx 8w: main 13.48 vs C 13.98 H/s). Stall-win didn't lift H/s (8w bound by
   E16 interconnect, not multiplies) but is a free code-quality win. A/B reverted (broke
   reference hashes). **CLOSED-as-satisfied** (not dead — produced a keeper).
-- **E16 multi-worker scaling** — 8w scales 5.4× vs XMRig 6.1×; ~33% per-core potential
-  lost to two-cluster interconnect contention (common on big.LITTLE / dual-cluster
-  AArch64). Code lever, not yet exhausted; now the top remaining generic AArch64 lever.
+- **Core-0 / main-thread contention in pool mode** — **OPEN (the last remaining generic
+  AArch64 code lever, 2026-08-07).** In 8w non-isolated pool mining one worker lands on
+  core 0 alongside the main/stratum reader thread, JSON handling, and the 1 Hz console
+  print — contention the local `bench_armrx` never has (explains why bench showed ~28.4
+  parity but pool ran ~24.76 pre-isolcpus). Scheduling-only mitigation (deprioritize the
+  main thread, or bind the stratum reader to an off-worker core, or throttle the console
+  print) is **portable** (helps any big.LITTLE / dual-cluster AArch64, not device-specific)
+  and low-risk. Estimated **~+2-4%** H/s. Per-family rule: this is a single-design lever
+  (scheduling tweak); one clean design + on-device A/B suffices to close. Kill criterion:
+  no H/s gain vs current pool baseline (~31.5 H/s with `--dataset-mb=512`) → CLOSED.
+- **E16 multi-worker scaling** — **RETRACTED as a code lever (2026-08-07, `docs/archived/audits/2026-08-07-improvement-headroom.md`).** The 8w 5.4× vs XMRig 6.1× ratio is the **SoC's own two-cluster interconnect asymmetry that XMRig also bears** (XMRig fast 4.5 / weak 2.4 H/s per-core) — not a code deficit armrx can close. Only `isolcpus` (deploy-level, out of scope) moves it. **CLOSED as a silicon-bound mirage.** The *only* remaining code-adjacent item in this area is **main-thread / core-0 contention in pool mode** (~+2-4% via scheduling-only deprioritization of the main/stratum thread on core 0; portable, unmeasured). See "Open levers" below.
 
 ---
 
