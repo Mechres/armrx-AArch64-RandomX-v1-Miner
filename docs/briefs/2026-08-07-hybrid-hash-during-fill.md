@@ -1,9 +1,11 @@
 # 2026-08-07 — Hybrid path: hash during fill (kill the 172s dead-stop)
 
-**Status:** PART 1 DONE (committed `9881878`, host 9/9 PASS, C1 closed). REMAINING:
-Part 2 (relax `wait_for_fill` → hash during fill) + Part 3 (fill-worker starvation).
-Delegated to an external agent per the project's Hermes-authored-brief / user-runs-agent /
-Hermes-gates-on-device discipline. Verbatim prompt: `2026-08-07-hybrid-part2-agent-prompt.md`.
+**Status:** PART 1 DONE (committed `9881878`, host 9/9 PASS, C1 closed). Part 2+3
+CLOSED — REVERTED (honest negative, 2026-08-07). Attempted by external agent, gated
+by the brief's kill-criterion. The `wait_for_fill` dead-stop is CORRECT behavior on
+this device, not a bug (see "Part 2+3 result" below). Delegated per the project's
+Hermes-authored-brief / user-runs-agent / Hermes-gates-on-device discipline. Verbatim
+prompt: `2026-08-07-hybrid-part2-agent-prompt.md`.
 
 **Severity:** correctness-adjacent + UX (the 172s `Speed: 0.00 H/s` dead-stop on
 `--dataset-mb=N`). Root cause of the dead-stop: Tier 1 `wait_for_fill()` blocks ALL
@@ -90,3 +92,25 @@ identical. Host `ctest` 9/9 PASS. No on-device run needed (behavior-neutral).
 - Part 2+3 are the behavior change → ONE device session, gated by the KAT + on-device A/B.
 - Do NOT touch the JIT `_end_hybrid` hit/miss logic (fixed 2026-08-07; correct, verified).
 - One test per session on-device; separate scp and ssh; never qemu.
+
+## Part 2+3 result (2026-08-07 — REVERTED, honest negative)
+Attempted by external agent, gated by the kill-criterion. Host gates passed
+(test_partial_dataset incl. contiguous KAT, test_mining, armrx_tests JIT 16/16).
+On-device (lenovo, cross-built):
+- Fill time **163.88s** (Part 3's `exclude_cores` fixed the 75s half-stall — fill
+  now completes cleanly instead of stalling at half).
+- Hashing began at **~12s** (Part 2 worked — instant start achieved).
+- **BUT steady-state was 23.16 H/s, below the 29–30 required baseline → REVERT.**
+- Root cause: excluding the 7 miner cores left **only 1 core** for the fill → a
+  single fill thread deriving the whole 512 MiB, starved by 7 hashing workers. The
+  cache stayed near-empty, so most hashes MISSED and derived on-the-fly (the slow
+  path) — hybrid effectively became pure light-mode derivation, ~22% slower than
+  waiting for a 100%-populated cache (29.8 H/s).
+- **Conclusion:** on an 8-core A53 with all cores already committed to hashing, the
+  172s `wait_for_fill` dead-stop is the *optimal* strategy, not a bug. Deriving the
+  dataset is more expensive than the idle time saved by not waiting; there are no
+  free cores to fill in parallel without starving either the fill or the hashers.
+  Part 2+3 is CLOSED. Do NOT re-attempt on ≤8-core devices. The only way it could
+  win is a device with spare cores (the 2nd Unisoc target, or a big.LITTLE with idle
+  big cores) — out of scope here.
+- No code retained; the two audit docs in docs/audits/ were left untouched.
