@@ -184,7 +184,7 @@ On a wide out-of-order core, these would likely show real wins. On an in-order C
 
 ### The measurement trap
 
-Every time we thought we had a win, it was because of a measurement artifact:
+Every apparent win turned out to be a measurement artifact:
 
 - **Unpinned comparison**: "PGO wins 2×!" — actually just core-cluster scheduling
 - **Short window**: "isolcpus gives +14%!" — sustained is more like +4%
@@ -204,7 +204,7 @@ The central finding that governed everything: the main VM program region carries
 This project used an unusual development workflow worth documenting.
 
 **Three AI agents, different roles:**
-- **Hermes** (this agent) — handled documentation, skills, static verification, second-opinion gating, continuity across sessions (keeping track of closed leads, measurement traps, file:line anchors), and running other agents.
+- **Hermes** — handled documentation, skills, static verification, second-opinion gating, continuity across sessions (keeping track of closed leads, measurement traps, file:line anchors), and running other agents.
 - **Reasonix** (Deepseek CLI) — the primary code-writing agent. Given structured briefs with exact file paths, root causes, old→new changes, and verification commands, it would implement the changes independently.
 - **AGY (Google Gemini)** — used for some batch tasks and analysis work.
 
@@ -218,7 +218,7 @@ This project used an unusual development workflow worth documenting.
 - Independent verification (Hermes reviewed Reasonix's diffs before sign-off, found bugs the implementation agent missed — e.g., pipeline state not reset on job change, nonce tracking mismatch, VM destructor double-munmap).
 - Preservation of continuity across session boundaries when an agent's context window filled.
 
-This workflow evolved organically and was itself refined multiple times — notably when the user specified that Hermes should run Reasonix directly via terminal rather than writing handoff briefs for the user to paste.
+This workflow evolved organically and was itself refined multiple times — notably when the workflow shifted to running Reasonix directly via terminal from Hermes rather than producing handoff briefs to paste.
 
 ---
 
@@ -273,7 +273,7 @@ The test suite grew organically as specific failure modes and correctness risks 
 |------|---------|---------------|
 | `test_blake2b.cpp` | KATs for Blake2b + reference dataset items | The RandomX specification's own published test vectors — the baseline everything depends on |
 | `test_aes_hash.cpp` | Golden-output pins + decomposition equivalence for `hash_and_fill_aes_1r_x4` | The AES fill/hash functions had no direct coverage — only end-to-end KATs that wouldn't localize a regression to `aes_hash.cpp` |
-| `test_jit_encodings.cpp` | Decodes emitted `bne`/`b` bytes for every CBRANCH sequence, asserts target is in-bounds | A prior CBRANCH encoding bug (`imm19` off-by-one) caused a 120s test *hang* instead of a fast assertion — we wanted instant failure next time |
+| `test_jit_encodings.cpp` | Decodes emitted `bne`/`b` bytes for every CBRANCH sequence, asserts target is in-bounds | A prior CBRANCH encoding bug (`imm19` off-by-one) caused a 120s test *hang* instead of a fast assertion — so failure is now instant next time |
 | `test_mining.cpp` | End-to-end lifecycle, bad-nonce recovery, dataset reinit, stop-race, pipeline correctness | The mining engine is the top-level integration point — if it breaks, nothing works |
 | `test_cli_parser.cpp` | Every CLI flag and config override combination | Zero prior automated coverage — CLI behavior was only verified manually against `--help` output |
 | `test_config.cpp` | Malformed numeric config values (`--workers=abc`) | `load_config_with_fallback()` runs unconditionally on every launch; malformed values crashed the process via unhandled `std::invalid_argument` |
