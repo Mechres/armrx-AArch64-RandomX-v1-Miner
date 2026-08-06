@@ -63,15 +63,16 @@ revert" pattern, RETROSPECTIVE.md:175). Listed so a per-family re-attempt can be
 These are code changes in the miner that help ANY AArch64 RandomX device, not
 device-specific tuning (isolcpus / clock-OPP unlock are deploy-level, OUT of scope
 for armrx itself — omitted from this ledger on purpose).
-- **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) — **ACTIVE
-  attempt** (2026-08-07 brief `docs/briefs/2026-08-07-superscalar-timing-model.md`, 3
-  designs on `try/superscalar-*` branches). `src/superscalar.cpp` models x86 ports, not
-  A53's single slow multiplier; re-tuning attacks `other_interlock_stall` (2.12× XMRig).
-  Model change only (generated program is data) → low JIT-correctness risk. Awaiting
-  agent run + Hermes gating.
+- **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) — **ADOPTED
+  (Design C) 2026-08-07** via `91f5b2f`. `src/superscalar.cpp` modeled x86 2-MUL ports;
+  A53 has 1 MUL port. Design C set `dependent_=true` on `IMULH_R`/`ISMULH_R` MUL ops
+  (2 lines) → `other_interlock_stall` halved (23.3→11.63M/hash) at **H/s parity**
+  (bench_armrx 8w: main 13.48 vs C 13.98 H/s). Stall-win didn't lift H/s (8w bound by
+  E16 interconnect, not multiplies) but is a free code-quality win. A/B reverted (broke
+  reference hashes). **CLOSED-as-satisfied** (not dead — produced a keeper).
 - **E16 multi-worker scaling** — 8w scales 5.4× vs XMRig 6.1×; ~33% per-core potential
   lost to two-cluster interconnect contention (common on big.LITTLE / dual-cluster
-  AArch64). Code lever, not yet exhausted; candidate after superscalar attempt resolves.
+  AArch64). Code lever, not yet exhausted; now the top remaining generic AArch64 lever.
 
 ---
 
