@@ -74,6 +74,12 @@ Experimental flags (all default OFF, all verified but not adopted — exception:
 - `.clang-format` and `.clang-tidy` exist (LLVM base, Allman braces, 120-col). No CI enforcement, but match their style when editing.
 - **Monero pools** (including herominers.com) use the CryptoNote Stratum protocol (`login` + `job`), not Bitcoin-style Stratum V1 (`mining.subscribe` + `mining.authorize`). The AUTO mode tries CryptoNote first, then falls back to Stratum V1.
 - **RETROSPECTIVE.md** at the repo root — full project retrospective. Start here for context.
+- **`docs/closed-levers-ledger.md`** is the authoritative current-state source for
+  optimization work (what's adopted / dead / in-flight). Read it BEFORE any perf
+  investigation. `docs/audits/` is now an **archive index only** — prior audits live
+  under `docs/archived/audits/` and are HISTORICAL (they predate recent adopts like the
+  superscalar timing-model `91f5b2f`). Do NOT glob `docs/audits/*.md` and treat matches
+  as current state; reconcile against the ledger first.
 - **CTest BAD_COMMAND flake** — intermittent CTest path-resolution issue on-device. Treat BAD_COMMAND "failures" as a flake, not real regressions; re-run named tests or binaries directly from `build/`.
 - **Two-cluster topology**: device is MSM8929/Snapdragon 415 (not MSM8916), two 4-core L2 clusters. Cores 4-7 lose ~50% throughput to cores 0-3 under full contention (interconnect arbitration, not a frequency difference).
 - **Instruction-count gap**: armrx is ~90% of XMRig per-cluster (cluster-normalized). Remaining ~10-12% is entirely an instruction-count gap, not stalls/scheduling/branch-prediction. IPC is actually *better* than XMRig (0.731 vs 0.612). Gap reframed 2026-08-01: **+19.5%** (118.96M vs 99.57M instr/hash; W1-4 XMRig re-baseline pending). Region census (W1-1, 2026-08-01): superscalar 80.5% of instructions (95.77M, IPC 0.800) / main-VM JIT 9.9% (IPC 0.405 — the known memory-stall penalty) / AES+glue 9.5%. Superscalar body is **5,224 A64 instr/call**, not the 3,563 once documented (stale `--jit-dump`; 8 programs × ~490 at the 512 cap). See `docs/experiments/w11-instruction-census.md`.
