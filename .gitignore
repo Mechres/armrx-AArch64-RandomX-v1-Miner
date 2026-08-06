@@ -32,3 +32,6 @@ HANDOFF_GEMINI.md
 build-cross/
 build-clang/
 build/
+
+# One-time-use agent prompts (not durable project history)
+docs/briefs/*agent-prompt*.md
