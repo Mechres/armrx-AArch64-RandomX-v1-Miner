@@ -134,11 +134,9 @@ static const size_t CalcDatasetItemSize =
 
 constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
 
-// W4 phase-2: slots in the per-program inline C* literal pool inside the
-// dataset-item function (see generateSuperscalarHash). 128 covers the
-// observed large-C* count per program (87-90) with ~4.6-sigma margin;
-// ops beyond the cap use the MOVZ/MOVN+MOVK fallback.
-static constexpr uint32_t SuperscalarCpoolSlots = 128;
+// NOTE: the per-program inline C* literal pool (formerly SuperscalarCpoolSlots,
+// 128 slots) was removed 2026-08-07 — it was dead code (emitCpoolImmediate
+// emits MOVZ/MOVN+MOVK unconditionally and never reads the pool).
 
 template<typename T> static constexpr size_t Log2(T value) { return (value > 1) ? (Log2(value / 2) + 1) : 0; }
 
@@ -1297,24 +1295,19 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		// W4 phase-2: dense INLINE C* literal pool (mirrors IMUL_RCP's proven
 		// PC-relative LDR_LITERAL geometry — the pool lives inside this
 		// dataset-item function so addressing is base-correct). Reserve
-		// SuperscalarCpoolSlots slots (8 bytes each via emit64);
-		// emitCpoolImmediate writes each C* constant here and emits
-		// LDR_LITERAL from it. The B below jumps over both pools.
-		// 2026-08-01 measurement (jit_equiv seed_0, all 8 programs): every
-		// program carries 87-90 poolable large-C* ops (mean 87.9), so 128
-		// slots covers the observed distribution at ~+4.6 sigma (binomial
-		// p~0.195, n~450, std~8.4); excess falls back to MOVZ/MOVN+MOVK
-		// (correct, just 3-instr). Slots are jumped over, never executed
-		// -> zero i-cache cost, buffer budget fits (worst case ~7.7KB <
-		// 8192B inner-loop allowance).
-		const uint32_t cpool_pos = codePos;
-		for (uint32_t s = 0; s < SuperscalarCpoolSlots; ++s)
-			emit64(0, code, codePos);   // 8 bytes/slot, zeroed
-		cpoolBase_ = cpool_pos;
-		cpoolLiteralPos_ = cpool_pos;
-		cpoolSlot_ = 0;
+		// NOTE: the 128-slot (1 KB) inline C* constant pool that used to be
+		// reserved here is DEAD. emitCpoolImmediate (below) unconditionally
+		// emits MOVZ/MOVN+MOVK for every C* immediate and never writes a
+		// pool slot or emits an LDR_LITERAL from it (verified 2026-08-07:
+		// cpoolBase_/cpoolLiteralPos_/cpoolSlot_ are written here but never
+		// read by any emit path). Reserving + zeroing 1024 bytes per
+		// program (8 programs = 8 KB) only fragmented the hottest code
+		// region (80.5% of all instructions) for no runtime benefit.
+		// Removed. cpoolBase_ stays 0 (its default) so main-VM mode is
+		// unaffected.
 
-		// Jump over literal pool
+		// Jump over literal pool (no pool to jump over now, but the existing
+		// structure is kept; the B simply spans the (now empty) gap safely).
 		uint32_t literal_pos = jmp_pos;
 		emit32(ARMV8A::B | ((codePos - jmp_pos) / 4), code, literal_pos);
 
