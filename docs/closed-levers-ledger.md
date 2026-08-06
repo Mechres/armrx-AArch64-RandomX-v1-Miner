@@ -59,10 +59,13 @@ revert" pattern, RETROSPECTIVE.md:175). Listed so a per-family re-attempt can be
 
 ---
 
-## Levers still OPEN (armrx code, generic AArch64 — not device-specific deploy)
+## Levers reconciled (armrx code, generic AArch64 — not device-specific deploy)
 These are code changes in the miner that help ANY AArch64 RandomX device, not
 device-specific tuning (isolcpus / clock-OPP unlock are deploy-level, OUT of scope
-for armrx itself — omitted from this ledger on purpose).
+for armrx itself — omitted from this ledger on purpose). As of 2026-08-07 there are
+**no open code levers remaining**: every generic-AArch64 lever is either ADOPTED
+(superscalar timing-model) or CLOSED/dead. The entries below are kept as the
+authoritative closed record.
 - **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) — **ADOPTED
   (Design C) 2026-08-07** via `91f5b2f`. `src/superscalar.cpp` modeled x86 2-MUL ports;
   A53 has 1 MUL port. Design C set `dependent_=true` on `IMULH_R`/`ISMULH_R` MUL ops
