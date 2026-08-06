@@ -54,7 +54,7 @@ revert" pattern, RETROSPECTIVE.md:175). Listed so a per-family re-attempt can be
 | CBRANCH CSEL (`b406bd5`, RETROSPECTIVE:84) | 1 | branch-miss figure was wrong (2.4% not 31%) | No (premise invalid) |
 | Argon2 memcpy copy-elimination (`88559a0`) | 1 | regression (cost relocated) | No |
 | DAG scheduler (`cb01a20`) | 1 (gated) | −14.3% H/s, not adopted, kept gated | No (measured negative) |
-| E15/E16 multi-worker scaling (`9935734`) | measured | XMRig=28 H/s baseline; gap thermal + SoC asymmetry | **OPEN lever** (not closed — see below) |
+| E15/E16 multi-worker scaling (`9935734`) | measured | XMRig=28 H/s baseline; gap thermal + SoC asymmetry | **RETRACTED as silicon-bound mirage (see below)** |
 | N1 ldp/stp adjacency (`88cda14`, `c5ac985`) | 2 (W2-2, W2-3) | CLOSED: no fusion possible | No (conclusive) |
 
 ---
@@ -62,34 +62,66 @@ revert" pattern, RETROSPECTIVE.md:175). Listed so a per-family re-attempt can be
 ## Levers reconciled (armrx code, generic AArch64 — not device-specific deploy)
 These are code changes in the miner that help ANY AArch64 RandomX device, not
 device-specific tuning (isolcpus / clock-OPP unlock are deploy-level, OUT of scope
-for armrx itself — omitted from this ledger on purpose). As of 2026-08-07 there are
-**no open code levers remaining**: every generic-AArch64 lever is either ADOPTED
-(superscalar timing-model) or CLOSED/dead. The entries below are kept as the
-authoritative closed record.
-- **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) — **ADOPTED
-  (Design C) 2026-08-07** via `91f5b2f`. `src/superscalar.cpp` modeled x86 2-MUL ports;
-  A53 has 1 MUL port. Design C set `dependent_=true` on `IMULH_R`/`ISMULH_R` MUL ops
-  (2 lines) → `other_interlock_stall` halved (23.3→11.63M/hash) at **H/s parity**
-  (bench_armrx 8w: main 13.48 vs C 13.98 H/s). Stall-win didn't lift H/s (8w bound by
-  E16 interconnect, not multiplies) but is a free code-quality win. A/B reverted (broke
-  reference hashes). **CLOSED-as-satisfied** (not dead — produced a keeper).
-- **Core-0 / main-thread contention in pool mode** — **CLOSED as DEAD (2026-08-07,
-  single-design, no per-family re-attempt warranted).** The premise was: worker 0
-  and the main/stratum/console loop share physical core 0 in AffinityMode::All,
-  and reserving core 0 for the main thread would lift pool H/s toward the
-  benchmark parity. The design reserved core 0 only when `workers < cores`
-  (`src/mining_engine.cpp` worker_loop). But on the target device `core_order_ =
-  {0..7}` (8 cores) and the pool command is `--workers=8`, so `8 < 8` is false and
-  the shift is a **no-op at 8w** — worker 0 still lands on core 0. The only way to
-  reserve a core for the main thread is to run `workers = cores - 1` (e.g. 7w),
-  which sacrifices ~12% of throughput to remove a ~2-4% contention → **net
-  negative**. Structurally: on an N-core box you cannot both use all N cores AND
-  reserve one for the main thread, so core-0 reservation is only ever viable at
-  N-1 workers. The pre-isolcpus pool deficit (~24.76 vs ~28.4 bench) was the OS
-  scheduler placing background tasks on the worker cores (which `isolcpus` removes
-  at deploy level), NOT worker-0-vs-main contention — so this code lever could not
-  have addressed it. Killed by arithmetic, no device run wasted. (Branch
-  `try/core0-contention` kept with the reverted attempt as evidence.)
+for armrx itself — omitted from this ledger on purpose).
+
+**Correction (2026-08-07, independent 3rd-party review):** an earlier draft of this
+section claimed "no open code levers remaining" and recorded the superscalar
+timing-model re-tune as ADOPTED (Design C). Both were wrong — see below. The
+superscalar family is NOT closed (all three designs failed), and two additional
+portable levers (dead superscalar literal-pool, main-thread deprioritization) were
+found open. Current honest state:
+
+- **Superscalar timing-model re-tune** — **NOT ADOPTED; family RE-OPENED as failed
+  (2026-08-07).** Three designs were tried:
+  - A/B: modeled x86 2-MUL ports on the A53's single MUL port → **broke reference
+    hashes** (reverted).
+  - C (`91f5b2f`, later reverted by `8cdf311`): set `dependent_=true` on
+    `IMULH_R`/`ISMULH_R` MUL ops. **Provably a NO-OP** — the generator calls
+    `scheduleMop(..., scheduleCycle, scheduleCycle)` (`src/superscalar.cpp:623`), so
+    `depCycle == cycle` and `isDependent()`'s `cycle = max(cycle, depCycle)` is
+    inert. Verified independently: HEAD vs reverted tree produce **byte-identical**
+    superscalar programs (FNV-equal across 512 programs; `armrx_tests` reference
+    hashes unchanged). The "H/s parity / stall halved 23.3→11.63M" earlier reading
+    was run-to-run/thermal noise. NOTE: the ledger previously also asserted E24
+    already halved the same baseline to 6.18M — the two claims were mutually
+    inconsistent; with C proven inert, E24's figure stands and C contributed nothing.
+  - Under the project's per-family rule, since all three designs failed (A/B broke
+    hashes, C inert) the family is **not a keeper** and was reverted. It is recorded
+    here as **CLOSED-as-failed** (not dead-by-principle — simply no working design),
+    and remains a candidate for a *different* future design if one is motivated.
+- **Core-0 / main-thread contention in pool mode** — **RE-OPENED (2026-08-07,
+  independent review).** The earlier "CLOSED as DEAD" reasoning was unsound: it
+  framed the only fix as "reserve core 0 by dropping to 7 workers" (a false
+  dichotomy) and waived the per-family rule on that bad argument. The real, portable
+  lever is **deprioritizing the main thread**, not removing a worker: the main
+  (calling) thread runs the pool tick + console-status loop and, under default
+  `SCHED_OTHER` scheduling, can share a core with worker 0 and steal a little of its
+  time. Verification: `grep` confirms **no `nice`/`setpriority`/`SCHED_BATCH`/
+  `SCHED_IDLE` anywhere in `src/`** — the main thread was never pinned or
+  deprioritized. Implemented opt-in as **`--main-thread-policy=default|idle|batch|
+  nice=N`** (portable: `sched_setscheduler` / `setpriority`, no CAP_SYS_NICE needed
+  to *lower* priority; default = unchanged). Host build + KAT green. **Status: OPEN
+  — H/s impact requires on-device validation** (per-device gate: KAT 16/16 +
+  450/200 stress + pool perf A/B). Branch `try/main-thread-deprioritize` kept.
+- **Dead superscalar inline C* literal-pool** — **REMOVED (2026-08-07,
+  `try/remove-dead-superscalar-cpool`, commit `1b10f02`).** `emitCpoolImmediate`
+  unconditionally emits MOVZ/MOVN+MOVK for every C* immediate and never reads the
+  per-program 128-slot (1 KB) inline pool that was reserved + zeroed for every
+  superscalar dataset-item program. The pool state (`cpoolBase_`/`cpoolLiteralPos_`/
+  `cpoolSlot_`) was written but never consumed. Removed ~8 KB of dead data spliced
+  into the hottest code region (superscalar body ≈ 80.5% of all instructions). Pure
+  dead-code removal; `armrx_tests` reference hashes byte-identical. Portable
+  code-quality / I-cache win, no behavioral change.
+- **Worker-local buffer reuse (D2)** — **OPEN, untried.** `worker_loop`
+  (`src/mining_engine.cpp`) reallocates `block_input` / `next_block` per job-change
+  (and copies per iteration). A reusable per-worker buffer (allocate once, `resize`
+  only on job change) would avoid repeated heap traffic. Portable, low-risk, small
+  expected impact. Not yet attempted.
+- **Cross-LTO (D1)** — **build-conditional, not a code lever.** LTO is wired in
+  CMake (`ARMRX_DISABLE_LTO`, off by default) but disabled on the musl cross
+  toolchain (GCC 15 + musl crash history). On a non-musl AArch64 build (Debian/
+  Ubuntu gcc) IPO engages and may recover the ~+1.9% previously measured. Out of
+  scope for the musl deploy path; noted for non-musl packagers.
 - **E16 multi-worker scaling** — **RETRACTED as a code lever (2026-08-07, `docs/archived/audits/2026-08-07-improvement-headroom.md`).** The 8w 5.4× vs XMRig 6.1× ratio is the **SoC's own two-cluster interconnect asymmetry that XMRig also bears** (XMRig fast 4.5 / weak 2.4 H/s per-core) — not a code deficit armrx can close. Only `isolcpus` (deploy-level, out of scope) moves it. **CLOSED as a silicon-bound mirage.**
 
 ---

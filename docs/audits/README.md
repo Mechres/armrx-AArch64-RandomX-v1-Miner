@@ -3,8 +3,9 @@
 This directory is **intentionally empty**. All prior agent audits, headroom
 analyses, and project reviews have been **archived** (not deleted) under
 `docs/archived/audits/` for historical reference. They predate recent code
-changes (e.g. superscalar timing-model adopted `91f5b2f`) and must NOT be read
-as current state.
+changes (e.g. superscalar timing-model — `91f5b2f` was later found to be a
+no-op and reverted by `8cdf311`; see `docs/closed-levers-ledger.md`) and must NOT be
+read as current state.
 
 ## The authoritative current-state sources are:
 

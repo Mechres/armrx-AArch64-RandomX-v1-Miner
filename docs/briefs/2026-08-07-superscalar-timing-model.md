@@ -1,12 +1,6 @@
 # 2026-08-07 — Superscalar generator timing-model A53 re-tune (E19→E22)
 
-**Status:** ADOPTED (Design C) — 2026-08-07. A + B broke reference hashes (reverted).
-C halved `other_interlock_stall` (23.3→11.63M/hash) with **NO H/s regression**:
-on-device `bench_armrx --full-hash-only` gave main 13.48 vs C 13.98 H/s @8w (parity;
-the apparent 13.61-vs-32 "regression" was a bench-vs-pool measurement mismatch, not a
-real loss). Adopted via `91f5b2f`. Stall-win didn't lift H/s because 8w throughput is
-bound by the two-cluster memory interconnect (E16), not multiplies — but the reduction
-is a free code-quality win for any AArch64 device. A/B branches kept as evidence.
+**Status:** CLOSED-AS-FAILED (all three designs failed) — corrected 2026-08-07 by independent review. A + B broke reference hashes (reverted). **C was a NO-OP, not an adoption:** `scheduleMop` is called as `scheduleMop(..., scheduleCycle, scheduleCycle)`, so `depCycle == cycle` and `dependent_=true` is inert. HEAD vs reverted tree emit byte-identical programs (`armrx_tests` reference hashes unchanged); the earlier "23.3→11.63M / 13.48→13.98 H/s" reading was run-to-run/thermal noise. C was reverted from main by `8cdf311`. The real interlock win is E24 (3-instr `MOVZ`/`MOVN`+`MOVK`, `other_interlock_stall` 23.3→6.18M/hash). See `docs/closed-levers-ledger.md`.
 gap is STALLS, not instruction count or scaling: E19 measured `other_interlock_stall`
 2.12× XMRig (= +12.30M cycles/hash, 154% of the 1w gap), localized to **A53 integer-
 multiplier interlocks** on the dependency-dense superscalar body (~35% multiplies).
