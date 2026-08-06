@@ -59,10 +59,17 @@ revert" pattern, RETROSPECTIVE.md:175). Listed so a per-family re-attempt can be
 
 ---
 
-## Levers still OPEN (not closed — distinct from above)
-- **Clock/OPP unlock** — device fixed at 765 MHz (no OPP table in DT); rated 1.1 GHz = ~+44%. Hardware/deploy change, not code. Biggest ceiling.
-- **E16 multi-worker scaling** — 8w scales 5.4× vs XMRig 6.1×; ~33% per-core potential lost to two-cluster interconnect contention. Code lever, not yet exhausted.
-- **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) — `src/superscalar.cpp` models x86 ports, not A53's single slow multiplier; re-tuning attacks `other_interlock_stall` (2.12× XMRig). Speculative, high-risk.
+## Levers still OPEN (armrx code, generic AArch64 — not device-specific deploy)
+These are code changes in the miner that help ANY AArch64 RandomX device, not
+device-specific tuning (isolcpus / clock-OPP unlock are deploy-level, OUT of scope
+for armrx itself — omitted from this ledger on purpose).
+- **E16 multi-worker scaling** — 8w scales 5.4× vs XMRig 6.1×; ~33% per-core potential
+  lost to two-cluster interconnect contention (common on big.LITTLE / dual-cluster
+  AArch64). Code lever, not yet exhausted.
+- **Superscalar timing-model re-tune** (`improvement-headroom.md` top pick) —
+  `src/superscalar.cpp` models x86 ports, not A53's single slow multiplier; re-tuning
+  attacks `other_interlock_stall` (2.12× XMRig). Speculative, high-risk, applies to all
+  AArch64.
 
 ---
 
