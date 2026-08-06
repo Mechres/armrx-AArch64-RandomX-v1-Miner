@@ -105,8 +105,8 @@ const MacroOp MacroOp::Cmp_ri = MacroOp("cmp r,i", 7, 1, ExecutionPort::P015);
 const MacroOp MacroOp::Setcc_r = MacroOp("setcc cl", 3, 1, ExecutionPort::P05);
 const MacroOp MacroOp::TestJz_fused = MacroOp("testjz r,i", 13, 0, ExecutionPort::P5);
 
-const MacroOp IMULH_R_ops_array[] = { MacroOp::Mov_rr, MacroOp(MacroOp::Mul_r, true), MacroOp::Mov_rr };
-const MacroOp ISMULH_R_ops_array[] = { MacroOp::Mov_rr, MacroOp(MacroOp::Imul_r, true), MacroOp::Mov_rr };
+const MacroOp IMULH_R_ops_array[] = { MacroOp::Mov_rr, MacroOp::Mul_r, MacroOp::Mov_rr };
+const MacroOp ISMULH_R_ops_array[] = { MacroOp::Mov_rr, MacroOp::Imul_r, MacroOp::Mov_rr };
 const MacroOp IMUL_RCP_ops_array[] = { MacroOp::Mov_ri64, MacroOp(MacroOp::Imul_rr, true) };
 
 class SuperscalarInstructionInfo {
