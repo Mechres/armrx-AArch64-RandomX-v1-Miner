@@ -101,8 +101,14 @@ found open. Current honest state:
   deprioritized. Implemented opt-in as **`--main-thread-policy=default|idle|batch|
   nice=N`** (portable: `sched_setscheduler` / `setpriority`, no CAP_SYS_NICE needed
   to *lower* priority; default = unchanged). Host build + KAT green. **Status: OPEN
-  — H/s impact requires on-device validation** (per-device gate: KAT 16/16 +
-  450/200 stress + pool perf A/B). Branch `try/main-thread-deprioritize` kept.
+  — correctness gate PASSED on-device 2026-08-07** (`test_jit_equivalence` 16/16
+  byte-identical, `test_mining` / `test_aes_hash` / `test_jit_determinism` /
+  `test_jit_encodings` all PASS on `try/main-thread-deprioritize`, cross-built with
+  the AUR GCC-16 musl toolchain). **H/s impact still unmeasured** — the decisive
+  gate is a real-pool `--pool-test` A/B (baseline vs `--main-thread-policy=idle`/
+  `nice=N`), per the device discipline (a main-thread/worker-0 contention win can
+  ONLY be seen via the real pool, never the bench). Branch `try/main-thread-deprioritize`
+  kept.
 - **Dead superscalar inline C* literal-pool** — **REMOVED (2026-08-07,
   `try/remove-dead-superscalar-cpool`, commit `1b10f02`).** `emitCpoolImmediate`
   unconditionally emits MOVZ/MOVN+MOVK for every C* immediate and never reads the

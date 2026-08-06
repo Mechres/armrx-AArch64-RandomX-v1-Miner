@@ -5,6 +5,26 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 (late) — device correctness gate: `--main-thread-policy` lever (branch `try/main-thread-deprioritize`)
+- **Lever:** opt-in `--main-thread-policy=default|idle|batch|nice=N` deprioritizes the
+  main (calling) thread in `MiningEngine::start()` via `sched_setscheduler`/`setpriority`
+  (portable; no CAP_SYS_NICE needed to *lower* priority; default = unchanged behavior).
+  Re-opened 2026-08-07 by independent review as the correct portable form of the
+  core-0/main-thread contention lever (the earlier "structurally dead" closure used a
+  false dichotomy and waived the per-family rule). See `docs/closed-levers-ledger.md`.
+- **Device correctness gate (cross-built with AUR GCC-16 musl toolchain, run on
+  lenovo / MSM8929 A53, fast-cluster-pinned):** ALL PASS —
+  `test_jit_equivalence` 16/16 byte-identical; `test_mining` (real shares, bad-nonce
+  recovery, partial-dataset seed rotation, light-mode reference match — 2 sub-tests
+  SKIPPED as fast-mode-OOM-on-device, expected); `test_aes_hash`; `test_jit_determinism`;
+  `test_jit_encodings`. The scheduling plumbing does not perturb generated programs,
+  hashes, AES, or JIT emission.
+- **NOT yet measured:** the decisive H/s gate is a real-pool `--pool-test` A/B
+  (baseline vs `--main-thread-policy=idle`/`nice=N`), per the device discipline
+  (a main-thread/worker-0 contention win is only visible via the real pool, never the
+  bench). That A/B is a separate session; lever remains **OPEN** pending it. Branch
+  kept unmerged as evidence.
+
 ## 2026-08-07 (night) — PartialDataset: contiguous-publish (closes audit C1, no behavior change yet)
 - **Why:** the fill published `item_count_ = max(completed)` = the END bound of a
   worker's chunk. Cross-chunk, a faster chunk finishing later items could advertise
