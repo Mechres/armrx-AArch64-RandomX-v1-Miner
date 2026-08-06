@@ -90,26 +90,33 @@ found open. Current honest state:
     here as **CLOSED-as-failed** (not dead-by-principle — simply no working design),
     and remains a candidate for a *different* future design if one is motivated.
 - **Core-0 / main-thread contention in pool mode** — **RE-OPENED (2026-08-07,
-  independent review).** The earlier "CLOSED as DEAD" reasoning was unsound: it
-  framed the only fix as "reserve core 0 by dropping to 7 workers" (a false
-  dichotomy) and waived the per-family rule on that bad argument. The real, portable
-  lever is **deprioritizing the main thread**, not removing a worker: the main
-  (calling) thread runs the pool tick + console-status loop and, under default
-  `SCHED_OTHER` scheduling, can share a core with worker 0 and steal a little of its
-  time. Verification: `grep` confirms **no `nice`/`setpriority`/`SCHED_BATCH`/
-  `SCHED_IDLE` anywhere in `src/`** — the main thread was never pinned or
-  deprioritized. Implemented opt-in as **`--main-thread-policy=default|idle|batch|
-  nice=N`** (portable: `sched_setscheduler` / `setpriority`, no CAP_SYS_NICE needed
-  to *lower* priority; default = unchanged). Host build + KAT green. **Status: OPEN
-  — correctness gate PASSED on-device 2026-08-07** (`test_jit_equivalence` 16/16
-  byte-identical, `test_mining` / `test_aes_hash` / `test_jit_determinism` /
-  `test_jit_encodings` all PASS on `try/main-thread-deprioritize`, cross-built with
-  the AUR GCC-16 musl toolchain). **H/s impact still unmeasured** — the decisive
-  gate is a real-pool `--pool-test` A/B (baseline vs `--main-thread-policy=idle`/
-  `nice=N`), per the device discipline (a main-thread/worker-0 contention win can
-  ONLY be seen via the real pool, never the bench). Branch `try/main-thread-deprioritize`
-  kept.
-- **Dead superscalar inline C* literal-pool** — **REMOVED (2026-08-07,
+  independent review), then MEASURED AS NO-OP (2026-08-07 device A/B).** The
+  earlier "CLOSED as DEAD" reasoning was unsound (false dichotomy + waived
+  per-family rule). The real, portable lever is **deprioritizing the main thread**
+  (which runs the pool tick + console-status loop), implemented opt-in as
+  **`--main-thread-policy=default|idle|batch|nice=N`** (`sched_setscheduler` /
+  `setpriority`, no CAP_SYS_NICE needed to *lower* priority; default = unchanged).
+  Correctness gate PASSED on-device (test_jit_equivalence 16/16 + 4 KATs, cross-built
+  GCC-16 musl). **Decisive gate — real-pool `--pool-test` A/B (lenovo / MSM8929 A53,
+  no isolcpus, `--dataset-mb=512 --workers=8 --seconds=360`, identical `taskset -c 0-7`,
+  built-in test pool+wallet, both arms):**
+  - **Baseline (`main`, no policy):** steady-state aggregate **~32.2 H/s** (live
+    Speed 31.8–32.8; INST agg 31–33; fast-cluster 4.2–6.0 / weak-cluster 2.4–3.0 per worker).
+  - **Treatment (`try/main-thread-deprioritize`, `--main-thread-policy=nice=10`):** steady
+    **~31.5 H/s** (live Speed 30.8–32.2; INST agg 29.6–33.1).
+  - **Δ ≈ −0.7 H/s (≈ −2%), within run-to-run thermal/working-set noise (CPU held 57°C
+    both arms).** The brief dips in the treatment arm correlated with CryptoNote job
+    rotations, not the policy. **Conclusion: deprioritizing the main thread produces no
+    measurable H/s change** — under `SCHED_OTHER`, the OS already yields the main
+    (non-realtime) thread to the `SCHED_OTHER` workers; the main thread's pool-tick /
+    console work is too infrequent/light to steal meaningful worker-0 cycles. (Note:
+    this was measured WITHOUT `--rt-priority`; with workers on `SCHED_FIFO` the main
+    thread already yields by priority class, so the lever is even less likely to help
+    there. A future `idle`/`SCHED_IDLE` probe could be re-run if a specific regression
+    is observed, but as a standalone lever it is closed as measured-null.) Recorded as
+    **CLOSED-as-measured-no-effect**; branch `try/main-thread-deprioritize` kept as
+    evidence. The code is opt-in (default = unchanged behavior) so it carries no
+    regression risk if left in the tree.
   `try/remove-dead-superscalar-cpool`, commit `1b10f02`).** `emitCpoolImmediate`
   unconditionally emits MOVZ/MOVN+MOVK for every C* immediate and never reads the
   per-program 128-slot (1 KB) inline pool that was reserved + zeroed for every

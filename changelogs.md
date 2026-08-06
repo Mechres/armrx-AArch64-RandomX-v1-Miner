@@ -5,6 +5,28 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 (late) — device perf A/B: `--main-thread-policy` lever measured as NO-OP
+- **Decisive gate for the core-0/main-thread deprioritization lever** (branch
+  `try/main-thread-deprioritize`). Per the device discipline (rule §8: a
+  main-thread/worker-0 contention win is only visible via the REAL pool, never the
+  bench), ran a real-pool `--pool-test` A/B on lenovo / MSM8929 A53 (no isolcpus):
+  - Both arms: `--pool-test --dataset-mb=512 --workers=8 --seconds=360 --warmup=0`,
+    identical `taskset -c 0-7`, built-in test pool+wallet (no real creds).
+  - **Baseline (`main`):** steady-state aggregate **~32.2 H/s** (live Speed 31.8–32.8;
+    INST agg 31–33; fast-cluster 4.2–6.0 / weak-cluster 2.4–3.0 H/s per worker).
+  - **Treatment (`--main-thread-policy=nice=10`):** steady **~31.5 H/s** (live 30.8–32.2;
+    INST agg 29.6–33.1).
+  - **Δ ≈ −0.7 H/s (≈ −2%), within run-to-run thermal/working-set noise (CPU held 57°C
+    both arms).** Brief treatment-arm dips tracked CryptoNote job rotations, not policy.
+- **Conclusion:** deprioritizing the main thread produces **no measurable H/s change**.
+  Under `SCHED_OTHER` the OS already yields the non-realtime main thread to the
+  `SCHED_OTHER` workers; the main thread's pool-tick/console work is too light/infrequent
+  to steal meaningful worker-0 time. Measured WITHOUT `--rt-priority` (where workers on
+  `SCHED_FIFO` would already out-prioritize the main thread, making the lever even less
+  likely to help). Lever **CLOSED as measured-no-effect**; branch kept as evidence. The
+  flag is opt-in (default = unchanged) so it is regression-safe if retained. Ledger updated
+  (`docs/closed-levers-ledger.md`).
+
 ## 2026-08-07 (late) — device correctness gate: `--main-thread-policy` lever (branch `try/main-thread-deprioritize`)
 - **Lever:** opt-in `--main-thread-policy=default|idle|batch|nice=N` deprioritizes the
   main (calling) thread in `MiningEngine::start()` via `sched_setscheduler`/`setpriority`
