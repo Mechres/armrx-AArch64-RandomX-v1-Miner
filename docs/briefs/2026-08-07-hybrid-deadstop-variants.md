@@ -1,13 +1,15 @@
 # 2026-08-07 — Hybrid dead-stop: 3 untried variants (branched attempts)
 
-**Status:** OPEN — brief + verbatim agent prompt ready. Part 1 (contiguous publish,
-`9881878`) is the safety net; Part 2+3 (instant-start + exclude-all-miner-cores) was
-REVERTED because excluding 7 miner cores left 1 fill core → cache starved → 23.16 H/s
-(honest negative, `785ee69`). The *lever* ("cut the 172s dead-stop's cost") is NOT
-exhausted — only one design of it was tried. This brief specifies 3 distinct variants,
-each on its own branch, so the code is never deleted on revert and Hermes can inspect it.
+**Status:** CLOSED — all 3 variants REVERTED (honest negative, 2026-08-07). Part 1
+(contiguous publish, `9881878`) is the safety net; Part 2+3 (`785ee69`) and all 3
+variants below were tried and failed the kill criterion for the SAME root cause:
+on an 8-core A53 with no free cores, you cannot start hashing early without
+lowering the hit rate → lower steady H/s. The 172s `wait_for_fill` dead-stop is
+the OPTIMAL steady-state choice; it is intended behavior, not a bug. See "Final
+verdict" below. Branches kept (not merged, not deleted) as evidence of what was
+tried, per the user's branch-discipline request.
 
-## The physics (why Part 2+3 failed)
+## The physics (why every variant failed)
 On an 8-core A53 with all cores needed for 29.8 H/s, any core given to the fill is a
 core taken from hashing. The fill is derivation-bound and slow (~164s for 512 MiB).
 - Block until 100% (`wait_for_fill`, current): 172s dead, then 29.8. Optimal for
@@ -72,3 +74,39 @@ inspect. Reports host + on-device numbers per branch.
 - Do NOT commit the audit docs in docs/audits/.
 - Report per-branch: diff scope, host results, on-device dead-time / steady H/s /
   fill_items behavior. Hermes gates adopt/revert per branch after inspecting.
+
+## Results (2026-08-07, agent-implemented, Hermes inspected the diffs)
+- **Variant 1** (`5a2ce72`, tiered threshold): correct code (threshold polling on the
+  contiguous prefix; plus a `local_partial_fill_gen` init fix). BUT on-device at
+  threshold 0.5: first hash ~95s, steady 23.28 H/s, `fill_items` stalled at 4,194,304
+  (exactly half) for most of the run. The fill is still core-starved (variant 1 did
+  NOT change fill scheduling, only the start threshold) → fill never completes behind
+  the workers → 50% hit rate the whole run. **REVERT** (same root cause as Part 2+3).
+- **Variant 2** (`b4e2006`, co-located): the diff is 2 added COMMENT lines only. The
+  `start_fill` call already passes `exclude_cores={}` on main (the stale comment above
+  it claimed otherwise). So variant 2 == main; its "pass" (178s fill, 28.53 H/s) is the
+  baseline. **CLOSE** (no-op, nothing to adopt).
+- **Variant 3** (`044cd27`, smaller default): `dataset_mb = 0` → `256`. Real effect:
+  dead-start ~83s (256 MiB) vs 172s (512 MiB). But agent's fill times were ~83s for
+  64/128/256 MiB ALIKE (fill is core-starved, size-independent), and steady was
+  26/27/27.4 H/s (lower hit rate than 512's 29.8). **REVERT for mining** (see below).
+
+## Final verdict — H/s > start time, so the dead-stop is optimal (user decision)
+The user correctly prioritized: **in a miner, steady-state H/s matters more than
+start time.** The 172s dead-start is a one-time fixed cost; 29.8 H/s is earned every
+second after. Every variant traded H/s for a shorter start and LOST:
+- 172s + 29.8 H/s (main, `wait_for_fill`) = optimal for persistent mining.
+- 83s + 27 H/s (variant 3) = 9% permanent hashrate loss to save 89s once. A net loss
+  for any session longer than ~15 min. Variant 3 only "wins" inside a `--pool-test
+  --seconds=200` window (cumulative H/s favors the shorter start) — that is a TEST
+  ARTIFACT, not a mining win.
+- Therefore: **do NOT adopt any variant. Keep main as-is** (`wait_for_fill`, hybrid
+  OFF by default `dataset_mb=0`). The 172s dead-stop is INTENDED BEHAVIOR, not a bug;
+  it maximizes steady-state H/s on an 8-core A53 with no free cores. The only way to
+  cut it without losing H/s is a device with spare cores (2nd Unisoc target) or the
+  clock/OPP unlock (~+44%).
+- Branches `try/variant1-tiered-threshold`, `try/variant2-colocated-fill`,
+  `try/variant3-smaller-dataset` are KEPT (not merged, not deleted) as evidence of
+  what was tried, per the user's branch-discipline request. No change to main.
+- If a shorter-looking start is still desired for `--pool-test` UX only (zero H/s
+  impact), that is a display change (show "warming up, fill N%") — out of scope here.
