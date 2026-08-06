@@ -70,17 +70,24 @@ for armrx itself — omitted from this ledger on purpose).
   (bench_armrx 8w: main 13.48 vs C 13.98 H/s). Stall-win didn't lift H/s (8w bound by
   E16 interconnect, not multiplies) but is a free code-quality win. A/B reverted (broke
   reference hashes). **CLOSED-as-satisfied** (not dead — produced a keeper).
-- **Core-0 / main-thread contention in pool mode** — **OPEN (the last remaining generic
-  AArch64 code lever, 2026-08-07).** In 8w non-isolated pool mining one worker lands on
-  core 0 alongside the main/stratum reader thread, JSON handling, and the 1 Hz console
-  print — contention the local `bench_armrx` never has (explains why bench showed ~28.4
-  parity but pool ran ~24.76 pre-isolcpus). Scheduling-only mitigation (deprioritize the
-  main thread, or bind the stratum reader to an off-worker core, or throttle the console
-  print) is **portable** (helps any big.LITTLE / dual-cluster AArch64, not device-specific)
-  and low-risk. Estimated **~+2-4%** H/s. Per-family rule: this is a single-design lever
-  (scheduling tweak); one clean design + on-device A/B suffices to close. Kill criterion:
-  no H/s gain vs current pool baseline (~31.5 H/s with `--dataset-mb=512`) → CLOSED.
-- **E16 multi-worker scaling** — **RETRACTED as a code lever (2026-08-07, `docs/archived/audits/2026-08-07-improvement-headroom.md`).** The 8w 5.4× vs XMRig 6.1× ratio is the **SoC's own two-cluster interconnect asymmetry that XMRig also bears** (XMRig fast 4.5 / weak 2.4 H/s per-core) — not a code deficit armrx can close. Only `isolcpus` (deploy-level, out of scope) moves it. **CLOSED as a silicon-bound mirage.** The *only* remaining code-adjacent item in this area is **main-thread / core-0 contention in pool mode** (~+2-4% via scheduling-only deprioritization of the main/stratum thread on core 0; portable, unmeasured). See "Open levers" below.
+- **Core-0 / main-thread contention in pool mode** — **CLOSED as DEAD (2026-08-07,
+  single-design, no per-family re-attempt warranted).** The premise was: worker 0
+  and the main/stratum/console loop share physical core 0 in AffinityMode::All,
+  and reserving core 0 for the main thread would lift pool H/s toward the
+  benchmark parity. The design reserved core 0 only when `workers < cores`
+  (`src/mining_engine.cpp` worker_loop). But on the target device `core_order_ =
+  {0..7}` (8 cores) and the pool command is `--workers=8`, so `8 < 8` is false and
+  the shift is a **no-op at 8w** — worker 0 still lands on core 0. The only way to
+  reserve a core for the main thread is to run `workers = cores - 1` (e.g. 7w),
+  which sacrifices ~12% of throughput to remove a ~2-4% contention → **net
+  negative**. Structurally: on an N-core box you cannot both use all N cores AND
+  reserve one for the main thread, so core-0 reservation is only ever viable at
+  N-1 workers. The pre-isolcpus pool deficit (~24.76 vs ~28.4 bench) was the OS
+  scheduler placing background tasks on the worker cores (which `isolcpus` removes
+  at deploy level), NOT worker-0-vs-main contention — so this code lever could not
+  have addressed it. Killed by arithmetic, no device run wasted. (Branch
+  `try/core0-contention` kept with the reverted attempt as evidence.)
+- **E16 multi-worker scaling** — **RETRACTED as a code lever (2026-08-07, `docs/archived/audits/2026-08-07-improvement-headroom.md`).** The 8w 5.4× vs XMRig 6.1× ratio is the **SoC's own two-cluster interconnect asymmetry that XMRig also bears** (XMRig fast 4.5 / weak 2.4 H/s per-core) — not a code deficit armrx can close. Only `isolcpus` (deploy-level, out of scope) moves it. **CLOSED as a silicon-bound mirage.**
 
 ---
 
