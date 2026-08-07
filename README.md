@@ -159,10 +159,20 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
     startup — a deliberate, optimal tradeoff (the wait buys a 100%-populated cache). **Historical note:**
     an earlier *interleaved* hybrid variant (hash-during-fill, Gate B) measured **−N% at 8 workers**
     (extra DRAM traffic saturating the two-cluster interconnect) and was reverted; the current
-    contiguous-publish path does NOT have that regression. Code stays gated behind `--dataset-mb=N`
+    the current contiguous-publish path does NOT have that regression. Code stays gated behind `--dataset-mb=N`
     (default 0, zero cost when off).
 
----
+*   **Dead superscalar C* literal-pool removal (P3a, 2026-08-07):** ✅ **Removed as dead code.** The `cpoolBase_`/`cpoolSlot_`/`cpoolLiteralPos_` members and their 128-slot inline literal pool were leftover from the pre-E24 W4 design (the E24 revert already switched emission to `MOVZ`/`MOVN`+`MOVK`; the pool was written but never read). Removed the 3 unused member writes and fixed two stale W4 comments that described the pre-E24 `LDR` behavior. Byte-identical: `test_jit_equivalence` 16/16 on-device. Adopted via `git merge --no-ff`.
+
+*   **JIT code-bounds assert (P3b, 2026-08-07):** ✅ **Adopted (defensive).** `generateSuperscalarHash` now `fprintf`+`abort`s if `codePos > CodeSize + CalcDatasetItemSize` instead of silently overflowing the emitted code buffer. No behavior change on valid programs (assert never trips: `test_jit_equivalence` 16/16 on-device).
+
+*   **Stratum client robustness (P3c, 2026-08-07):** ✅ **Adopted.** Reader thread wrapped in try/catch (closes the remote-abort DoS: a malicious/broken server can no longer `std::terminate()` the miner via an exception in the reader); `mining.notify` seed now read from `params[3]` (was `[4]`); difficulty parsed with `isfinite` + `2^64` clamp; job blob validated `>= 76 B` and seed `== 32 B` hex. `test_pool_protocol` green on-device (incl failover).
+
+*   **Submit extranonce handling (P4, 2026-08-07):** ✅ **Adopted (Monero-correct).** Monero nonces are fixed 4-byte, so the job nonce is submitted via `job.nonce_size` (not concatenated/extranonce-appended like Bitcoin-style Stratum V1). Emits a one-time warning when a V1 pool advertises an extranonce, so a misconfigured pool is surfaced instead of silently producing rejected shares. `test_pool_protocol` green on-device.
+
+*   **Redundant pipelined scratchpad-fill skip (P1, 2026-08-07):** ✅ **Adopted (+~1% steady-state).** From the 2nd pipelined `randomx_calculate_hash` call onward, the `init_scratchpad` 2 MiB fill is skipped: Part D's AES writeback is threaded back as the next call's run key (the buffer is byte-identical to what `init_scratchpad` would produce for the same seed — Part A re-derives from the same `blake2b(input)`, so the skip is principled-correct, not a hash shortcut). Verified correct (`test_mining` all pass, incl. seed-rotation partial-dataset) and live shares on-device. Steady-state A/B on Lenovo A53 (light, 8w): **+0.91% (26.38 → 26.62 H/s, wins in both orderings)** — real but small (matches ~52 MB/s bandwidth saved at ~26 H/s, below the 2–3.5% predicted). Zero regression risk; the JIT/`--dataset-mb` paths are unaffected.
+
+*   **Real-pool non-isolated gap (E15, 2026-08-03):**
 
 ## 📚 Documentation
 

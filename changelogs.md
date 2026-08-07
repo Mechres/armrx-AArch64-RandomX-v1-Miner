@@ -5,6 +5,34 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-07 (night) — adopt 5 branches from independent audit: dead-pool removal, JIT bounds assert, stratum robustness, extranonce, redundant pipelined fill
+- **Source:** 6-branch delivery from an independent read-only audit (verified against source +
+  gated on-device per project discipline). 5 adopted into `main` via `git merge --no-ff`
+  (P2 `diag-fill-stall` kept on `try/`, default OFF — debugging tool, job complete; the
+  older parallel `try/remove-dead-superscalar-cpool` left unmerged as evidence).
+- **P3a — dead superscalar C* literal-pool removal:** dropped `cpoolBase_`/`cpoolSlot_`/
+  `cpoolLiteralPos_` (written, never read) + fixed two stale W4 comments. Pre-E24 leftover;
+  E24 already switched emission to `MOVZ`/`MOVN`+`MOVK`. Byte-identical: `test_jit_equivalence`
+  16/16 on-device.
+- **P3b — JIT code-bounds assert:** `generateSuperscalarHash` `fprintf`+`abort`s if
+  `codePos > CodeSize + CalcDatasetItemSize` (no silent overflow). No behavior change on
+  valid programs (assert never trips: 16/16 on-device).
+- **P3c — Stratum client robustness:** reader thread try/catch (closes remote-abort DoS);
+  `mining.notify` seed `params[3]` (was `[4]`); difficulty `isfinite` + `2^64` clamp; job blob
+  `>= 76 B` / seed `== 32 B` hex validation. `test_pool_protocol` green on-device (incl failover).
+- **P4 — Submit extranonce handling:** Monero nonce is fixed 4-byte → submitted via `job.nonce_size`
+  (not Bitcoin-style concatenated); one-time warning on V1 pools advertising extranonce.
+  `test_pool_protocol` green on-device.
+- **P1 — Redundant pipelined scratchpad-fill skip:** from the 2nd pipelined
+  `randomx_calculate_hash` call, `init_scratchpad` 2 MiB fill skipped — Part D's AES writeback
+  is threaded back as the next call's run key (byte-identical to what the fill would produce for
+  the same seed). Principled-correct, not a hash shortcut. Verified correct (`test_mining` all
+  pass, incl. seed-rotation partial-dataset) + live shares on-device. Steady-state A/B (Lenovo
+  A53, light, 8w): **+0.91% (26.38 → 26.62 H/s, wins in both orderings)** — real but small.
+- **Gate discipline honored:** every merge gated on-device before the next (test_jit_equivalence
+  16/16 / test_pool_protocol all / test_mining + A/B); no rollbacks needed. Audit artifact:
+  `docs/briefs/2026-08-07-source-verified-audit.md` (untracked working doc).
+
 ## 2026-08-07 (late) — device perf A/B: `--main-thread-policy` lever measured as NO-OP
 - **Decisive gate for the core-0/main-thread deprioritization lever** (branch
   `try/main-thread-deprioritize`). Per the device discipline (rule §8: a
