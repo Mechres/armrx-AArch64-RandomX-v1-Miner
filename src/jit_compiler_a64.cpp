@@ -1611,12 +1611,14 @@ void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* /*
 	uint32_t k = codePos;
 
 	uint32_t imm = instr.getImm32();
-	constexpr uint32_t tmp_reg = 19;
+    constexpr uint32_t tmp_reg = 19;
 
-	imm &= instr.getModMem() ? (RANDOMX_SCRATCHPAD_L1 - 1) : (RANDOMX_SCRATCHPAD_L2 - 1);
-	emitAddImmediate(tmp_reg, src, imm, code, k);
+    imm &= instr.getModMem() ? (RANDOMX_SCRATCHPAD_L1 - 1) : (RANDOMX_SCRATCHPAD_L2 - 1);
+    if (imm != 0) {
+        emitAddImmediate(tmp_reg, src, imm, code, k);
+    }
 
-	constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
+    constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
 	constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 	constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
 
