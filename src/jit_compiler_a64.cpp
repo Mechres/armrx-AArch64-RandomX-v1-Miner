@@ -134,11 +134,9 @@ static const size_t CalcDatasetItemSize =
 
 constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
 
-// W4 phase-2: slots in the per-program inline C* literal pool inside the
-// dataset-item function (see generateSuperscalarHash). 128 covers the
-// observed large-C* count per program (87-90) with ~4.6-sigma margin;
-// ops beyond the cap use the MOVZ/MOVN+MOVK fallback.
-static constexpr uint32_t SuperscalarCpoolSlots = 128;
+// NOTE: the per-program inline C* literal pool (formerly SuperscalarCpoolSlots,
+// 128 slots) was removed 2026-08-07 — it was dead code (emitCpoolImmediate
+// emits MOVZ/MOVN+MOVK unconditionally and never reads the pool).
 
 template<typename T> static constexpr size_t Log2(T value) { return (value > 1) ? (Log2(value / 2) + 1) : 0; }
 
@@ -980,10 +978,6 @@ void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos)
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
 	uint32_t codePos;
-	// W4 phase-2: ensure main-VM mode (C* pooling only active in the
-	// superscalar path via cpoolBase_). Byte-identical behavior to baseline.
-	cpoolBase_ = 0;
-	cpoolSlot_ = 0;
 	emitPrologueMix(program, codePos);
 
 	// Update spMix2
@@ -1297,24 +1291,19 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		// W4 phase-2: dense INLINE C* literal pool (mirrors IMUL_RCP's proven
 		// PC-relative LDR_LITERAL geometry — the pool lives inside this
 		// dataset-item function so addressing is base-correct). Reserve
-		// SuperscalarCpoolSlots slots (8 bytes each via emit64);
-		// emitCpoolImmediate writes each C* constant here and emits
-		// LDR_LITERAL from it. The B below jumps over both pools.
-		// 2026-08-01 measurement (jit_equiv seed_0, all 8 programs): every
-		// program carries 87-90 poolable large-C* ops (mean 87.9), so 128
-		// slots covers the observed distribution at ~+4.6 sigma (binomial
-		// p~0.195, n~450, std~8.4); excess falls back to MOVZ/MOVN+MOVK
-		// (correct, just 3-instr). Slots are jumped over, never executed
-		// -> zero i-cache cost, buffer budget fits (worst case ~7.7KB <
-		// 8192B inner-loop allowance).
-		const uint32_t cpool_pos = codePos;
-		for (uint32_t s = 0; s < SuperscalarCpoolSlots; ++s)
-			emit64(0, code, codePos);   // 8 bytes/slot, zeroed
-		cpoolBase_ = cpool_pos;
-		cpoolLiteralPos_ = cpool_pos;
-		cpoolSlot_ = 0;
+		// NOTE: the 128-slot (1 KB) inline C* constant pool that used to be
+		// reserved here is DEAD. emitCpoolImmediate (below) unconditionally
+		// emits MOVZ/MOVN+MOVK for every C* immediate and never writes a
+		// pool slot or emits an LDR_LITERAL from it (verified 2026-08-07:
+		// cpoolBase_/cpoolLiteralPos_/cpoolSlot_ are written here but never
+		// read by any emit path). Reserving + zeroing 1024 bytes per
+		// program (8 programs = 8 KB) only fragmented the hottest code
+		// region (80.5% of all instructions) for no runtime benefit.
+		// Removed. cpoolBase_ stays 0 (its default) so main-VM mode is
+		// unaffected.
 
-		// Jump over literal pool
+		// Jump over the (removed) literal pool region: the B simply spans the now
+// empty gap — kept so the IMUL_RCP reciprocal literals stay PC-reachable.
 		uint32_t literal_pos = jmp_pos;
 		emit32(ARMV8A::B | ((codePos - jmp_pos) / 4), code, literal_pos);
 
@@ -1468,14 +1457,13 @@ void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*cod
 	codePos = k;
 }
 
-// W4 phase-2 (docs/briefs/brief-w4-phase2.md): dedicated C* immediate loader that
-// pools constants into the DENSE INLINE block set up per-program in
-// generateSuperscalarHash (cpoolBase_/cpoolLiteralPos_). ONLY called by the
-// superscalar IADD_C*/IXOR_C* emission sites -- NOT by emitMovImmediate (which
-// memory ops and the main VM still use, unchanged). Geometry mirrors IMUL_RCP's
-// proven PC-relative LDR_LITERAL EXACTLY: the pool is reserved with emit64 (8-byte
-// slots) and the literal pointer is stepped by 8 per slot, so the LDR target is
-// pool_start + N*8 -- matching the hardware PC-relative convention.
+// Dedicated C* immediate loader for the superscalar IADD_C*/IXOR_C* emission
+// sites -- NOT by emitMovImmediate (which memory ops and the main VM still
+// use, unchanged). Emits the E24 XMRig-style 3-instr MOVZ/MOVN+MOVK form.
+// The W4 phase-2 LDR-from-inline-pool design was superseded 2026-08-04 by E24
+// (the 2-instr pooled form was too dense for the A53 4-cycle MAC interlock:
+// consecutive program multiplies landed only 2 instructions apart, saturating
+// other_interlock_stall; the 3-instr form pads the multiply gaps, +7.1% H/s).
 void JitCompilerA64::emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
