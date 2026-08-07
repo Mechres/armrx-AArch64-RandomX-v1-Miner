@@ -162,9 +162,12 @@ void test_stratum_v1_full_flow_via_auto_fallback() {
         server_send_line(c2, "{\"id\":" + id3 + ",\"error\":null,\"result\":true}");
 
         // Push an unsolicited mining.notify (server-initiated, no reply expected).
+        // Spec order: [job_id, blob, target, seed_hash, clean_jobs] — the seed
+        // hash sits at index 3, clean_jobs at index 4 (corrected from an older
+        // fixture that placed the seed at index 4, matching the pre-fix parse).
         server_send_line(c2,
             "{\"method\":\"mining.notify\",\"params\":[\"job1\",\"" + kBlobHex + "\",\"" +
-            std::string(kTargetHex) + "\",0,\"" + kSeedHex + "\"]}");
+            std::string(kTargetHex) + "\",\"" + kSeedHex + "\",0]}");
         notify_sent.store(true);
 
         // Keep the connection open briefly so the client can process the
@@ -192,6 +195,14 @@ void test_stratum_v1_full_flow_via_auto_fallback() {
         std::lock_guard<std::mutex> lock(job_mutex);
         assert(received_job.job_id == "job1");
         assert(received_job.block_template.size() == 76);
+        // The seed hash must be parsed from params[3] (CryptoNote notify
+        // order [job_id, blob, target, seed_hash, clean_jobs]). A parser
+        // reading params[4] would get the clean_jobs flag ("0") here and
+        // produce an empty/garbage seed_key — which this assertion catches.
+        assert(received_job.seed_key.size() == 32);
+        // kSeedHex = 64 '1' chars → each "11" pair decodes to 0x11.
+        assert(std::memcmp(received_job.seed_key.data(),
+                           std::vector<std::byte>(32, std::byte{0x11}).data(), 32) == 0);
     }
 
     client.disconnect();

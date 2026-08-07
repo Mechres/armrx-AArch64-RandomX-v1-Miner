@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cmath>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -33,6 +34,37 @@
 #include <unistd.h>
 
 namespace armrx {
+
+// Monero RandomX job geometry: a block template is 76+ bytes and the seed hash
+// (RandomX cache key) is exactly 32 bytes. A pool sending other lengths is
+// broken or hostile — the engine would silently build a garbage Argon2 cache
+// (every share rejected) or deactivate workers on a truncated template, so
+// reject at the protocol layer with a visible log instead.
+constexpr std::size_t kMinMoneroBlobBytes = 76;
+constexpr std::size_t kSeedHashBytes = 32;
+
+// Strict hex validation — hex_to_bytes() itself silently maps invalid nibbles
+// to 0, which would turn a malformed blob/seed into a plausible-looking wrong
+// one. The job-parse paths validate with this BEFORE decoding.
+static bool is_valid_hex(const std::string& s) {
+    if (s.size() % 2 != 0) return false;
+    for (char c : s) {
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            return false;
+    }
+    return true;
+}
+
+// Returns true when both fields are well-formed Monero RandomX hex. An empty
+// seed_hex is tolerated (some pools omit it); a non-empty one must be exactly
+// 32 bytes. The blob must be at least 76 bytes and valid hex.
+static bool valid_job_hex(const std::string& blob_hex, const std::string& seed_hex) {
+    if (blob_hex.size() < 2 * kMinMoneroBlobBytes) return false;
+    if (!is_valid_hex(blob_hex)) return false;
+    if (!seed_hex.empty() && seed_hex.size() != 2 * kSeedHashBytes) return false;
+    if (!seed_hex.empty() && !is_valid_hex(seed_hex)) return false;
+    return true;
+}
 
 // JSON helpers moved to armrx/json.hpp — stratum_client now uses armrx::json::*
 
@@ -419,7 +451,23 @@ void StratumClient::reader_thread_fn() {
         std::string line;
         if (!read_line(line)) break;
         if (!line.empty()) {
-            handle_line(line);
+            try {
+                handle_line(line);
+            } catch (const std::exception& e) {
+                // handle_line must never let an exception escape into the
+                // reader thread: an uncaught exception in a std::thread calls
+                // std::terminate() and aborts the whole process. The known
+                // source is a duplicate handshake reply — the second
+                // subscribe_done_.set_value() throws std::future_error.
+                // Treat as a protocol error: close the connection and let the
+                // reconnect path recover with a fresh handshake.
+                ARMRX_LOG_ERROR << "protocol error in reader thread: " << e.what()
+                          << " — closing connection";
+                break;
+            } catch (...) {
+                ARMRX_LOG_ERROR << "unknown exception in reader thread — closing connection";
+                break;
+            }
         }
     }
 
@@ -477,9 +525,20 @@ void StratumClient::handle_notify(const std::string& line) {
     const auto job_id   = armrx::json::get_array_element(line, "params", 0);
     const auto blob_hex = armrx::json::get_array_element(line, "params", 1);
     const auto tgt_hex  = armrx::json::get_array_element(line, "params", 2);
-    const auto seed_hex = armrx::json::get_array_element(line, "params", 4);
+    // CryptoNote mining.notify params: [job_id, blob, target, seed_hash,
+    // clean_jobs]. seed_hash is at index 3; index 4 is the clean_jobs flag.
+    // (Reading index 4 as the seed produced a garbage cache key on every
+    // 5-element frame — all shares silently rejected.)
+    const auto seed_hex = armrx::json::get_array_element(line, "params", 3);
 
     if (job_id.empty() || blob_hex.empty()) return;
+
+    if (!valid_job_hex(blob_hex, seed_hex)) {
+        ARMRX_LOG_ERROR << "rejecting malformed mining.notify job " << job_id
+                  << " (blob=" << blob_hex.size() / 2 << "B, seed_hex="
+                  << seed_hex.size() << " chars)";
+        return;
+    }
 
     Job job;
     job.job_id        = job_id;
@@ -653,6 +712,13 @@ void StratumClient::process_cryptonote_job(const std::string& job_id,
                                            const std::string& seed_hex) {
     if (job_id.empty() || blob_hex.empty()) return;
 
+    if (!valid_job_hex(blob_hex, seed_hex)) {
+        ARMRX_LOG_ERROR << "rejecting malformed CryptoNote job " << job_id
+                  << " (blob=" << blob_hex.size() / 2 << "B, seed_hex="
+                  << seed_hex.size() << " chars)";
+        return;
+    }
+
     Job job;
     job.job_id = job_id;
     job.block_template = hex_to_bytes(blob_hex);
@@ -818,9 +884,20 @@ Target StratumClient::difficulty_to_target(double diff) {
     // We store it as a 32-byte little-endian value.
     // For practical difficulties (D < 2^64) only the upper bytes are affected.
     Target t{};
-    if (diff <= 0.0) {
+    // Reject non-finite / non-positive difficulties. NaN/inf from a hostile
+    // pool used to fall through to the FP→int cast below — undefined behavior
+    // (float-cast-overflow), saturating to 2^63 on AArch64 → a pathological
+    // ~2^193 target that silently rejects every share. Treat as accept-
+    // everything (all-0xFF) instead.
+    if (!std::isfinite(diff) || diff <= 0.0) {
         std::fill(t.bytes.begin(), t.bytes.end(), std::byte{0xFF});
         return t;
+    }
+    // Clamp at the largest double below 2^64: casting a double >= 2^64 to
+    // uint64_t is UB, and no Monero pool sets a difficulty anywhere near this.
+    constexpr double kLargestDoubleBelow2Pow64 = 18446744073709549568.0;
+    if (diff > kLargestDoubleBelow2Pow64) {
+        diff = kLargestDoubleBelow2Pow64;
     }
     // Use the same division approach as main.cpp::difficulty_to_target
     std::uint64_t d = static_cast<std::uint64_t>(diff);
