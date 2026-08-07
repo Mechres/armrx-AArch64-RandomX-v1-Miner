@@ -474,6 +474,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
     std::vector<std::byte> block_input;
+    std::vector<std::byte> next_block;
     // Nonce tracked in block_input for pipelined mode
     std::uint64_t current_nonce = 0;
 
@@ -651,7 +652,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
             // Prepare next nonce's block template for the interleaved fill
             std::uint64_t next_nonce = local_nonce;
             local_nonce += num_threads_;
-            std::vector<std::byte> next_block = block_input;
+            next_block = block_input;
             if (!update_nonce_in_template(next_block, next_nonce, local_job.nonce_offset, local_job.nonce_size)) {
                 active = false;
                 continue;
@@ -688,7 +689,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
             // Advance to next nonce and swap fill target
             sp_fill = 1 - sp_fill;
-            block_input = std::move(next_block);
+            block_input.swap(next_block);
             current_nonce = next_nonce;
         }
 
