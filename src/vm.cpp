@@ -997,7 +997,8 @@ void randomx_calculate_hash_pipelined(
     VirtualMachine* machine,
     const void* input, std::size_t input_size, void* output,
     const void* next_input, std::size_t next_input_size,
-    std::byte* next_scratchpad, void* next_seed_out
+    std::byte* next_scratchpad, void* next_seed_out,
+    const void* run_seed
 ) {
     fenv_t fpstate;
     std::fegetenv(&fpstate);
@@ -1011,7 +1012,20 @@ void randomx_calculate_hash_pipelined(
         reinterpret_cast<const std::byte*>(input), input_size);
     blake2b(input_span, temp_hash.data(), 64);
 
-    machine->init_scratchpad(temp_hash.data());
+    if (run_seed != nullptr) {
+        // Pipelined fill-skip (try/skip-redundant-pipelined-fill): the VM's
+        // active scratchpad already holds byte-identical fill content — the
+        // previous call's Part D filled this buffer from
+        // blake2b(next_input) (== blake2b(input) in the mining engine, where
+        // next_input of call N is moved into input of call N+1) and Part F
+        // made it the active scratchpad. That same Part D computed the fill's
+        // final AES state (its writeback), which is exactly the key
+        // init_scratchpad would have left in temp_hash for the first run().
+        // Reuse it instead of re-running the full 2 MiB AES fill.
+        std::memcpy(temp_hash.data(), run_seed, 64);
+    } else {
+        machine->init_scratchpad(temp_hash.data());
+    }
     machine->reset_rounding_mode();
 
     alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
@@ -1030,9 +1044,6 @@ void randomx_calculate_hash_pipelined(
         reinterpret_cast<const std::byte*>(next_input), next_input_size);
     blake2b(next_input_span, next_seed.data(), 64);
 
-    // Save seed for caller's run() sequence (fill modifies the AesState in place)
-    std::memcpy(next_seed_out, next_seed.data(), 64);
-
     // ── Part C: Save hash state before interleave ──
     RegisterFile current_reg = machine->get_register_file();
     AesState hash_state;
@@ -1046,6 +1057,16 @@ void randomx_calculate_hash_pipelined(
         std::span<std::byte>(next_scratchpad, scratchpad_size),
         hash_state, next_seed    // next_seed is consumed by fill
     );
+
+    // Part D's fill phase writes its final AES state back into next_seed
+    // (the AesState it consumed) — the exact key init_scratchpad would have
+    // left behind for the next call's first run(). Publish it so the caller
+    // can pass it back as run_seed and skip the redundant 2 MiB re-fill.
+    // (next_seed_out may alias next_seed.data() when the caller recycles the
+    // buffer as run_seed — a self-copy, safe to skip.)
+    if (next_seed_out != next_seed.data()) {
+        std::memcpy(next_seed_out, next_seed.data(), 64);
+    }
 
     // ── Part E: Finalize current hash output ──
     std::memcpy(&current_reg.a, hash_state.data(), sizeof(AesState));

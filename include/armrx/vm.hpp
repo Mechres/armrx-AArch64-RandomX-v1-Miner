@@ -291,12 +291,28 @@ void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::siz
 /// \param next_input     next nonce's block template
 /// \param next_input_size  size of next input
 /// \param next_scratchpad  2 MiB buffer to fill for next hash's VM execution
-/// \param next_seed_out   64-byte output: seed for first run() on next_scratchpad
+/// \param next_seed_out   64-byte output: the fill's final AES state for
+///                        next_scratchpad — i.e. the *mutated* seed that
+///                        init_scratchpad would leave behind after filling
+///                        that buffer (Part D's AES writeback). Pass it back
+///                        as \p run_seed on the next call to skip the fill.
+/// \param run_seed        Optional pre-computed run key for `input` (the
+///                        mutated seed saved from the previous call's
+///                        \p next_seed_out). When non-null, the 2 MiB
+///                        init_scratchpad fill is SKIPPED: the active
+///                        scratchpad already holds identical content (the
+///                        previous call's Part D filled it from
+///                        blake2b(next_input) == blake2b(input), proven
+///                        byte-identical by the D2 equivalence gate), and
+///                        the first run() key is taken from \p run_seed
+///                        instead of a fresh fill. Pass nullptr to do the
+///                        full fill (prime path / first pipelined call).
 void randomx_calculate_hash_pipelined(
     VirtualMachine* machine,
     const void* input, std::size_t input_size, void* output,
     const void* next_input, std::size_t next_input_size,
-    std::byte* next_scratchpad, void* next_seed_out
+    std::byte* next_scratchpad, void* next_seed_out,
+    const void* run_seed = nullptr
 );
 
 } // namespace armrx
