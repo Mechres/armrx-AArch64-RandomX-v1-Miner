@@ -112,8 +112,13 @@ private:
     mutable std::mutex fill_join_mutex_;
     // Keeps the Argon2dCache alive while fill threads are running
     std::shared_ptr<const Argon2dCache> cache_holder_;
+    // Shared independently of PartialDataset so a worker never needs the object
+    // to stay alive to observe cancellation.
+    std::shared_ptr<std::atomic<bool>> stop_ =
+        std::make_shared<std::atomic<bool>>(false);
 
     void fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
+                     std::shared_ptr<std::atomic<bool>> stop,
                      std::uint64_t start_item,
                      std::uint64_t end_item,
                      unsigned cpu_id,
