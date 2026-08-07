@@ -978,10 +978,6 @@ void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos)
 void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& config)
 {
 	uint32_t codePos;
-	// W4 phase-2: ensure main-VM mode (C* pooling only active in the
-	// superscalar path via cpoolBase_). Byte-identical behavior to baseline.
-	cpoolBase_ = 0;
-	cpoolSlot_ = 0;
 	emitPrologueMix(program, codePos);
 
 	// Update spMix2
@@ -1306,8 +1302,8 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 		// Removed. cpoolBase_ stays 0 (its default) so main-VM mode is
 		// unaffected.
 
-		// Jump over literal pool (no pool to jump over now, but the existing
-		// structure is kept; the B simply spans the (now empty) gap safely).
+		// Jump over the (removed) literal pool region: the B simply spans the now
+// empty gap — kept so the IMUL_RCP reciprocal literals stay PC-reachable.
 		uint32_t literal_pos = jmp_pos;
 		emit32(ARMV8A::B | ((codePos - jmp_pos) / 4), code, literal_pos);
 
@@ -1461,14 +1457,13 @@ void JitCompilerA64::emitMovImmediate(uint32_t dst, uint32_t imm, uint8_t* /*cod
 	codePos = k;
 }
 
-// W4 phase-2 (docs/briefs/brief-w4-phase2.md): dedicated C* immediate loader that
-// pools constants into the DENSE INLINE block set up per-program in
-// generateSuperscalarHash (cpoolBase_/cpoolLiteralPos_). ONLY called by the
-// superscalar IADD_C*/IXOR_C* emission sites -- NOT by emitMovImmediate (which
-// memory ops and the main VM still use, unchanged). Geometry mirrors IMUL_RCP's
-// proven PC-relative LDR_LITERAL EXACTLY: the pool is reserved with emit64 (8-byte
-// slots) and the literal pointer is stepped by 8 per slot, so the LDR target is
-// pool_start + N*8 -- matching the hardware PC-relative convention.
+// Dedicated C* immediate loader for the superscalar IADD_C*/IXOR_C* emission
+// sites -- NOT by emitMovImmediate (which memory ops and the main VM still
+// use, unchanged). Emits the E24 XMRig-style 3-instr MOVZ/MOVN+MOVK form.
+// The W4 phase-2 LDR-from-inline-pool design was superseded 2026-08-04 by E24
+// (the 2-instr pooled form was too dense for the A53 4-cycle MAC interlock:
+// consecutive program multiplies landed only 2 instructions apart, saturating
+// other_interlock_stall; the 3-instr form pads the multiply gaps, +7.1% H/s).
 void JitCompilerA64::emitCpoolImmediate(uint32_t dst, uint32_t imm, uint8_t* /*code_buf*/, uint32_t& codePos)
 {
 	uint32_t k = codePos;
