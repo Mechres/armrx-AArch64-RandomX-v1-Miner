@@ -1400,6 +1400,22 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	memcpy(code + codePos, p1, p2 - p1);
 	codePos += static_cast<uint32_t>(p2 - p1);
 
+	// Hard bounds guard: the per-program emission (RANDOMX_SUPERSCALAR_LATENCY
+	// × 512 instructions + IMUL_RCP reciprocals + the C* fallback immediates)
+	// must fit the CalcDatasetItemSize slot or it silently overruns the mmap'd
+	// JIT buffer (CodeSize + CalcDatasetItemSize) and corrupts adjacent code.
+	// No guard existed before this — the budget math is tight (worst measured
+	// ~7.7 KB vs 8192 B allowance) and the input seed is pool-controlled, so
+	// fail loudly instead of overflowing.
+	if (codePos > (CodeSize + CalcDatasetItemSize)) {
+		std::fprintf(stderr,
+			"FATAL: superscalar JIT emission overran its buffer slot: "
+			"codePos=%u, budget=CodeSize(%zu)+CalcDatasetItemSize(%zu)=%zu\n",
+			codePos, CodeSize, CalcDatasetItemSize,
+			CodeSize + CalcDatasetItemSize);
+		std::abort();
+	}
+
 #ifdef __GNUC__
 	__builtin___clear_cache(reinterpret_cast<char*>(code + CodeSize), reinterpret_cast<char*>(code + codePos));
 #endif
