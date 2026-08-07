@@ -177,8 +177,15 @@ private:
     std::atomic<bool> connected_{false};
 
     std::string session_id_;
+    // Parsed from mining.subscribe / mining.set_extranonce but INFORMATIONAL
+    // ONLY for Monero mining: Monero embeds the nonce as a fixed field inside
+    // the template blob (offset 39, 4 bytes), so there is no extranonce1/2
+    // concatenation. A non-empty value on the Stratum V1 path indicates a
+    // Bitcoin-style pool whose 4-param mining.submit armrx cannot satisfy —
+    // surfaced once via warned_extranonce_v1_ in build_submit_msg().
     std::string extra_nonce1_;      // Pool-assigned nonce prefix (hex)
     std::size_t extra_nonce2_size_{4}; // Extra nonce 2 length in bytes
+    mutable bool warned_extranonce_v1_{false}; // log-once guard (see above)
 
     // Nonce field location within the block template blob. Monero defaults;
     // overridable via set_nonce_config() for other RandomX-based chains.

@@ -346,7 +346,10 @@ std::string StratumClient::build_authorize_msg() const {
 std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                                             const std::array<std::byte, 32>& hash) const {
     const auto id = request_id_.fetch_add(1);
-    const std::string nonce_hex = nonce_to_hex(nonce, 4);
+    // Use the job's declared nonce size (default 4) — a hardcoded 4 would
+    // truncate submits for pools that set a wider nonce field via
+    // set_nonce_info().
+    const std::string nonce_hex = nonce_to_hex(nonce, job.nonce_size);
 
     if (protocol_ == StratumProtocol::CRYPTONOTE) {
         std::vector<std::byte> hash_vec(hash.begin(), hash.end());
@@ -361,6 +364,23 @@ std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
                  "\"result\":\"" + result_hex + "\"" +
                "}}\n";
     } else {
+        // Stratum V1 fallback (Monero pools speaking the classic protocol).
+        // The 3-param form [wallet, job_id, nonce] is correct for Monero: the
+        // nonce is a fixed field inside the template blob (offset 39, 4 bytes),
+        // so no extranonce1/2 concatenation exists. extra_nonce1_ is only set
+        // by Bitcoin-style pools (mining.subscribe result / set_extranonce) —
+        // those require 4-param mining.submit with extra_nonce2, which armrx
+        // cannot produce (it does not construct coinbases). Warn once so the
+        // silent-all-shares-rejected case is visible instead of mysterious.
+        if (!extra_nonce1_.empty() && !warned_extranonce_v1_) {
+            warned_extranonce_v1_ = true;
+            ARMRX_LOG_WARN << "pool advertised extranonce (extra_nonce1=" << extra_nonce1_
+                      << ") on the Stratum V1 path — armrx submits the Monero "
+                         "3-param form [wallet, job_id, nonce]; a Bitcoin-style pool "
+                         "requiring extra_nonce2 will reject every share (Monero "
+                         "pools do not use extranonce: the nonce is a fixed 4-byte "
+                         "field at blob offset 39).";
+        }
         return armrx::json::rpc_envelope(id, "mining.submit",
                         "[\"" + armrx::json::escape(wallet_) + "\",\"" + armrx::json::escape(job.job_id) + "\",\"" +
                         nonce_hex + "\"]");
