@@ -442,6 +442,17 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     std::byte* sp[2] = { dual_scratchpad.get(), dual_scratchpad.get() + kScratchpadSize };
     int sp_fill = 0;
     bool pipelined_active = false;
+    // Pipelined calls completed since the last job change (or prime). The
+    // first pipelined call after a prime still runs the full 2 MiB
+    // init_scratchpad; subsequent ones skip it (see run_seed in the
+    // pipelined branch). Reset alongside pipelined_active on job change.
+    std::uint64_t pipelined_calls = 0;
+    // Mutated fill seed threaded across pipelined calls: call N's Part D
+    // writes the final AES state of its fill here (the key init_scratchpad
+    // would leave for call N+1), and call N+1 reuses it as its run key while
+    // skipping the redundant 2 MiB re-fill. MUST persist across iterations —
+    // a per-iteration local would feed the next call uninitialized garbage.
+    alignas(16) std::array<std::byte, 64> pipeline_seed{};
     // Start VM with sp[0] as active scratchpad (replaces VM's own allocation)
     vm.set_scratchpad(sp[0], kScratchpadSize);
 
@@ -546,6 +557,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 // The next hash goes through the standard (prime) path, which
                 // correctly reinitializes the pipeline for the new job.
                 pipelined_active = false;
+                pipelined_calls = 0;
                 local_nonce = static_cast<std::uint64_t>(thread_id);
                 current_nonce = 0;
 
@@ -645,14 +657,25 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 continue;
             }
 
-            alignas(16) std::array<std::byte, 64> next_seed{};
+            // Pipelined fill-skip (try/skip-redundant-pipelined-fill): from the
+            // 2nd pipelined call onward, skip the redundant 2 MiB init_scratchpad
+            // fill in Part A. The active scratchpad was already filled with
+            // byte-identical content by the previous call's Part D (proven by
+            // the D2 equivalence gate), and pipeline_seed holds that fill's
+            // final AES state — exactly the run key init_scratchpad would have
+            // left. The buffer is deliberately ALIASED as both run_seed and
+            // next_seed_out: Part A copies it into temp_hash before Part D
+            // overwrites it with the next call's key, so the order is safe.
+            const void* run_seed = (pipelined_calls > 0) ? pipeline_seed.data() : nullptr;
             randomx_calculate_hash_pipelined(
                 &vm,
                 block_input.data(), block_input.size(), hash.data(),
                 next_block.data(), next_block.size(),
                 sp[sp_fill],
-                next_seed.data()
+                pipeline_seed.data(),
+                run_seed
             );
+            ++pipelined_calls;
             // After: VM scratchpad = sp[sp_fill] (filled from next_seed by Part D)
             //        hash = output for block_input's nonce
 
