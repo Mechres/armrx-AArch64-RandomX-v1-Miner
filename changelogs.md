@@ -5,6 +5,28 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-08 — adopt 3 correctness/cleanup branches from Luna follow-up audit
+- **Source:** Luna read-only audit (round 2) + Hermes on-device gating. 3 branches adopted
+  into `main` via `git merge --no-ff`. All gated green on-device (Lenovo AArch64); `main`
+  ctest 9/9 after merge. `try/` branches preserved as evidence.
+- **L-2 — PartialDataset destructor joins fill workers on teardown:** the old destructor
+  `detach()`ed still-running fill threads that kept touching `data_`/atomics after the object
+  was destroyed → use-after-lifetime UB on any non-process-exit teardown (engine recreation,
+  exception, `--dataset-mb` re-init). Now a `shared_ptr<std::atomic<bool>> stop_` (independent
+  of `this` lifetime) is set in the destructor, workers always finish their in-flight chunk,
+  and the destructor `join()`s all workers before `munmap`. First Luna attempt **crashed
+  on-device** (SIGSEGV at the 256 MiB lagging-chunk teardown — host ASan/TSan missed it);
+  revised to remove mid-critical-section early-returns → re-gated green (`test_partial_dataset`
+  256 MiB PASS, exit 0). This is the workflow working: device caught what sanitizers didn't.
+- **C2 — Hoist per-hash `next_block` vector allocation:** `mining_engine.cpp` allocated +
+  freed a `std::vector<std::byte>` every pipelined hash inside the worker loop; now a persistent
+  buffer reused via `swap()`. Removes allocator churn from the per-hash path (0 instructions
+  removed; impact below noise but harmless). Gated: `test_mining` + `test_jit_equivalence` 16/16.
+- **B — Skip redundant zero FP memory offset add:** `emitMemLoadFP` unconditionally emitted
+  `add x19, xSrc, #0` when the masked FP memory offset was zero; now guarded by `imm != 0`
+  (mirroring the integer `emitMemLoad` path). Negligible instruction saving (~0.007/hash) but
+  correct and consistent. Gated: `test_jit_equivalence` 16/16 + `test_jit_encodings` 136/5 seeds.
+
 ## 2026-08-07 (night) — adopt 5 branches from independent audit: dead-pool removal, JIT bounds assert, stratum robustness, extranonce, redundant pipelined fill
 - **Source:** 6-branch delivery from an independent read-only audit (verified against source +
   gated on-device per project discipline). 5 adopted into `main` via `git merge --no-ff`
