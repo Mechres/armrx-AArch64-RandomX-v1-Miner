@@ -8,7 +8,11 @@ Referred to as **pine** in conversation (pmOS device codename `xiaomi-pine`).
 
 > **First baseline measured 2026-08-08: 69.39 H/s steady-state** (8 workers,
 > `performance` governor, fan-cooled, light mode, zero throttling).
-> See [Benchmarking notes](#benchmarking-notes).
+> NOTE: this was measured at the uncapped 1958 MHz fast-cluster clock, which
+> later proved to wedge under pool load (see [Clock-instability hazard](#-clock-instability-hazard-2026-08-09-concluded)).
+> The **stable** operating point is the fast cluster capped to **1708 MHz**
+> (~80 H/s) — see below. Treat 69.39 H/s as a best-case local number, not the
+> sustainable pool rate.
 
 All values below were read from the running device on 2026-08-08.
 
@@ -385,20 +389,29 @@ clock is capped. Confirmed by a controlled test:
 - Capped fast cluster to its 960000 floor (slow cluster → 768000): **survived
   781 s / 9 job rotations / 50.8 H/s, zero crashes** — matching the Lenovo.
 
-**Operational rule:** do **not** mine pine at 1958 MHz. Cap the fast cluster for
-stable operation:
+**Operational rule:** do **not** mine pine at 1958 MHz (the fast cluster's top
+step). Cap the fast cluster to **1708 MHz** (its highest stable step) for safe
+operation:
 
 ```sh
-# stable pine: cap fast cluster to its 960 MHz floor (slow cluster min is 768 MHz)
-echo 960000 | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq
-echo 768000 | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_freq
+# stable pine: fast cluster pinned to 1708 MHz (userspace), slow cluster at full 1459
+echo userspace | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
+echo 1708800  | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_setspeed
+echo performance | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_governor
+echo 1459200  | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_freq
 ```
 
-- Stable throughput at 960 MHz: **~51 H/s** (vs the 80–86 H/s seen briefly at
-  1958 MHz before the wedge).
-- The 86 H/s number is **not attainable safely** without a power/VRM fix
-  (cleaner VRM, more output capacitance, or a stable V/F point). The fault is in
-  pine's power delivery at high clock, out of scope for armrx code.
+- Stable throughput at 1708/1459 MHz: **~80 H/s** (matches the original uncapped
+  speed, but without the wedge).
+- Clock-sweep results (2026-08-09), each run several job rotations under pool
+  load: **960 ✓, 1497 ✓, 1708 ✓, 1958 ✗ (wedges @ job 3 / ~173–210s)**. So
+  1708 MHz is the highest stable fast-cluster step; 1958 is the only step above
+  it and it is not attainable on this board.
+- The fault at 1958 is a hardware V/F margin (SoC not stable at that clock under
+  the JIT-recompile current spike), confirmed NOT a supply issue (bench PSU swap
+  still wedged) and NOT a software bug. Out of scope for armrx code.
+- The 86 H/s briefly seen at 1958 before wedging is **not safely attainable**;
+  ~80 H/s at 1708 is the practical max.
 - **PSU swap (2026-08-09) ruled out the supply:** replacing the LM2596 with a
   clean regulated bench/desk PSU at the same voltage, clock left uncapped, still
   wedged at ~job 3 / ~210s. The fault is the **SoC's V/F margin at 1958 MHz**,
