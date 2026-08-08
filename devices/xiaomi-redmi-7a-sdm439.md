@@ -399,6 +399,11 @@ echo 768000 | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_freq
 - The 86 H/s number is **not attainable safely** without a power/VRM fix
   (cleaner VRM, more output capacitance, or a stable V/F point). The fault is in
   pine's power delivery at high clock, out of scope for armrx code.
+- **PSU swap (2026-08-09) ruled out the supply:** replacing the LM2596 with a
+  clean regulated bench/desk PSU at the same voltage, clock left uncapped, still
+  wedged at ~job 3 / ~210s. The fault is the **SoC's V/F margin at 1958 MHz**,
+  not the supply. No PSU change can fix it — the 960 MHz cap is the only stable
+  answer. See `docs/briefs/2026-08-08-pine-pool-segfault.md`.
 - Root-cause analysis and the discriminating experiment are in
   `docs/briefs/2026-08-08-pine-pool-segfault.md` (with the rejected JIT-race
   hypothesis, kept for record).
