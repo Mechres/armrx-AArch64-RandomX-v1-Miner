@@ -39,7 +39,9 @@
 
 Measurements conducted on an **8× Cortex-A53 CPU** (Lenovo, MSM8929 /
 Snapdragon 415, running postmarketOS — a genuine two-cluster big.LITTLE-shaped part;
-see `ROADMAP.md`'s Baseline section for the cache-topology finding). **Clock:** the device
+see `ROADMAP.md`'s Baseline section for the cache-topology finding, and
+[`devices/lenovo-vibe-k5-msm8929.md`](devices/lenovo-vibe-k5-msm8929.md) for the full
+hardware reference). **Clock:** the device
 has **no cpufreq / OPP table** (`scaling_cur_freq` empty), so it runs at a fixed
 firmware-set **~765 MHz** — the "~1.1/1.4 GHz" figure in older docs was retracted
 (commit `290e323`). All numbers below are at that fixed clock; treat 765 MHz as the real
@@ -190,6 +192,7 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 | [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. |
 | [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
+| [`devices/`](devices/) | Hardware reference for each AArch64 test device — cluster topology, frequency scaling, thermal limits, and measured gotchas. Read before interpreting any benchmark number. |
 | [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives and alpha archives. |
 
 `RETROSPECTIVE.md` carries the full narrative for every phase. The master plan at
