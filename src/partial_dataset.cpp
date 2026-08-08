@@ -71,27 +71,17 @@ PartialDataset::PartialDataset(std::size_t item_count)
 }
 
 PartialDataset::~PartialDataset() {
-    // Detach any still-running fill threads. We check if fill completed
-    // synchronously: if so, all threads have exited and we can unmap safely.
-    // If not, the threads are still writing to data_ — skip munmap and let
-    // the OS reclaim the mapping on process exit (the process is shutting
-    // down anyway in this case, e.g. SIGTERM during a benchmark).
-    // This avoids a race between fill_worker's data access and munmap.
-    // Check if all items are filled (fill_worker threads have completed).
-    // If the fill finished before shutdown, join and unmap cleanly.
-    // If still in progress, detach and skip munmap to avoid racing with
-    // fill_worker's data_ access — the OS reclaims the mapping on exit.
-    bool fill_finished = (item_count_.load(std::memory_order_acquire) >= allocated_items_);
-    for (auto& t : fill_threads_) {
-        if (t.joinable()) {
-            if (fill_finished) {
-                t.join();
-            } else {
-                t.detach();
-            }
-        }
+    const bool fill_finished =
+        item_count_.load(std::memory_order_acquire) >= allocated_items_;
+    if (!fill_finished && stop_) {
+        stop_->store(true, std::memory_order_release);
     }
-    if (data_ && fill_finished) {
+
+    for (auto& t : fill_threads_) {
+        if (t.joinable()) t.join();
+    }
+
+    if (data_) {
         ::munmap(data_, allocated_items_ * kRandomXDatasetItemBytes);
         data_ = nullptr;
     }
@@ -103,17 +93,6 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
                                  const std::vector<unsigned>& chunk_delays_ms)
 {
     if (allocated_items_ == 0) return;
-
-    // Re-fillable: a prior fill (e.g. for an earlier seed) may have already
-    // advanced item_count_ and set fill_complete_. Reset both so this new fill
-    // (with a possibly different cache/seed) starts from zero and is observed
-    // as incomplete until the last chunk publishes the final item. Without
-    // this, a second start_fill() would publish nothing (item_count_ already
-    // at allocated_items_) and fill_complete_ would stay true — letting a
-    // wait_for_fill() caller skip the re-wait entirely.
-    item_count_.store(0, std::memory_order_relaxed);
-    contiguous_done_.store(0, std::memory_order_relaxed);
-    fill_complete_.store(false, std::memory_order_relaxed);
 
     // Serialize with any still-running prior fill: join and drop its threads
     // (they would otherwise keep writing this same buffer concurrently with
@@ -127,6 +106,12 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
         }
         fill_threads_.clear();
     }
+
+    // Reset only after all workers from the previous generation have stopped.
+    item_count_.store(0, std::memory_order_relaxed);
+    contiguous_done_.store(0, std::memory_order_relaxed);
+    fill_complete_.store(false, std::memory_order_relaxed);
+    stop_ = std::make_shared<std::atomic<bool>>(false);
 
     // Keep the cache alive while fill threads are running
     cache_holder_ = cache_holder;
@@ -166,7 +151,8 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
         const unsigned cpu_id = avail_cores[i % avail_cores.size()];
         const unsigned delay_ms = (i < chunk_delays_ms.size()) ? chunk_delays_ms[i] : 0;
         fill_threads_.emplace_back(&PartialDataset::fill_worker, this,
-                                   cache_holder_, start, end, cpu_id, i, delay_ms);
+                                   cache_holder_, stop_, start, end, cpu_id, i,
+                                   delay_ms);
     }
 
     ARMRX_LOG_INFO << "PartialDataset: started fill with " << num_workers
@@ -174,7 +160,8 @@ void PartialDataset::start_fill(std::shared_ptr<const Argon2dCache> cache_holder
 }
 
 void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holder,
-                                  std::uint64_t start_item,
+                                 std::shared_ptr<std::atomic<bool>> stop,
+                                 std::uint64_t start_item,
                                   std::uint64_t end_item,
                                   unsigned cpu_id,
                                   std::size_t chunk_id,
@@ -186,6 +173,7 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
 
     // Test-only artificial lag so a test can force a lagging chunk (verifies
     // contiguous-publish safety). Production passes delay_ms == 0.
+    if (stop->load(std::memory_order_acquire)) return;
     if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 
     // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern)
@@ -248,7 +236,8 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     }
 
     // Mark the whole fill complete once the contiguous prefix reaches the end.
-    if (contiguous_done_.load(std::memory_order_acquire) >= allocated_items_) {
+    if (!stop->load(std::memory_order_acquire) &&
+        contiguous_done_.load(std::memory_order_acquire) >= allocated_items_) {
         fill_complete_.store(true, std::memory_order_release);
     }
 
