@@ -412,6 +412,25 @@ echo 1459200  | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_fre
   still wedged) and NOT a software bug. Out of scope for armrx code.
 - The 86 H/s briefly seen at 1958 before wedging is **not safely attainable**;
   ~80 H/s at 1708 is the practical max.
+
+### Permanent clock pin (OpenRC `local.d`, 2026-08-09)
+
+To keep pine off the unstable 1958 step across reboots, the stable pin is
+installed as a boot hook (pmOS uses OpenRC, not systemd):
+
+- File: `/etc/local.d/cpufreq.start` (mode 0755), already in the `default`
+  runlevel via the `local` service.
+- Contents: fast cluster (policy0) → `userspace` + `scaling_setspeed=1708800`;
+  slow cluster (policy1) → `performance` + `scaling_max_freq=1459200`; re-assert
+  after 1 s (the cpufreq driver on this kernel occasionally rounds a setspeed
+  up to the next table step, so the re-assert guards against that).
+- Verify after any reboot: `cat /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq`
+  must read `1708800 1459200`. If it reads `1958400 ...`, the hook did not fire
+  (or a setspeed rounding slipped through) — re-run `sudo /etc/local.d/cpufreq.start`.
+- **Note:** the cpufreq driver silently rounds any off-table frequency request
+  UP to the nearest table step (e.g. writing 1830000 yields 1958400). Only the
+  five table steps stick: 960 / 1305 / 1497 / 1708 / 1958. 1708 is the highest
+  stable one.
 - **PSU swap (2026-08-09) ruled out the supply:** replacing the LM2596 with a
   clean regulated bench/desk PSU at the same voltage, clock left uncapped, still
   wedged at ~job 3 / ~210s. The fault is the **SoC's V/F margin at 1958 MHz**,
