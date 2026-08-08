@@ -173,8 +173,8 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
 
     // Test-only artificial lag so a test can force a lagging chunk (verifies
     // contiguous-publish safety). Production passes delay_ms == 0.
-    if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
     if (stop->load(std::memory_order_acquire)) return;
+    if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 
     // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern)
     cpu_set_t cpus{};
@@ -192,11 +192,9 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     // Fill the chunk using the existing vectorized initialize_dataset.
     // The cache is valid because cache_holder keeps it alive.
     initialize_dataset(span, *cache_holder, start_item, total_items);
-    if (stop->load(std::memory_order_acquire)) return;
 
     // Mark THIS chunk done (release: its bytes are now fully initialized and
     // visible to any reader that observes item_count_ >= end_item via acquire).
-    if (stop->load(std::memory_order_acquire)) return;
     (*chunk_done_)[chunk_id].store(true, std::memory_order_release);
 
     // Contiguous-publish: advance the published bound only over the prefix that
@@ -207,8 +205,6 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     // publish of a lagging chunk's uninitialized bytes -- closes audit C1).
     std::uint64_t cursor = contiguous_done_.load(std::memory_order_acquire);
     for (;;) {
-        if (stop->load(std::memory_order_acquire)) return;
-
         // Advance cursor over consecutive finished chunks. The chunk that
         // owns item `cursor` is chunk (cursor / items_per_chunk_); it is done
         // when its flag is set, and then the whole chunk's item span is safe.
