@@ -4,8 +4,9 @@ Snapdragon 439 test device running postmarketOS. Faster than the Lenovo and the
 only device in the fleet with **working frequency scaling**, which makes it the
 better platform for clock-normalised measurement.
 
-> **Status: never benchmarked.** Treat the first `armrx` run as a
-> characterisation run, not a data point. See [Benchmarking notes](#benchmarking-notes).
+> **First baseline measured 2026-08-08: 69.39 H/s steady-state** (8 workers,
+> `performance` governor, fan-cooled, light mode, zero throttling).
+> See [Benchmarking notes](#benchmarking-notes).
 
 All values below were read from the running device on 2026-08-08.
 
@@ -136,6 +137,88 @@ for this port, so an empty `power_supply` directory is ambiguous: here it is
 simply *correct*. A side benefit for measurement is that there is no battery sag
 or charge-state variable in the thermal/clock behaviour.
 
+### The missing battery is a real operational hazard
+
+A phone battery normally acts as a very-low-ESR buffer capacitor directly across
+the power rail. It absorbs the microsecond-scale current transients produced
+when the CPU jumps from idle to full load — far faster than a switching
+regulator's feedback loop can respond.
+
+**With no battery, this device has no local buffering.** Every load transient
+propagates back through the supply wiring to the regulator.
+
+Observed failure mode: running an 8-worker benchmark while a second device
+shared the same buck-converter supply caused a **hard hang** — unresponsive on
+the physical console, with the kernel still answering ICMP and TCP SYN from
+softirq context while userspace was completely wedged. Removing the second
+device from the shared supply made the identical workload run to completion.
+
+Two consequences:
+
+- **Network reachability is not proof the device is alive.** `ping` and an open
+  port 22 can both persist through a hang. Check the physical console.
+- **No crash log survives.** `/sys/fs/pstore` is empty (no ramoops backend),
+  `/var/log/dmesg` is overwritten each boot, and `wtmp` is broken (dates to
+  1970). Files written shortly before a hang can also come back **0 bytes** —
+  unflushed ext4 writes are lost. Any on-device logging intended to survive a
+  hang must `sync` after every line.
+
+The comparison devices **never exhibit this failure** on the same supply, and
+the wiring difference is the key asymmetry:
+
+| Device | Power path | Hangs under load? |
+|---|---|---|
+| Lenovo (MSM8929) | LM2596 → battery terminals, direct | no |
+| Unisoc (SC9863A) | LM2596 → battery terminals, direct | no |
+| **Redmi 7A** | LM2596 → **BMS** → phone | **yes** |
+
+The Redmi is the only device with a **BMS in series** in the power path, and the
+only one that hangs. A BMS adds a protection FET (nonzero on-resistance), a
+current-sense shunt, and an overcurrent/short-circuit trip with its own
+threshold and blanking time. Under a step load from idle to 8 workers at
+1958 MHz, either the FET + shunt drop can sag the rail below the PMIC's
+undervoltage threshold, or the BMS overcurrent protection can trip outright.
+A momentary cut would present exactly as observed: userspace wedged, kernel
+still answering ICMP from softirq, nothing in any log, unflushed writes lost.
+
+Because the BMS is not exposed to the kernel (`/sys/class/power_supply/` is
+empty), a trip event leaves **no driver-level trace** — there is nothing to log
+even in principle.
+
+Note that the Lenovo's `pm8916-bms-vm` node reports a 4.17 V "battery" despite
+having **no battery connected**; that reading is a phantom from the BMS driver
+against an unpopulated input and is not evidence of buffering.
+
+A secondary contributing factor is clock and DVFS behaviour: the Lenovo has **no
+cpufreq at all** and runs at a fixed 765 MHz, whereas this device scales to
+1958 MHz and changes OPP dynamically. Dynamic power scales with frequency and
+roughly with the square of voltage, and OPP transitions are themselves current
+steps — so this device's peak and transient demand is substantially higher.
+
+**The mechanism is not confirmed.** The BMS is the strongest suspect on
+elimination grounds, not on direct measurement.
+
+### Discriminating test
+
+Bypass the BMS and wire the LM2596 directly to the phone's terminals, matching
+the other two devices. This is a single-variable change against the one
+component unique to this device. If the 8-worker hang disappears, the BMS is the
+cause.
+
+Worth doing **before** adding bulk capacitance upstream: capacitors on the
+regulator side of a tripping BMS would not help much. Capacitance placed
+*downstream* of the BMS, at the phone end with short leads, helps with both
+failure modes.
+
+Capping peak current via `scaling_max_freq` is a second zero-cost, reversible
+test:
+
+```sh
+echo 1497600 | sudo tee /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq
+```
+
+If the hangs stop at a lower OPP, the cause is power delivery, not software.
+
 ## Access
 
 | Path | Address |
@@ -225,31 +308,73 @@ permanently headless unit the remaining option is physical.
 
 Note that the `console` UI choice is not what enables a local TTY — pmOS
 provides a TTY on the physical display with `none` as well.
-
 ## Benchmarking notes
 
-This device has never been benchmarked. Suggested first run:
+### First measured baseline (2026-08-08)
+
+First `armrx` run on this device. Cross-compiled `armrx 0.2.0` (`a1ea83c`),
+`performance` governor on both policies, actively fan-cooled, in its case.
+
+**Correctness gate first:** `test_jit_equivalence` — **16/16 pairs
+byte-identical**.
+
+| Metric | Value |
+|---|---|
+| **Steady-state** | **69.39 H/s** (mean of last 60 samples) |
+| Stability | σ = 0.078 H/s |
+| Peak | 69.54 H/s |
+| Workers | 8 |
+| Valid shares | 121 |
+| Memory mode | light — **528 MiB** including reserve |
+| Throttle events | **0** (`cooling_device*/cur_state` never left 0) |
+| Clock | `1958,1958,1459,1459` MHz — never varied |
+| Zone temps | 37 °C idle → **49 °C peak** (trip is 75 °C) |
+| Reported CPU temp | 45 → 50 °C |
+
+Hashrate *rose* +1.58 H/s from the early window to the late window and then held
+flat — that is warmup completing, not thermal decay. **69.39 H/s is the
+steady-state figure.**
+
+Two things this establishes:
+
+- **Thermals are a non-issue with active cooling.** Peak 49 °C against a 75 °C
+  trip point is 26 °C of headroom, with zero throttling, in a case.
+- **Memory mode is light at 528 MiB**, not the ~2 GiB a naive
+  "256 MiB × 8 workers" estimate would suggest — workers share the cache.
+
+For scale, the Lenovo's best recorded figure is ~28.4 H/s (under `isolcpus`), so
+this device is roughly **2.4×**. The clock ratio alone is 1958/765 ≈ 2.56×, so
+the gain is essentially clock, not microarchitecture — as expected for the same
+A53 core.
+
+### Procedure for subsequent runs
 
 1. Pin both policies to `performance` (see above).
-2. Log `scaling_cur_freq` **and** `cooling_device*/cur_state` every 10 s.
+2. Log `scaling_cur_freq` **and** `cooling_device*/cur_state` every 5–10 s.
 3. Run until temperatures plateau — the case means peak ≠ sustained.
 4. Only record hashrate **after** thermal steady state; treat any run with
    `cur_state > 0` as throttled and label it as such.
 
 ```sh
-# thermal + clock sampler
+# thermal + clock sampler — sync after every line so the log survives a hang
 while :; do
-  printf '%s ' "$(date +%T)"
-  for z in /sys/class/thermal/thermal_zone*; do
-    printf '%s=%sC ' "$(cat $z/type)" "$(( $(cat $z/temp) / 1000 ))"
-  done
-  for c in /sys/class/thermal/cooling_device*; do
-    printf '%s:%s ' "$(cat $c/type)" "$(cat $c/cur_state)"
-  done
-  echo
-  sleep 10
+  L="$(date +%T) T="
+  for z in 2 5 6; do L="$L$(( $(cat /sys/class/thermal/thermal_zone$z/temp) / 1000 )),"; done
+  L="$L F="
+  for i in 0 5 1 4; do L="$L$(( $(cat /sys/devices/system/cpu/cpu$i/cpufreq/scaling_cur_freq) / 1000 )),"; done
+  L="$L thr="
+  for c in /sys/class/thermal/cooling_device*; do L="$L$(cat $c/cur_state),"; done
+  echo "$L" >> /tmp/thermal.log
+  sync
+  sleep 5
 done
 ```
 
 Because steady-state throughput is what matters, a slower start that reaches a
 higher plateau beats a fast start that settles lower.
+
+### Do not process logs on-device
+
+Running `tr`, `awk`, or `strings` over log files **on this device** has
+repeatedly preceded a hang. `scp` the logs to a host and parse them there — the
+data survives even when the device does not.

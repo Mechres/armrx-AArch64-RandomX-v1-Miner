@@ -9,7 +9,7 @@ large enough to invalidate a benchmark comparison. Each file records what was
 | Device | SoC | Cores | cpufreq | RAM | armrx mode | Status |
 |---|---|---|---|---|---|---|
 | [Lenovo Vibe K5](lenovo-vibe-k5-msm8929.md) | MSM8929 | 8× A53 | **none** (fixed ~765 MHz) | 1884 MiB | light | primary benchmark host |
-| [Xiaomi Redmi 7A](xiaomi-redmi-7a-sdm439.md) | SDM439 | 8× A53 | **yes** (960–1958 MHz) | 1826 MiB | light | never benchmarked |
+| [Xiaomi Redmi 7A](xiaomi-redmi-7a-sdm439.md) | SDM439 | 8× A53 | **yes** (960–1958 MHz) | 1826 MiB | light | **69.39 H/s** (2026-08-08) |
 | [Unisoc SC9863A](unisoc-sc9863a-termux.md) | SC9863A | 8× **A55** (**only 6 reachable**) | yes, **not settable** (no root) | 3865 MiB | light or **fast** | never benchmarked |
 
 ## Reading these files
