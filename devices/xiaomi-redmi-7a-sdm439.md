@@ -367,6 +367,42 @@ This run confirms the `--dataset-mb` partial-dataset path works end to end
 (login → seed-key cache init → background fill → resume → mining) and that the
 Redmi 7A is stable on real pool traffic, not just the local benchmark.
 
+### ⚠️ Clock-instability hazard (2026-08-09, CONFIRMED)
+
+Running at the **uncapped fast-cluster clock (1958 MHz)** under 8-worker pool
+load causes a **device-wedging fault** shortly after the first seed-key
+rotation (typically job 3, ~170–195 s): the process emits `Segmentation fault`
+and the **whole device hangs** (SSH → "No route to host", unrecoverable without
+a power cycle). No core dump or kernel log survives — consistent with an ARM
+SError / async external abort, i.e. a **hardware-level** fault, not a recoverable
+userspace crash.
+
+This is **NOT a software bug** — the identical `a1ea83c` binary runs cleanly
+through 9+ seed rotations on the Lenovo (~765 MHz) and on pine itself once the
+clock is capped. Confirmed by a controlled test:
+
+- Uncapped (1958 MHz): segfault + wedge at job 3 / ~173 s.
+- Capped fast cluster to its 960000 floor (slow cluster → 768000): **survived
+  781 s / 9 job rotations / 50.8 H/s, zero crashes** — matching the Lenovo.
+
+**Operational rule:** do **not** mine pine at 1958 MHz. Cap the fast cluster for
+stable operation:
+
+```sh
+# stable pine: cap fast cluster to its 960 MHz floor (slow cluster min is 768 MHz)
+echo 960000 | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_max_freq
+echo 768000 | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_freq
+```
+
+- Stable throughput at 960 MHz: **~51 H/s** (vs the 80–86 H/s seen briefly at
+  1958 MHz before the wedge).
+- The 86 H/s number is **not attainable safely** without a power/VRM fix
+  (cleaner VRM, more output capacitance, or a stable V/F point). The fault is in
+  pine's power delivery at high clock, out of scope for armrx code.
+- Root-cause analysis and the discriminating experiment are in
+  `docs/briefs/2026-08-08-pine-pool-segfault.md` (with the rejected JIT-race
+  hypothesis, kept for record).
+
 ### Procedure for subsequent runs
 
 1. Pin both policies to `performance` (see above).
