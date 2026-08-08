@@ -4,6 +4,8 @@ Snapdragon 439 test device running postmarketOS. Faster than the Lenovo and the
 only device in the fleet with **working frequency scaling**, which makes it the
 better platform for clock-normalised measurement.
 
+Referred to as **pine** in conversation (pmOS device codename `xiaomi-pine`).
+
 > **First baseline measured 2026-08-08: 69.39 H/s steady-state** (8 workers,
 > `performance` governor, fan-cooled, light mode, zero throttling).
 > See [Benchmarking notes](#benchmarking-notes).
@@ -346,6 +348,24 @@ For scale, the Lenovo's best recorded figure is ~28.4 H/s (under `isolcpus`), so
 this device is roughly **2.4×**. The clock ratio alone is 1958/765 ≈ 2.56×, so
 the gain is essentially clock, not microarchitecture — as expected for the same
 A53 core.
+
+### Real-pool run (2026-08-08)
+
+A second run against a CryptoNote Stratum pool (`--pool`, 8 workers, light mode
+with `--dataset-mb=512`).
+
+- Login succeeded; partial dataset (512 MiB) filled in **~46 s** before mining
+  started.
+- Steady-state **~80–83 H/s** — **higher than the local benchmark's 69.39 H/s**,
+  consistent with the local benchmark's artificial 30 s warmup and the pool run
+  reaching full steady state.
+- CPU 39 → 50 °C, no throttling, no hang.
+- **0 shares** submitted over a ~145 s run (no share-found at pool difficulty in
+  that window) — expected at this hashrate; not a fault.
+
+This run confirms the `--dataset-mb` partial-dataset path works end to end
+(login → seed-key cache init → background fill → resume → mining) and that the
+Redmi 7A is stable on real pool traffic, not just the local benchmark.
 
 ### Procedure for subsequent runs
 
