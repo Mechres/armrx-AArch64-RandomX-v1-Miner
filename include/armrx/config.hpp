@@ -20,8 +20,7 @@ struct AppConfig {
     std::string mode = "auto";    // auto, light, fast
     unsigned workers = 0;         // 0 = all cores
     std::uint64_t difficulty = 100;
-    unsigned seconds = 10;        // benchmark duration
-    bool tui = false;
+    unsigned seconds = 10;    // benchmark duration
 };
 
 /** Parse config from a JSON file path. Returns defaults if file missing. */

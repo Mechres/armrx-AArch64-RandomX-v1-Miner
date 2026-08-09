@@ -78,8 +78,9 @@ AppConfig load_config(const std::string& path) {
     auto tls_str = armrx::json::get_raw(json, "tls");
     cfg.pool_tls = (tls_str == "true");
 
-    auto tui_str = armrx::json::get_raw(json, "tui");
-    cfg.tui = (tui_str == "true");
+    // NOTE (T3-D audit, 2026-08-09): the JSON "tui" key was parsed into
+    // AppConfig::tui but never consumed -- only the CLI --tui / opts_.use_tui
+    // path drives the TUI (miner_app.cpp). The dead parse + field were removed.
 
     // load_config_with_fallback() runs unconditionally on every launch (it
     // auto-probes $ARMRX_CONFIG / ~/.config/armrx/config.json / ./armrx.conf
