@@ -3,11 +3,25 @@ cmake_minimum_required(VERSION 3.20)
 project(armrx VERSION 0.2.0 LANGUAGES C CXX ASM)
 
 # Embed git SHA and build date for --version flag
-# .git_sha is written by devbox_sync or the build host
-file(READ .git_sha ARMRX_GIT_SHA)
-string(STRIP "${ARMRX_GIT_SHA}" ARMRX_GIT_SHA)
-if(ARMRX_GIT_SHA STREQUAL "")
-    set(ARMRX_GIT_SHA "unknown")
+# .git_sha is written by devbox_sync or the build host when present; otherwise we
+# fall back to git describe, then "unknown". All paths must be OPTIONAL so that
+# clean clones and CI (no .git_sha, possibly no .git) can configure successfully.
+if(EXISTS "${CMAKE_SOURCE_DIR}/.git_sha")
+    file(READ .git_sha ARMRX_GIT_SHA)
+    string(STRIP "${ARMRX_GIT_SHA}" ARMRX_GIT_SHA)
+endif()
+if(NOT DEFINED ARMRX_GIT_SHA OR ARMRX_GIT_SHA STREQUAL "")
+    # Fallback: derive from git if we are inside a work tree.
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+        OUTPUT_VARIABLE ARMRX_GIT_SHA
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE _git_sha_rc)
+    if(NOT _git_sha_rc EQUAL 0 OR ARMRX_GIT_SHA STREQUAL "")
+        set(ARMRX_GIT_SHA "unknown")
+    endif()
 endif()
 string(TIMESTAMP ARMRX_BUILD_DATE "%Y-%m-%d" UTC)
 add_compile_definitions(ARMRX_VERSION="${PROJECT_VERSION}"
