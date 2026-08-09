@@ -5,6 +5,17 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — build(ci): make .git_sha optional (clean-clone configure fix)
+- **Source:** user-reported GitHub CI configure error. `CMakeLists.txt` read `.git_sha`
+  unconditionally with `file(READ .git_sha ...)`; `.git_sha` is gitignored (written by
+  devbox_sync/build host) so it is **absent in clean clones and CI**, causing a hard
+  `cmake` configure failure. Branch `try/ci-gitsha-optional`, commit `f6be0e3`, merged `2d9a848`.
+- **Fix:** `.git_sha` is now read only `if(EXISTS ...)`; if absent, fall back to
+  `git rev-parse --short HEAD` (populates a real SHA when inside a git work tree), and
+  finally "unknown" if git is also unavailable. Verified: configure + `armrx --version`
+  succeed with `.git_sha` absent (printed `0.2.0 (9b0a00e, built ...)` from the git
+  fallback); the `.git_sha`-present path still works.
+
 ## 2026-08-09 — T6: surface swallowed errors (diagnostics gaps)
 - **Source:** Hermes-led T6 from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`). Logging/counter-only fixes (no behavior
