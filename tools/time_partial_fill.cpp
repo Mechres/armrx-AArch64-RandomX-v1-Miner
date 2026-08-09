@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     const std::size_t item_count = (mb * 1024ULL * 1024ULL) / armrx::kRandomXDatasetItemBytes;
 
     auto t0 = std::chrono::steady_clock::now();
-    armrx::PartialDataset pd(item_count);
+    auto pd = std::make_shared<armrx::PartialDataset>(item_count);
     auto t_alloc = std::chrono::steady_clock::now();
 
     std::vector<std::byte> seed_key(64, std::byte{0xAB});
@@ -34,8 +34,8 @@ int main(int argc, char** argv) {
 
     std::vector<unsigned> core_order;
     for (unsigned i = 0; i < std::thread::hardware_concurrency(); ++i) core_order.push_back(i);
-    pd.start_fill(cache, core_order, {});
-    pd.wait_for_fill();
+    pd->start_fill(cache, core_order, {});
+    pd->wait_for_fill();
     auto t_fill = std::chrono::steady_clock::now();
 
     auto ms = [](auto a, auto b) { return std::chrono::duration<double, std::milli>(b - a).count(); };
@@ -46,8 +46,10 @@ int main(int argc, char** argv) {
     const std::uint32_t flags = armrx::kRandOMXFlagHardAes | armrx::kRandOMXFlagJit | armrx::kRandOMXFlagFullMem;
     armrx::VirtualMachine vm(flags);
     vm.set_cache(cache.get());
-    // Wire the filled partial dataset (Track B hybrid light mode).
-    vm.set_partial_dataset(pd.data(), pd.item_count_atomic());
+    // Wire the filled partial dataset (Track B hybrid light mode). Pass shared
+    // ownership so the VM keeps it (and its atomic item count) alive for the
+    // measurement window.
+    vm.set_partial_dataset(pd);
 
     constexpr std::size_t kScratch = 2ULL * 1024 * 1024;
     auto scratch = std::make_unique<std::byte[]>(kScratch);

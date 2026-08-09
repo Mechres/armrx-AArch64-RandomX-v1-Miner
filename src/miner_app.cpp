@@ -145,7 +145,7 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
     if (partial_dataset_) {
-        engine.set_partial_dataset(partial_dataset_.get());
+        engine.set_partial_dataset(partial_dataset_);
     }
     engine.set_job(job);
 
@@ -308,7 +308,7 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
     if (partial_dataset_) {
-        engine.set_partial_dataset(partial_dataset_.get());
+        engine.set_partial_dataset(partial_dataset_);
     }
 
     std::atomic<std::uint64_t> shares_submitted{0};

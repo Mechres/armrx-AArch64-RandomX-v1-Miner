@@ -570,8 +570,11 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                 // enables the hybrid code emission. item_count_ rises
                 // atomically as fill progresses.
                 if (partial_dataset_) {
-                    vm.set_partial_dataset(partial_dataset_->data(),
-                                           partial_dataset_->item_count_atomic());
+                    // Forward shared ownership: the VM keeps the PartialDataset (and
+                    // its atomic item count) alive for the duration of this hash,
+                    // so a job rotation that swaps partial_dataset_ cannot leave the
+                    // VM holding dangling data/atomic pointers mid-hash.
+                    vm.set_partial_dataset(partial_dataset_);
                 }
                 if (mode_ == RandomXMode::fast && active_dataset) {
                     if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {

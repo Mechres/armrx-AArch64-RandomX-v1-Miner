@@ -3,6 +3,7 @@
 #include "armrx/blake2b.hpp"
 #include "armrx/dataset.hpp"
 #include "armrx/aes_generator.hpp"
+#include "armrx/partial_dataset.hpp"
 #include "armrx/assert.hpp"
 #include "armrx/randomx_config.hpp"
 #include <algorithm>
@@ -802,7 +803,7 @@ void VirtualMachine::run_jit() {
     }
     if (!is_fast_mode()) {
         // Light mode: JIT compiler generates inline dataset item derivation
-        const bool useHybrid = (partial_dataset_data_ != nullptr);
+        const bool useHybrid = (partial_dataset_ != nullptr);
         jit_->generateProgramLight(program_, config, static_cast<uint32_t>(dataset_offset_), useHybrid);
     } else {
         // Fast mode: JIT compiler reads directly from pre-computed dataset
@@ -824,10 +825,14 @@ void VirtualMachine::run_jit() {
         // Hybrid: pass partial dataset information for bound check.
         // Read item_count fresh from the atomic every hash — the fill
         // publishes chunks with release ordering, this load pairs with
-        // acquire, guaranteeing written item bytes are visible.
-        if (partial_dataset_data_ != nullptr && partial_dataset_item_count_ptr_) {
-            mem_regs.partial_dataset_ = reinterpret_cast<const uint8_t*>(partial_dataset_data_);
-            mem_regs.partial_dataset_items_ = partial_dataset_item_count_ptr_->load(std::memory_order_acquire);
+        // acquire, guaranteeing written item bytes are visible. The VM holds a
+        // shared_ptr to the PartialDataset, so data()/item_count_atomic() stay
+        // valid for the lifetime of this hash (no dangling-pointer window across
+        // job rotation / teardown).
+        if (partial_dataset_) {
+            mem_regs.partial_dataset_ = reinterpret_cast<const uint8_t*>(partial_dataset_->data());
+            mem_regs.partial_dataset_items_ =
+                partial_dataset_->item_count_atomic()->load(std::memory_order_acquire);
         }
     } else {
         // Fast mode: JIT reads from pre-computed dataset
