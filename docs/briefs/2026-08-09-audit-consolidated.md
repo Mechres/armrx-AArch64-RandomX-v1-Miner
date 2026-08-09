@@ -296,17 +296,24 @@ Canonical constraints applied throughout:
 
 ---
 
-## TIER 6 — Error-handling / diagnostics gaps (Deepseek + Luna #3 #9 — VERIFIED)
+## TIER 6 — Error-handling / diagnostics gaps (Deepseek + Luna #3 #9 — VERIFIED) — ✅ PARTIALLY ADOPTED 2026-08-09
 
-- `include/armrx/metrics.hpp:40` silently swallows `socket()` failure (`if (fd<0){running_=false;
-  return;}` — no log); `--metrics-port=N` then serves nothing.
-- `stratum_client.cpp:619` `catch(...){}` swallow in `handle_set_difficulty`.
-- `partial_dataset.cpp:179-183` `pthread_setaffinity_np` return ignored; madvise/prefault
-  best-effort without diagnostics. Fix: log when requested affinity fails; don't claim
-  topology-aware fill if pinning failed.
-- `stratum_client.cpp:394-396` `write_all` failure drops a share with no counter (silent loss).
-- `--pool-test` hardcoded third-party pool+wallet (`cli_parser.cpp:437-448`) — known open-source-
-  prep blocker (links repo to user); user deferred.
+Adopted (logging/counter-only, no behavior change; committed `eea37fd`, merged `a09cfe4`):
+- `include/armrx/metrics.hpp:40` `socket()` failure was silent (`running_=false; return;` no log;
+  `--metrics-port` then serves nothing). **FIXED:** `ARMRX_LOG_ERROR` with `strerror(errno)`.
+- `stratum_client.cpp:633` `handle_set_difficulty` `catch(...){}` swallowed malformed
+  difficulty silently (kept stale target). **FIXED:** `ARMRX_LOG_WARN` naming the bad value.
+  (Audit cited `:619` — that is actually `handle_set_target`'s tail; the real swallow is `:633`.)
+- `partial_dataset.cpp:186` `pthread_setaffinity_np` return ignored (no diagnostic if pinning
+  failed). **FIXED:** check return, `ARMRX_LOG_WARN` naming the cpu + "topology-aware fill NOT
+  enforced". (Audit cited `:179-183` — the call is `:186`.)
+- `stratum_client.cpp:405` `send_line` already logged `write_all` failure, but there was no
+  share-loss counter. **FIXED:** added `shares_dropped_` atomic (+ accessor, mirrors
+  `shares_accepted_/rejected_`) and increments it on send failure; log now says "(share dropped)".
+
+Deferred (not a diag-log gap, separate workstream):
+- `--pool-test` hardcoded third-party pool+wallet (`cli_parser.cpp:437-448`) — open-source-prep
+  blocker (links repo to user); **user deferred** (see Tier-7/deferred-work notes).
 
 ---
 

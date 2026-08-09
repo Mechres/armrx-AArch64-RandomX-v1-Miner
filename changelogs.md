@@ -5,6 +5,22 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T6: surface swallowed errors (diagnostics gaps)
+- **Source:** Hermes-led T6 from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`). Logging/counter-only fixes (no behavior
+  change). Branch `try/t6-diag`, commit `eea37fd`, merged `a09cfe4`.
+- **Adopted:** (1) `metrics.hpp` `socket()` failure now logs `strerror(errno)`; (2)
+  `handle_set_difficulty` `catch(...)` now logs the malformed difficulty instead of swallowing;
+  (3) `partial_dataset.cpp` `pthread_setaffinity_np` return checked + warns if pinning failed
+  (no longer silently claims topology-aware fill); (4) `send_line` share-loss now increments a
+  `shares_dropped_` counter (mirrors `shares_accepted_/rejected_`) + logs "(share dropped)".
+- **Audit line-number corrections:** the `catch(...)` is at `:633` (not `:619`); the pinning
+  call is `:186` (not `:179-183`); `write_all` send failure was already logged (only the
+  counter was missing). Deferred: `--pool-test` hardcoded wallet (user-deferred, open-source
+  prep).
+- Gate (on-device, Lenovo): `armrx_tests` Input1/2 byte-identical; `test_partial_dataset` ALL
+  PASSED.
+
 ## 2026-08-09 — T5-A/T5-B: CI cross-build + benchmarks out of CTest
 - **Source:** Hermes-led T5-A/T5-B from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`). No armrx CI existed; benchmarks were
