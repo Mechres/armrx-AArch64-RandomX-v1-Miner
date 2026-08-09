@@ -23,7 +23,16 @@ Canonical constraints applied throughout:
 
 ## TIER 1 — Correctness bugs (real UB / data races) — do first
 
-### T1-A Fix 3 data races (Deepseek, all VERIFIED)
+### T1-A Fix 3 data races (Deepseek, all VERIFIED) — ✅ ADOPTED 2026-08-09
+- Commits: `cc014e7` (fix) → merged `6af9744` (origin/main).
+- Fixes: (1) `extra_nonce1_` guarded by new `extra_nonce_mutex_` (`stratum_client.hpp`
+  + R/W sites); (2) `PoolManager::connect()` resets wrapped in `stratum_mutex_`
+  (released before `connect_to_current()` to avoid nested-lock); (3) `sockfd_` →
+  `std::atomic<int>`, AND `close_connection()` reordered to `shutdown → join reader
+  → close` (the deeper use-after-close race TSan caught and the poll missed).
+- **Gate:** host ThreadSanitizer on `test_pool_protocol` = **0 data races**; aarch64
+  cross-build clean; on-device `test_jit_equivalence` 16/16 + `test_jit_determinism`
+  green (Lenovo).
 1. **`extra_nonce1_` (std::string) race** — `src/stratum_client.cpp:528` (reader thread writes
    in `handle_set_extranonce`) vs `:375` (read, unsynchronized, in `build_submit_msg` from the
    worker submit path). Unsynchronized `std::string` access = UB (TSan-visible). Fix: guard with
@@ -36,7 +45,18 @@ Canonical constraints applied throughout:
    `:437/:440` (reader thread recv). Real but LOW severity — `shutdown()` precedes `close` so
    near-harmless in practice. Fix: `std::atomic<int>` or a mutex.
 
-### T1-B Stabilize partial-dataset lifecycle tests (Luna #1 #2, Luna #3 #2, Deepseek — VERIFIED)
+### T1-B Stabilize partial-dataset lifecycle tests (Luna #1 #2, Luna #3 #2, Deepseek — VERIFIED) — ✅ ADOPTED 2026-08-09
+- Commits: `a1967ae` (fix) → merged `39f8464` (origin/main).
+- Fixes: `wait_for_fill()` 100 ms poll → `std::condition_variable` (`fill_cv_`/
+  `fill_cv_mutex_`), notified by `fill_worker` on `item_count_` advance + `fill_complete_`,
+  destructor notifies on cancellation (predicate also checks `stop_`). Added
+  `wait_until_published(count)` hook. `test_contiguous_publish_no_uninitialized_read`
+  flaky `max_observed < kTotalItems` assert → deterministic `wait_until_published(
+  kChunkItems)` barrier + `assert(item_count()==kChunkItems)`; lag bumped 500ms→5s so
+  the stall is reliably observable. The byte-level `violation` check remains the
+  deterministic correctness guard.
+- **Gate:** on-device `test_partial_dataset` = **ALL PASSED** (Lenovo, deterministic
+  barrier message confirmed). 2× fresh runs.
 - **`tests/test_partial_dataset.cpp:262`** timing-sensitive assert
   (`assert(max_observed < kTotalItems)`) fails under ASan even when correct. Fix: sync barrier /
   explicit test hook instead of observing an intermediate prefix.
