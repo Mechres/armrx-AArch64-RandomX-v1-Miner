@@ -362,8 +362,8 @@ void test_light_mode_seed_rotation_rebuilds_partial_dataset() {
 
     armrx::MiningEngine engine(armrx::RandomXMode::light, kThreads);
 
-    armrx::PartialDataset pd(kPartialItems);
-    engine.set_partial_dataset(&pd);
+    auto pd = std::make_shared<armrx::PartialDataset>(kPartialItems);
+    engine.set_partial_dataset(pd);
 
     auto make_job = [](const std::string& id, std::vector<std::byte> seed) {
         armrx::Job job;
@@ -396,10 +396,10 @@ void test_light_mode_seed_rotation_rebuilds_partial_dataset() {
 
     // Wait for the first (seed-A) fill to finish before rotating.
     const auto fill_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (!pd.fill_complete() && std::chrono::steady_clock::now() < fill_deadline) {
+    while (!pd->fill_complete() && std::chrono::steady_clock::now() < fill_deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
-    assert(pd.fill_complete());
+    assert(pd->fill_complete());
     std::this_thread::sleep_for(std::chrono::milliseconds(300)); // let job1 hash briefly
 
     // Rotate to job2 (different seed) WHILE workers are running. This is the
@@ -449,13 +449,13 @@ void test_light_mode_seed_rotation_rebuilds_partial_dataset() {
     // test_partial_dataset already byte-validates, so this check is
     // platform-independent and isolates exactly what this fix changed: the
     // buffer rebuild on rotation.
-    assert(pd.fill_complete());
-    assert(pd.item_count() == kPartialItems);
+    assert(pd->fill_complete());
+    assert(pd->item_count() == kPartialItems);
     constexpr std::size_t kVerifyItems = 256; // spot-check first 256 items
     std::size_t wrong = 0;
     for (std::size_t i = 0; i < kVerifyItems; ++i) {
         const auto expected = armrx::generate_dataset_item(seedB_cache_for_verify, static_cast<std::uint64_t>(i));
-        const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
+        const auto* actual = pd->data() + i * armrx::kRandomXDatasetItemBytes;
         if (std::memcmp(expected.data(), actual, armrx::kRandomXDatasetItemBytes) != 0) {
             ++wrong;
         }
@@ -476,8 +476,8 @@ void test_light_mode_partial_dataset_matches_reference() {
     constexpr std::size_t kPartialItems = 65536;
 
     armrx::MiningEngine engine(armrx::RandomXMode::light, 1);
-    armrx::PartialDataset pd(kPartialItems);
-    engine.set_partial_dataset(&pd);
+    auto pd = std::make_shared<armrx::PartialDataset>(kPartialItems);
+    engine.set_partial_dataset(pd);
 
     const std::vector<std::byte> seed{std::byte{'s'}, std::byte{'e'}, std::byte{'e'}, std::byte{'d'},
                                       std::byte{'B'}, std::byte{'B'}, std::byte{'B'}, std::byte{'B'}};
@@ -505,7 +505,7 @@ void test_light_mode_partial_dataset_matches_reference() {
         have_sample = !samples.empty();
     }
     engine.stop();
-    assert(pd.fill_complete());
+    assert(pd->fill_complete());
     assert(!samples.empty());
 
     armrx::Argon2dCache cache;

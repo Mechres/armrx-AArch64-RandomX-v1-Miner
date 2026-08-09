@@ -98,9 +98,11 @@ public:
     void set_stagger_ms(unsigned ms) { stagger_ms_ = ms; }
     void set_affinity_mode(AffinityMode mode) { affinity_mode_ = mode; }
 
-    /// Set a partial dataset for hybrid light mode. The PartialDataset must
-    /// outlive the MiningEngine. Pass nullptr to disable.
-    void set_partial_dataset(PartialDataset* pd) { partial_dataset_ = pd; }
+    /// Set a partial dataset for hybrid light mode. The engine takes shared
+    /// ownership (so the PartialDataset outlives any in-flight VM hash even across
+    /// job rotation / teardown) and forwards a shared_ptr to each worker VM. Pass
+    /// nullptr (or empty shared_ptr) to disable.
+    void set_partial_dataset(std::shared_ptr<PartialDataset> pd) { partial_dataset_ = std::move(pd); }
 
     void set_job(const Job& job);
 
@@ -199,7 +201,7 @@ private:
     // (the "big" cluster size) -- used by AffinityMode::BigOnly.
     unsigned int big_core_count_ = 1;
 
-    PartialDataset* partial_dataset_ = nullptr;
+    std::shared_ptr<PartialDataset> partial_dataset_ = nullptr;
     // Generation counter for the partial (light-mode) dataset fill. Bumped
     // whenever the partial dataset must be re-filled — either the one-shot
     // first fill, or a live seed rotation while running. Workers compare

@@ -17,6 +17,10 @@
 
 namespace armrx {
 
+// Forward declaration: the VM holds a std::shared_ptr<const PartialDataset>, which
+// only needs the incomplete type here; the full definition is pulled in by vm.cpp.
+class PartialDataset;
+
 struct FloatRegister {
     double lo;
     double hi;
@@ -85,14 +89,16 @@ public:
     }
 
     /// Configure a partial dataset for hybrid light mode (Track B).
-    /// When set, the JIT bound-checks item_number < *partial_dataset_item_count_ptr_
-    /// before deciding whether to load directly (hit) vs. derive on the fly (miss).
-    /// item_count_ptr is the PartialDataset's atomic item count, read fresh every
-    /// hash via memory_order_acquire. Partial dataset lifetime must exceed the VM's.
-    void set_partial_dataset(const std::byte* data,
-                             const std::atomic<std::size_t>* item_count_ptr) {
-        partial_dataset_data_ = data;
-        partial_dataset_item_count_ptr_ = item_count_ptr;
+    /// When set, the JIT bound-checks item_number < item_count() before deciding
+    /// whether to load directly (hit) vs. derive on the fly (miss). The item_count
+    /// is read fresh every hash via memory_order_acquire.
+    /// Takes shared ownership of the PartialDataset so it (and its atomic item
+    /// count) stay alive for as long as this VM references it — this removes the
+    /// former "partial dataset lifetime must exceed the VM's" contract that was
+    /// fragile across job rotation / teardown (a rotated-away PartialDataset could
+    /// otherwise leave the VM holding dangling data/atomic pointers mid-hash).
+    void set_partial_dataset(std::shared_ptr<const PartialDataset> pd) {
+        partial_dataset_ = std::move(pd);
     }
 
     void allocate();
@@ -225,8 +231,10 @@ private:
     std::uint32_t flags_;
     const Argon2dCache* cache_ = nullptr;
     std::span<const std::byte> dataset_;
-    const std::byte* partial_dataset_data_ = nullptr;
-    const std::atomic<std::size_t>* partial_dataset_item_count_ptr_ = nullptr;
+    // Shared ownership of the partial dataset (hybrid light mode, Track B). The VM
+    // keeps it alive for as long as it references data()/item_count_atomic(), so a
+    // rotated-away PartialDataset can never leave dangling pointers mid-hash.
+    std::shared_ptr<const PartialDataset> partial_dataset_ = nullptr;
 
     std::uint64_t dataset_offset_ = 0;
     std::uint32_t mx_ = 0;
