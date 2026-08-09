@@ -224,7 +224,8 @@ if(ARMRX_BUILD_TESTS)
 
     add_executable(bench_armrx tests/bench_armrx.cpp)
     target_link_libraries(bench_armrx PRIVATE armrx_core)
-    add_test(NAME bench_armrx COMMAND bench_armrx)
+    # Opt-in benchmark, NOT part of CTest: slow + thermally variant on-device.
+    # Run manually after building: ./build-cross/bench_armrx
 
     add_executable(test_config tests/test_config.cpp)
     target_link_libraries(test_config PRIVATE armrx_core)
@@ -267,7 +268,8 @@ if(ARMRX_BUILD_TESTS)
     if(ARMRX_HAVE_JIT)
     add_executable(bench_opcodes tests/bench_opcodes.cpp)
     target_link_libraries(bench_opcodes PRIVATE armrx_core)
-    add_test(NAME bench_opcodes COMMAND bench_opcodes)
+    # Opt-in benchmark, NOT part of CTest: slow + thermally variant on-device.
+    # Run manually after building: ./build-cross/bench_opcodes
 
     # JIT encoding and determinism tests
     add_executable(test_jit_encodings tests/test_jit_encodings.cpp)
@@ -367,7 +369,8 @@ if(ARMRX_BUILD_TESTS)
     # IMUL_R operand-magnitude sampler (T3-3 gate check) — interpreter-only, host-runnable
     add_executable(bench_imul_magnitudes tests/bench_imul_magnitudes.cpp)
     target_link_libraries(bench_imul_magnitudes PRIVATE armrx_core)
-    add_test(NAME bench_imul_magnitudes COMMAND bench_imul_magnitudes 8 20)
+    # Opt-in benchmark, NOT part of CTest: slow + thermally variant on-device.
+    # Run manually after building: ./build-cross/bench_imul_magnitudes 8 20
 
     # Dual-hash premise microbench (experiment tool, NOT shipped): measures whether the
     # A53 MAC port has spare throughput to exploit by interleaving a 2nd independent hash

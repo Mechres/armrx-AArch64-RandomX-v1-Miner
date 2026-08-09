@@ -39,8 +39,8 @@ static std::vector<std::byte> hex_to_bytes(const char* s) {
 static int run_engine(const char* seed_hex, std::uint64_t nonce, std::size_t partial_items, bool rotate) {
     std::vector<std::byte> seed = hex_to_bytes(seed_hex);
     armrx::MiningEngine engine(armrx::RandomXMode::light, 2);
-    armrx::PartialDataset pd(partial_items);
-    engine.set_partial_dataset(&pd);
+    auto pd = std::make_shared<armrx::PartialDataset>(partial_items);
+    engine.set_partial_dataset(pd);
 
     auto make_job = [&](const std::string& id, const std::vector<std::byte>& sk) {
         armrx::Job job;
@@ -67,7 +67,7 @@ static int run_engine(const char* seed_hex, std::uint64_t nonce, std::size_t par
     });
     // wait for first fill
     auto dl = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (!pd.fill_complete() && std::chrono::steady_clock::now() < dl)
+    while (!pd->fill_complete() && std::chrono::steady_clock::now() < dl)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     // rotate (only in rotate mode)
