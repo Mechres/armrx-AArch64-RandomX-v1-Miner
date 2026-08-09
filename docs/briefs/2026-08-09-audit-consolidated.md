@@ -96,11 +96,37 @@ Canonical constraints applied throughout:
   hand-written assembly — this is the clean answer to "could our code be faster in asm?" (no).
 - **Gate:** all hash KATs + `test_mining` + byte-for-byte comparison vs current path.
 
-### T2-B Improve PartialDataset ownership (Luna #3 #3 — VERIFIED, NEW)
-- `include/armrx/vm.hpp:87-96` `set_partial_dataset` stores raw `const std::byte*` +
+### T2-B Improve PartialDataset ownership (Luna #3 #3 — VERIFIED, NEW) — ✅ ADOPTED 2026-08-09
+- `include/armrx/vm.hpp:87-96` `set_partial_dataset` stored raw `const std::byte*` +
   `const std::atomic<size_t>*` with comment "Partial dataset lifetime must exceed the VM's."
-  Fragile during job rotation / teardown / exceptions. Fix: shared ownership (shared_ptr) or an
-  explicit lifetime object for the data mapping + publication counter.
+  Fragile during job rotation / teardown / exceptions. Fix: shared ownership (shared_ptr).
+- **Fix (commit `23b0b4b` → merged `7ded65c` on origin/main):** thread the `shared_ptr<PartialDataset>`
+  that `miner_app` already held through to the VM. `VirtualMachine` now stores
+  `std::shared_ptr<const PartialDataset> partial_dataset_` and reads `data()` /
+  `item_count_atomic()` through it; `MiningEngine::set_partial_dataset` takes
+  `std::shared_ptr<PartialDataset>`; `miner_app` passes the shared_ptr (no `.get()`).
+  The PartialDataset (and its atomic item count) now outlive any in-flight VM hash.
+  No hashing-behavior change. Callers updated: `mining_engine.cpp`, `miner_app.cpp`,
+  `tools/time_partial_fill.cpp`, `tests/test_mining.cpp`.
+- **Gate (on-device, Lenovo, merged main @ `7ded65c`):**
+  - `test_mining`: "ALL MINING TESTS PASSED SUCCESSFULLY!" — **2 clean passes**
+    (`proc_66ee7288827e`, `proc_f1a96721f730`), including both
+    `test_light_mode_seed_rotation_rebuilds_partial_dataset` and
+    `test_light_mode_partial_dataset_matches_reference` (the shared-ownership-under-
+    rotation path this change exists to protect).
+  - `test_jit_equivalence`: 16 pairs all byte-identical.
+  - `armrx_tests` (test_blake2b): Input1 actual == Input1 (JIT) hash byte-identical.
+  - `test_partial_dataset`: intermittently hits `Assertion failed: pd.item_count() ==
+    kChunkItems` at `test_contiguous_publish_no_uninitialized_read:260` — the
+    **pre-existing documented flake** (T1-C / Luna #2, "timing-sensitive assertion").
+    ORTHOGONAL to T2-B: that test uses a locally-created `PartialDataset` and asserts
+    on `PartialDataset`-internal `item_count()`/`wait_until_published()` logic in
+    `partial_dataset.cpp` (none of which T2-B touches). Proven not a regression: it
+    PASSED on the same merged code (`pb_pd2.out`: "ALL PARTIAL DATASET TESTS PASSED"),
+    and the test's `pd` does not route through the VM/engine ownership path.
+    This flake is the subject of **T2-C** (make partial-dataset publication
+    data-race-safe) — tracked separately, not a T2-B regression.
+- **Result:** T2-B correctness-preserving. Adopted.
 
 ---
 
