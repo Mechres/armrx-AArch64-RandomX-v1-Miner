@@ -91,19 +91,27 @@ StratumClient::~StratumClient() {
 void StratumClient::close_connection() {
     connected_.store(false);
 
-    // Close the socket FIRST to unblock the reader thread (avoids TLS race)
-    if (sockfd_ >= 0) {
-        ::shutdown(sockfd_, SHUT_RDWR);
-        ::close(sockfd_);
-        sockfd_ = -1;
+    // Unblock the reader thread's recv() with a SHUT_RDWR so it returns and
+    // exits its loop (becomes joinable). The fd must NOT be closed until after
+    // the reader thread is joined — closing while the reader is mid-recv() is a
+    // use-after-close race (TSan-flagged). shutdown() alone unblocks recv()
+    // without invalidating the fd the reader is using.
+    if (sockfd_.load() >= 0) {
+        ::shutdown(sockfd_.load(), SHUT_RDWR);
     }
 
-    // Join reader thread before tearing down TLS
+    // Join reader thread before closing the fd / tearing down TLS.
     if (reader_thread_.joinable() && std::this_thread::get_id() != reader_thread_.get_id()) {
         reader_thread_.join();
     }
     if (keepalive_thread_.joinable() && std::this_thread::get_id() != keepalive_thread_.get_id()) {
         keepalive_thread_.join();
+    }
+
+    // Reader is gone — now safe to close the fd and tear down TLS.
+    if (sockfd_.load() >= 0) {
+        ::close(sockfd_.load());
+        sockfd_.store(-1);
     }
 
     // Now safe to tear down TLS
@@ -372,14 +380,17 @@ std::string StratumClient::build_submit_msg(const Job& job, std::uint64_t nonce,
         // those require 4-param mining.submit with extra_nonce2, which armrx
         // cannot produce (it does not construct coinbases). Warn once so the
         // silent-all-shares-rejected case is visible instead of mysterious.
-        if (!extra_nonce1_.empty() && !warned_extranonce_v1_) {
-            warned_extranonce_v1_ = true;
-            ARMRX_LOG_WARN << "pool advertised extranonce (extra_nonce1=" << extra_nonce1_
-                      << ") on the Stratum V1 path — armrx submits the Monero "
-                         "3-param form [wallet, job_id, nonce]; a Bitcoin-style pool "
-                         "requiring extra_nonce2 will reject every share (Monero "
-                         "pools do not use extranonce: the nonce is a fixed 4-byte "
-                         "field at blob offset 39).";
+        {
+            std::lock_guard<std::mutex> lock(extra_nonce_mutex_);
+            if (!extra_nonce1_.empty() && !warned_extranonce_v1_) {
+                warned_extranonce_v1_ = true;
+                ARMRX_LOG_WARN << "pool advertised extranonce (extra_nonce1=" << extra_nonce1_
+                          << ") on the Stratum V1 path — armrx submits the Monero "
+                             "3-param form [wallet, job_id, nonce]; a Bitcoin-style pool "
+                             "requiring extra_nonce2 will reject every share (Monero "
+                             "pools do not use extranonce: the nonce is a fixed 4-byte "
+                             "field at blob offset 39).";
+            }
         }
         return armrx::json::rpc_envelope(id, "mining.submit",
                         "[\"" + armrx::json::escape(wallet_) + "\",\"" + armrx::json::escape(job.job_id) + "\",\"" +
@@ -525,7 +536,10 @@ void StratumClient::handle_line(const std::string& line) {
         // mining.set_extranonce: update extra_nonce1 / extra_nonce2_size
         else if (method == "mining.set_extranonce") {
             const auto en1 = armrx::json::get_array_first(line, "params");
-            if (!en1.empty()) extra_nonce1_ = en1;
+            if (!en1.empty()) {
+                std::lock_guard<std::mutex> lock(extra_nonce_mutex_);
+                extra_nonce1_ = en1;
+            }
         }
         else if (method == "job") {
             // CryptoNote job notification
