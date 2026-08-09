@@ -251,13 +251,22 @@ Canonical constraints applied throughout:
 
 ## TIER 4 — Security / defaults
 
-### T4-A Make JIT buffer W^X by default (Luna #1 #8, Luna #3 #8, Deepseek #8 — VERIFIED)
-- `jit_compiler_a64.cpp:162-185` attempts RWX as the fast path. `RANDOMX_FORCE_SECURE` is
-  auto-defined ONLY for OpenBSD/NetBSD/macOS — on **Linux AArch64 it is NOT defined**, so RWX is
-  the default and W^X needs a manual `-DRANDOMX_FORCE_SECURE` (no CMake option, no runtime
-  toggle). Fix: add `ARMRX_SECURE_JIT` CMake option defaulting to W^X on Linux; expose RWX as an
-  explicit benchmark-only option. Recompilation overhead is amortized (rare per steady-state
-  hash) — measure separately, don't assume it hurts mining.
+### T4-A Make JIT buffer W^X by default (Luna #1 #8, Luna #3 #8, Deepseek #8 — VERIFIED) — ✅ ADOPTED 2026-08-09
+- `jit_compiler_a64.cpp` tried RWX as the fast path; `RANDOMX_FORCE_SECURE` was auto-defined
+  only for OpenBSD/NetBSD/macOS, so on **Linux AArch64 RWX was the default** and W^X required a
+  manual `-DRANDOMX_FORCE_SECURE`. Added `ARMRX_SECURE_JIT` CMake option **defaulting ON**
+  (W^X via `RANDOMX_FORCE_SECURE`); RWX is now the explicit opt-out (`ARMRX_SECURE_JIT=OFF`).
+  Committed `d90b487`, merged `93aae9d` (origin/main).
+- **A/B test (user directive: adopt only if real-world H/s not hurt):**
+  - Steady-state `bench_armrx` on-device (Lenovo, 765 MHz fixed): **RWX 5.13 H/s** vs
+    **W^X 5.12 H/s** (~0.2% diff, within run-to-run noise; per-phase breakdown identical).
+    W^X does NOT measurably hurt hashrate — the mprotect cost is amortized (one RW→RX pair
+    per JIT recompile, not per hash).
+  - **Correctness gate (WX build, on-device):** `armrx_tests` Input1/2 actual == JIT hash
+    byte-identical; `test_jit_equivalence` **16/16 byte-identical**; `test_partial_dataset`
+    ALL PASSED. W^X emits identical code to RWX.
+  - **Verdict: ADOPT** — W^X is a free security win (removes the RWX JIT exploit primitive)
+    with no hashrate regression. Made the default; RWX kept as opt-out for benchmarking.
 
 ---
 

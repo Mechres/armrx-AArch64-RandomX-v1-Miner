@@ -5,6 +5,20 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T4-A: make W^X JIT the default (RWX opt-out)
+- **Source:** Hermes-led T4-A from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`). On Linux AArch64, `RANDOMX_FORCE_SECURE`
+  was NOT auto-defined, so the JIT code buffer defaulted to RWX (a known exploit primitive).
+  Committed `d90b487`, merged `93aae9d` (origin/main).
+- **Change:** added `ARMRX_SECURE_JIT` CMake option **defaulting ON** (W^X via
+  `RANDOMX_FORCE_SECURE`); RWX is now the explicit opt-out (`ARMRX_SECURE_JIT=OFF`) for
+  benchmarking. Only `CMakeLists.txt` changed.
+- **A/B test (user directive: adopt only if real-world H/s not hurt):** on-device
+  `bench_armrx` steady-state — RWX **5.13 H/s** vs W^X **5.12 H/s** (~0.2%, within noise;
+  per-phase identical). W^X is a free security win with no hashrate regression. Correctness
+  gate (WX build): `armrx_tests` byte-identical, `test_jit_equivalence` 16/16,
+  `test_partial_dataset` ALL PASSED.
+
 ## 2026-08-09 — T3-C: derive resolveInstructionType from engine[256] ordering
 - **Source:** Hermes-led T3-C from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`). The audit OVERSTATED this as a large
