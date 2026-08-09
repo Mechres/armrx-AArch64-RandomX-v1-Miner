@@ -37,7 +37,10 @@ public:
     {
         thread_ = std::thread([this, port, prov = std::move(provider)]() {
             int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-            if (fd < 0) { running_ = false; return; }
+            if (fd < 0) {
+                ARMRX_LOG_ERROR << "Metrics socket() failed: " << std::strerror(errno);
+                running_ = false; return;
+            }
             int opt = 1;
             ::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
             struct sockaddr_in addr{};

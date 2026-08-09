@@ -88,6 +88,7 @@ public:
     void set_tls_verify_peer(bool v) { tls_verify_peer_ = v; }
     [[nodiscard]] std::uint64_t shares_accepted() const { return shares_accepted_.load(std::memory_order_relaxed); }
     [[nodiscard]] std::uint64_t shares_rejected() const { return shares_rejected_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t shares_dropped() const { return shares_dropped_.load(std::memory_order_relaxed); }
 
     /**
      * Configure automatic reconnection on disconnect.
@@ -234,6 +235,7 @@ private:
     // Share result counters (written by reader thread, read by main thread)
     std::atomic<std::uint64_t> shares_accepted_{0};
     std::atomic<std::uint64_t> shares_rejected_{0};
+    std::atomic<std::uint64_t> shares_dropped_{0};  // send failures (share lost)
 
     // TLS
     bool tls_enabled_{false};

@@ -403,7 +403,8 @@ void StratumClient::send_line(const std::string& json_line) {
     std::string line = json_line;
     if (line.empty() || line.back() != '\n') line.push_back('\n');
     if (!write_all(line.c_str(), line.size())) {
-        ARMRX_LOG_ERROR << "send_line failed: " << std::strerror(errno);
+        shares_dropped_.fetch_add(1, std::memory_order_relaxed);
+        ARMRX_LOG_ERROR << "send_line failed (share dropped): " << std::strerror(errno);
     }
 }
 
@@ -630,7 +631,10 @@ void StratumClient::handle_set_difficulty(const std::string& line) {
         std::lock_guard lock(target_mutex_);
         current_target_ = t;
         ARMRX_LOG_INFO << "Difficulty updated to " << diff;
-    } catch (...) {}
+    } catch (...) {
+        ARMRX_LOG_WARN << "handle_set_difficulty: malformed difficulty '" << diff_str
+                       << "' (kept previous target)";
+    }
 }
 
 void StratumClient::handle_reply(const std::string& line) {
