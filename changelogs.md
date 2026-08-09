@@ -5,6 +5,25 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T3-A: make JIT register/label contract mechanical
+- **Source:** Hermes-led T3-A from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  Committed `d19bcb6` (origin/main).
+- **Hazard:** the JIT emitter derived template sizes from linker symbols
+  (`CodeSize`, `PrologueSize`, `MainLoopBegin`, `ImulRcpLiteralsEnd`) and an integer-register
+  map `IntRegMap[8]` that lived only as an informal comment block in `jit_compiler_a64_static.S`
+  plus an independent constexpr in `jit_compiler_a64.cpp`. When the hand-written assembly
+  changed layout without a matching C++ constant update, the emitter silently produced
+  wrong-size / overlapping JIT code (the historical register-clobber hazard class).
+- **Fix:** new `include/armrx/jit_contract.h` is the single source of truth — `IntRegMap`
+  with `static_assert` invariants (8 distinct entries, in x0..x30) checked at compile time,
+  plus `kExpected*` known-good label deltas. `jit_compiler_a64.cpp` reuses the shared
+  `IntRegMap` and validates the computed deltas against the contract via a
+  `[[gnu::constructor]]` check that aborts at load if the asm/C++ layout ever drifts.
+- **Correctness unchanged:** no emitted instruction differs. Gate: `armrx_tests` Input1
+  actual == JIT hash byte-identical; `test_partial_dataset` ALL PASSED; the load-time
+  validator passes (no abort).
+
 ## 2026-08-09 — T2-C: close lost-wakeup deadlock in PartialDataset fill waiters
 - **Source:** Hermes-led T2-C from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
