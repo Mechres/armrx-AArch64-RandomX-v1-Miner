@@ -215,16 +215,25 @@ Canonical constraints applied throughout:
 - Fix: generate instruction metadata, interpreter handlers, JIT handlers, scheduler footprints
   from ONE opcode-definition table. Largest refactor — do last.
 
-### T3-D Remove / gate dead & inert code (Deepseek — VERIFIED)
-- `subscribe_try_` never incremented (`grep` for `++` returns 0) → `idx = 0 % 4 = 0` always →
-  the 4-format `mining.subscribe` fallback (`stratum_client.cpp:320`) is inert.
-- `cfg.tui` parsed (`config.cpp:82`) but consumed nowhere — JSON `"tui":true` silently no-ops.
-- `Tui::set_color()` (tui.hpp:74) and `StratumClient::set_nonce_config()`
-  (stratum_client.hpp:106) have zero callers.
-- ~250 lines dead Windows/Apple/BSD branches in `src/virtual_memory.c` (self-acknowledged).
-- TLS EAGAIN handling (`tls_client.cpp:111-122` sets `errno=EAGAIN` but returns ≤0; `write_all`
-  treats as fatal) — latent, and DEAD on the musl shipping build (`ARMRX_HAVE_TLS` undefined).
-  Low priority.
+### T3-D Remove / gate dead & inert code (Deepseek — VERIFIED, mostly overstated) — ✅ PARTIALLY ADOPTED 2026-08-09
+- Verified each claim against source before acting:
+  - `cfg.tui` JSON parse (`config.cpp:82`) + `AppConfig::tui` field (`config.hpp:24`):
+    **genuinely dead** — only CLI `--tui`/`opts_.use_tui` (cli_parser.hpp:36) drives the
+    TUI (miner_app.cpp). **ADOPTED**: removed the dead parse + field (`b929d50`, origin/main).
+  - `subscribe_try_` never incremented → `idx = 0` always → 4-format `mining.subscribe`
+    fallback (`stratum_client.cpp:328`) is **inert** — but it is LIVE pool-reconnect logic;
+    removing it risks the working Stratum path. **Left as-is** (not safely removable without
+    a behavioral re-test of pool failover; out of scope for a hygiene cleanup).
+  - `set_color()` (tui.hpp:74) / `set_nonce_config()` (stratum_client.hpp:106): **zero
+    callers, but intentional public API** (color override; alt-chain nonce layout) — not
+    "inert dead code". **Left as-is.**
+  - ~250 lines Win/Apple/BSD branches in `src/virtual_memory.c`: **critical JIT-platform
+    code** (guards RWX/secure alloc across OSes) — **left as-is** (too risky).
+  - TLS EAGAIN (`tls_client.cpp`) is **DEAD on the musl shipping build** (`ARMRX_HAVE_TLS`
+    undefined); latent only. **Left as-is** (low priority, no shipping effect).
+- **Net:** only the dead `cfg.tui` field was safely removable; the rest of the audit's
+  "dead code" framing was overstated. Gate (on-device, Lenovo): `armrx_tests` Input1 actual
+  == JIT hash byte-identical; `test_partial_dataset` ALL PASSED.
 
 ---
 

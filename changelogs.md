@@ -5,6 +5,19 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T3-D: drop dead cfg.tui JSON field (conservative slice)
+- **Source:** Hermes-led T3-D from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`), verified against source before acting.
+  Committed `b929d50` (origin/main).
+- **Scope (safe slice only):** `AppConfig::tui` JSON parse (`config.cpp`) + field
+  (`config.hpp`) were dead — only the CLI `--tui`/`opts_.use_tui` path drives the TUI
+  (`miner_app.cpp`). Removed. The audit's other "dead code" claims (`subscribe_try_` inert
+  fallback, `set_color`/`set_nonce_config` public API, 250 lines in `virtual_memory.c`, TLS
+  EAGAIN) were verified to be live reconnect logic, intentional API, critical JIT-platform
+  code, or latent/dead-on-shipping-build — all **left as-is** (overstated by the audit).
+- **Behavior-preserving:** TUI still works via CLI `--tui`. Gate: `armrx_tests` Input1 actual
+  == JIT hash byte-identical; `test_partial_dataset` ALL PASSED.
+
 ## 2026-08-09 — T3-B: name raw scratchpad/AND/bitfield A64 encoders
 - **Source:** Hermes-led T3-B from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
