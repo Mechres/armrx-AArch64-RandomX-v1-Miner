@@ -954,17 +954,23 @@ void VirtualMachine::hash_and_fill(void* out, void* fill_state) {
     hash_and_fill_aes_1r_x4(std::span<std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a), new_fill_state);
     std::memcpy(fill_state, new_fill_state.data(), 64);
 
-    alignas(16) std::array<std::byte, sizeof(RegisterFile)> input_bytes{};
-    std::memcpy(input_bytes.data(), &reg_, sizeof(RegisterFile));
-    blake2b(std::span<const std::byte>(input_bytes), static_cast<std::byte*>(out), 32);
+    // Feed the register file to BLAKE2b directly as a byte span — no intermediate
+    // 256-byte copy. RegisterFile is standard-layout and alignas(16), so its object
+    // representation is exactly the bytes BLAKE2b hashes (byte-identical to the old
+    // memcpy'd array, which only copied those same 256 bytes).
+    blake2b(std::span<const std::byte>(reinterpret_cast<const std::byte*>(&reg_),
+                                       sizeof(RegisterFile)),
+            static_cast<std::byte*>(out), 32);
 }
 
 void VirtualMachine::get_final_result(void* out) {
     hash_aes_1r_x4(std::span<const std::byte>(scratchpad_data_, scratchpad_size_), reinterpret_cast<AesState&>(reg_.a));
 
-    alignas(16) std::array<std::byte, sizeof(RegisterFile)> input_bytes{};
-    std::memcpy(input_bytes.data(), &reg_, sizeof(RegisterFile));
-    blake2b(std::span<const std::byte>(input_bytes), static_cast<std::byte*>(out), 32);
+    // Feed the register file to BLAKE2b directly as a byte span — no intermediate
+    // 256-byte copy (see hash_and_fill for rationale; identical byte representation).
+    blake2b(std::span<const std::byte>(reinterpret_cast<const std::byte*>(&reg_),
+                                       sizeof(RegisterFile)),
+            static_cast<std::byte*>(out), 32);
 }
 
 void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::size_t input_size, void* output) {
@@ -978,13 +984,17 @@ void randomx_calculate_hash(VirtualMachine* machine, const void* input, std::siz
     machine->init_scratchpad(tempHash.data());
     machine->reset_rounding_mode();
 
-    alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
     for (int chain = 0; chain < 7; ++chain) {
         machine->run(tempHash.data());
 
+        // Hash the register file directly as a byte span — drops the 256-byte copy
+        // per chain (7×/hash). RegisterFile is standard-layout and alignas(16), so
+        // its object representation is exactly what BLAKE2b hashes (byte-identical
+        // to the prior memcpy'd buffer).
         const auto& reg = machine->get_register_file();
-        std::memcpy(reg_bytes.data(), &reg, sizeof(reg));
-        blake2b(std::span<const std::byte>(reg_bytes), tempHash.data(), 64);
+        blake2b(std::span<const std::byte>(reinterpret_cast<const std::byte*>(&reg),
+                                           sizeof(RegisterFile)),
+                tempHash.data(), 64);
     }
 
     machine->run(tempHash.data());
@@ -1028,12 +1038,16 @@ void randomx_calculate_hash_pipelined(
     }
     machine->reset_rounding_mode();
 
-    alignas(16) std::array<std::byte, sizeof(RegisterFile)> reg_bytes{};
     for (int chain = 0; chain < 7; ++chain) {
         machine->run(temp_hash.data());
+        // Hash the register file directly as a byte span — drops the 256-byte copy
+        // per chain. RegisterFile is standard-layout and alignas(16), so its object
+        // representation is exactly what BLAKE2b hashes (byte-identical to the old
+        // memcpy'd buffer).
         const auto& reg = machine->get_register_file();
-        std::memcpy(reg_bytes.data(), &reg, sizeof(reg));
-        blake2b(std::span<const std::byte>(reg_bytes), temp_hash.data(), 64);
+        blake2b(std::span<const std::byte>(reinterpret_cast<const std::byte*>(&reg),
+                                           sizeof(RegisterFile)),
+                temp_hash.data(), 64);
     }
     machine->run(temp_hash.data());
     // Now: scratchpad has VM execution results, reg_.a has initial AES hash state
@@ -1070,9 +1084,12 @@ void randomx_calculate_hash_pipelined(
 
     // ── Part E: Finalize current hash output ──
     std::memcpy(&current_reg.a, hash_state.data(), sizeof(AesState));
-    alignas(16) std::array<std::byte, sizeof(RegisterFile)> final_reg_bytes{};
-    std::memcpy(final_reg_bytes.data(), &current_reg, sizeof(RegisterFile));
-    blake2b(std::span<const std::byte>(final_reg_bytes),
+    // Hash the (modified) register-file copy directly as a byte span — drops the
+    // 256-byte copy. current_reg is a local copy (its .a was patched above), and
+    // RegisterFile is standard-layout/alignas(16), so its object representation is
+    // exactly what BLAKE2b hashes (byte-identical to the old memcpy'd buffer).
+    blake2b(std::span<const std::byte>(reinterpret_cast<const std::byte*>(&current_reg),
+                                       sizeof(RegisterFile)),
             static_cast<std::byte*>(output), 32);
 
     // ── Part F: Prepare VM for next hash's execution ──
