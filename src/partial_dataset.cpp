@@ -258,12 +258,23 @@ void PartialDataset::wait_for_fill() {
     // poll loop, which added wakeup latency and test flakiness under TSAN/ASan
     // scheduling skew). Wakes on fill_complete_ OR cancellation (stop_) so a
     // cancelled fill never blocks forever.
+    //
+    // The fill workers raise the atomic item_count_/fill_complete_ and call
+    // fill_cv_.notify_all() WITHOUT holding fill_cv_mutex_ (the hot publish
+    // path is intentionally lock-free). A notify_all() that lands in the
+    // window between the predicate check and the futex wait is therefore lost,
+    // which can block this waiter forever (no subsequent notify, no guaranteed
+    // spurious wakeup) -- the observed test_partial_dataset deadlock. Re-check
+    // the predicate on a short timeout backstop so liveness never depends on a
+    // single notify. Correctness is unchanged: the published counters are
+    // atomics and the CV is only a wakeup hint.
     {
         std::unique_lock<std::mutex> lk(fill_cv_mutex_);
-        fill_cv_.wait(lk, [this] {
-            return fill_complete_.load(std::memory_order_acquire) ||
-                   stop_->load(std::memory_order_acquire);
-        });
+        static constexpr auto kPoll = std::chrono::milliseconds(20);
+        while (!fill_complete_.load(std::memory_order_acquire) &&
+               !stop_->load(std::memory_order_acquire)) {
+            fill_cv_.wait_for(lk, kPoll);
+        }
     }
 
     // Log fill completion once per process (multiple workers may observe it).
@@ -289,10 +300,14 @@ void PartialDataset::wait_for_fill() {
 
 void PartialDataset::wait_until_published(std::size_t count) {
     std::unique_lock<std::mutex> lk(fill_cv_mutex_);
-    fill_cv_.wait(lk, [this, count] {
-        return item_count_.load(std::memory_order_acquire) >= count ||
-               stop_->load(std::memory_order_acquire);
-    });
+    // See wait_for_fill(): a lock-free notify_all() from a fill worker can be
+    // lost in the predicate-check/futex-wait window, so re-check the published
+    // count on a short timeout backstop instead of relying on a single wakeup.
+    static constexpr auto kPoll = std::chrono::milliseconds(20);
+    while (item_count_.load(std::memory_order_acquire) < count &&
+           !stop_->load(std::memory_order_acquire)) {
+        fill_cv_.wait_for(lk, kPoll);
+    }
 }
 
 } // namespace armrx
