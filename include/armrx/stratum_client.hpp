@@ -173,7 +173,9 @@ private:
     std::string wallet_;
     std::string password_;
 
-    int sockfd_{-1};
+    // Socket fd. std::atomic so the reader thread's recv() and close_connection()'s
+    // write of -1 cannot race on a plain int (TSan-flagged data race).
+    std::atomic<int> sockfd_{-1};
     std::atomic<bool> connected_{false};
 
     std::string session_id_;
@@ -184,6 +186,10 @@ private:
     // Bitcoin-style pool whose 4-param mining.submit armrx cannot satisfy —
     // surfaced once via warned_extranonce_v1_ in build_submit_msg().
     std::string extra_nonce1_;      // Pool-assigned nonce prefix (hex)
+    // Guards extra_nonce1_ (written by the reader thread on mining.set_extranonce,
+    // read by build_submit_msg on the worker submit path). Separate from send_mutex_
+    // because build_submit_msg runs before send_mutex_ is acquired in submit_share.
+    mutable std::mutex extra_nonce_mutex_;
     std::size_t extra_nonce2_size_{4}; // Extra nonce 2 length in bytes
     mutable bool warned_extranonce_v1_{false}; // log-once guard (see above)
 

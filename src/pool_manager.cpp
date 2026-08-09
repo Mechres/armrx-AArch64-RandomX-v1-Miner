@@ -86,9 +86,17 @@ void PoolManager::connect_to_current() {
 }
 
 bool PoolManager::connect() {
-    current_idx_ = 0;
-    failover_cooldown_ = 0;
-    sync_retry_count_ = 0;
+    // Reset state under the same lock the accessors (current_pool_name, etc.)
+    // take when they read current_idx_/failover_cooldown_/sync_retry_count_,
+    // so a MetricsExporter poll racing this reset cannot observe a torn write.
+    // Released before connect_to_current() (which takes stratum_mutex_ itself)
+    // to avoid a nested non-recursive lock.
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
+        current_idx_ = 0;
+        failover_cooldown_ = 0;
+        sync_retry_count_ = 0;
+    }
     connect_to_current();
     return is_connected();
 }
