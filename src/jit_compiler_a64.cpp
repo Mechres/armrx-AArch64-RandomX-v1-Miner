@@ -1389,6 +1389,22 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	memcpy(code + codePos, p1, p2 - p1);
 	codePos += static_cast<uint32_t>(p2 - p1);
 
+	// Diagnostic-only: dump the raw superscalar/dataset-derivation bytes so the
+	// emitted mnemonics (not just the per-opcode byte sizes) can be disassembled
+	// offline. Guarded by jit_dump_enabled_ so it never fires in normal runs.
+	if (jit_dump_enabled_) {
+		const uint32_t ss_bytes = codePos - static_cast<uint32_t>(CodeSize);
+		std::cout << "\n--- Raw bytes (SUPERSCALAR region, offset from CodeSize) ---\n";
+		for (uint32_t i = 0; i < ss_bytes; i += 16) {
+			std::cout << std::hex << std::setw(6) << std::setfill('0') << i << ": ";
+			for (uint32_t j = i; j < i + 16 && j < ss_bytes; ++j) {
+				std::cout << std::hex << std::setw(2) << std::setfill('0')
+				          << static_cast<int>(code[CodeSize + j]) << ' ';
+			}
+			std::cout << std::dec << '\n';
+		}
+	}
+
 	// Hard bounds guard: the per-program emission (RANDOMX_SUPERSCALAR_LATENCY
 	// × 512 instructions + IMUL_RCP reciprocals + the C* fallback immediates)
 	// must fit the CalcDatasetItemSize slot or it silently overruns the mmap'd
