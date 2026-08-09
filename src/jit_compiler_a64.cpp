@@ -618,53 +618,6 @@ InstrFootprint computeSuperscalarFootprint(const Instruction& instr, Superscalar
 
 } // namespace
 
-InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
-	const InstructionGeneratorA64 h = engine[opcode];
-	if (h == &JitCompilerA64::h_IADD_RS) return InstructionType::IADD_RS;
-	if (h == &JitCompilerA64::h_IADD_M) return InstructionType::IADD_M;
-	if (h == &JitCompilerA64::h_ISUB_R) return InstructionType::ISUB_R;
-	if (h == &JitCompilerA64::h_ISUB_M) return InstructionType::ISUB_M;
-	if (h == &JitCompilerA64::h_IMUL_R) return InstructionType::IMUL_R;
-	if (h == &JitCompilerA64::h_IMUL_M) return InstructionType::IMUL_M;
-	if (h == &JitCompilerA64::h_IMULH_R) return InstructionType::IMULH_R;
-	if (h == &JitCompilerA64::h_IMULH_M) return InstructionType::IMULH_M;
-	if (h == &JitCompilerA64::h_ISMULH_R) return InstructionType::ISMULH_R;
-	if (h == &JitCompilerA64::h_ISMULH_M) return InstructionType::ISMULH_M;
-	if (h == &JitCompilerA64::h_IMUL_RCP) return InstructionType::IMUL_RCP;
-	if (h == &JitCompilerA64::h_INEG_R) return InstructionType::INEG_R;
-	if (h == &JitCompilerA64::h_IXOR_R) return InstructionType::IXOR_R;
-	if (h == &JitCompilerA64::h_IXOR_M) return InstructionType::IXOR_M;
-	if (h == &JitCompilerA64::h_IROR_R) return InstructionType::IROR_R;
-	if (h == &JitCompilerA64::h_IROL_R) return InstructionType::IROL_R;
-	if (h == &JitCompilerA64::h_ISWAP_R) return InstructionType::ISWAP_R;
-	if (h == &JitCompilerA64::h_FSWAP_R) return InstructionType::FSWAP_R;
-	if (h == &JitCompilerA64::h_FADD_R) return InstructionType::FADD_R;
-	if (h == &JitCompilerA64::h_FADD_M) return InstructionType::FADD_M;
-	if (h == &JitCompilerA64::h_FSUB_R) return InstructionType::FSUB_R;
-	if (h == &JitCompilerA64::h_FSUB_M) return InstructionType::FSUB_M;
-	if (h == &JitCompilerA64::h_FSCAL_R) return InstructionType::FSCAL_R;
-	if (h == &JitCompilerA64::h_FMUL_R) return InstructionType::FMUL_R;
-	if (h == &JitCompilerA64::h_FDIV_M) return InstructionType::FDIV_M;
-	if (h == &JitCompilerA64::h_FSQRT_R) return InstructionType::FSQRT_R;
-	if (h == &JitCompilerA64::h_CBRANCH) return InstructionType::CBRANCH;
-	if (h == &JitCompilerA64::h_CFROUND) return InstructionType::CFROUND;
-	if (h == &JitCompilerA64::h_ISTORE) return InstructionType::ISTORE;
-	if (h == &JitCompilerA64::h_NOP) return InstructionType::NOP;
-
-	// Maintenance hazard flagged by independent review (2026-07-25,
-	// docs/archived/audits/scheduler-review-2026-07-25.md #4): this if-chain and
-	// engine[256] (built from instruction_weights.hpp's INST_HANDLE macro)
-	// are not mechanically linked. A future opcode wired into engine[] but
-	// not added above would previously fall through to `return NOP`,
-	// giving computeFootprint() an all-zero (no-hazard) footprint for a
-	// REAL instruction -- silently permitting the scheduler to swap
-	// something unsafely across it. Fail loud (debug) and fail SAFE
-	// (release): CFROUND's footprint sets is_barrier=true, which blocks
-	// all scheduling across this position rather than permitting it.
-	ARMRX_ASSERT(false, "resolveInstructionType: unrecognized JIT handler -- add it above");
-	return InstructionType::CFROUND;
-}
-
 // W3-2 bisection diagnostic: when ARMRX_MAX_SWAPS is set to a non-negative integer, the
 // scheduler performs at most that many reordering swaps across the whole program and leaves the
 // rest in original order. Used ONLY to binary-search which swap first causes a JIT/interpreter
@@ -2351,4 +2304,48 @@ void JitCompilerA64::h_NOP(Instruction& /*instr*/, uint32_t& /*codePos*/)
 		INST_HANDLE(ISTORE)
 		INST_HANDLE(NOP)
 	};
+
+// T3-C: opcode -> InstructionType, derived from the SAME INST_HANDLE ordering as
+// engine[256] so the two can never drift. resolveInstructionType indexes this.
+#define INST_TYPE(x) REPN(InstructionType::x, WT(x))
+static constexpr InstructionType kTypeOfEngine[256] = {
+		INST_TYPE(IADD_RS)
+		INST_TYPE(IADD_M)
+		INST_TYPE(ISUB_R)
+		INST_TYPE(ISUB_M)
+		INST_TYPE(IMUL_R)
+		INST_TYPE(IMUL_M)
+		INST_TYPE(IMULH_R)
+		INST_TYPE(IMULH_M)
+		INST_TYPE(ISMULH_R)
+		INST_TYPE(ISMULH_M)
+		INST_TYPE(IMUL_RCP)
+		INST_TYPE(INEG_R)
+		INST_TYPE(IXOR_R)
+		INST_TYPE(IXOR_M)
+		INST_TYPE(IROR_R)
+		INST_TYPE(IROL_R)
+		INST_TYPE(ISWAP_R)
+		INST_TYPE(FSWAP_R)
+		INST_TYPE(FADD_R)
+		INST_TYPE(FADD_M)
+		INST_TYPE(FSUB_R)
+		INST_TYPE(FSUB_M)
+		INST_TYPE(FSCAL_R)
+		INST_TYPE(FMUL_R)
+		INST_TYPE(FDIV_M)
+		INST_TYPE(FSQRT_R)
+		INST_TYPE(CBRANCH)
+		INST_TYPE(CFROUND)
+		INST_TYPE(ISTORE)
+		INST_TYPE(NOP)
+};
+#undef INST_TYPE
+
+InstructionType JitCompilerA64::resolveInstructionType(uint8_t opcode) const {
+	// kTypeOfEngine is built from the same INST_HANDLE ordering as engine[256],
+	// so this can never drift from the handler table (T3-C).
+	ARMRX_ASSERT(opcode < 256, "opcode out of range in resolveInstructionType");
+	return kTypeOfEngine[opcode];
+}
 }
