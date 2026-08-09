@@ -5,6 +5,20 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-10 — ci: disable optional OpenSSL in cross-build (TLS header fix)
+- **Source:** GitHub Actions `cross-build` job failed compiling `tls_client.cpp`
+  (`fatal error: openssl/opensslconf.h: No such file or directory`). Copilot suggested
+  installing `libssl-dev:arm64`, but that needs `dpkg --add-architecture arm64` first or it
+  fails again, and it compiles the TLS path the **real musl deploy doesn't use** (no OpenSSL
+  there). Branch `try/ci-openssl-fix`, commit `045c4e2`, merged `784b018`.
+- **Fix (chosen over Copilot's):** pass `-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE` to the CI
+  configure. This force-skips the optional OpenSSL detection (TLS compiled out), exactly
+  mirroring the shipping musl build. No OpenSSL install, no extra apt arch, self-sufficient;
+  the JIT path still compiles. Verified locally with the identical flag: CMake reports
+  "OpenSSL not found — TLS pool connections disabled", configure+build rc=0, `ARMRX_HAVE_TLS`
+  unset. The workflow documents the alternative `libssl-dev:arm64` route in a comment for
+  anyone who later wants CI to also compile-check the TLS path.
+
 ## 2026-08-09 — docs(T7): reconcile documentation drift
 - **Source:** Hermes-led T7 from the consolidated Luna/Deepseek audit. Doc-only; no code change.
   Branch `try/t7-docsync`, commit `4d5c6f3`, merged `6acba99`.
