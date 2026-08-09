@@ -29,6 +29,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "armrx/jit_compiler_a64.hpp"
 #include "armrx/assert.hpp"
+#include "armrx/jit_contract.h"
 #include "armrx/log.hpp"
 #include "configuration.h"
 #include "instruction_weights.hpp"
@@ -129,10 +130,31 @@ static const size_t CalcDatasetItemSize =
 		// Main loop epilogue
 		((uint8_t*)randomx_calc_dataset_item_aarch64_store_result - (uint8_t*)randomx_calc_dataset_item_aarch64_mix) + 4
 	) +
-	// Epilogue
-	((uint8_t*)randomx_calc_dataset_item_aarch64_end - (uint8_t*)randomx_calc_dataset_item_aarch64_store_result);
+		// Epilogue
+		((uint8_t*)randomx_calc_dataset_item_aarch64_end - (uint8_t*)randomx_calc_dataset_item_aarch64_store_result);
 
-constexpr uint32_t IntRegMap[8] = { 4, 5, 6, 7, 12, 13, 14, 15 };
+	// --- JIT label-offset contract validation (T3-A) -----------------------------
+	// The C++ emitter derives template sizes from linker symbols (CodeSize,
+	// PrologueSize, MainLoopBegin, ImulRcpLiteralsEnd). If the hand-written AArch64
+	// assembly in jit_compiler_a64_static.S changes its layout without a matching
+	// update here, the emitter silently produces wrong-size / overlapping code.
+	// Validate the *computed* deltas against the known-good contract in
+	// include/armrx/jit_contract.h at load time, so any future drift fails loudly
+	// (abort) instead of corrupting the JIT buffer. No emitted instruction changes.
+	[[gnu::constructor]] static void ValidateJitLabelContract() {
+		ARMRX_ASSERT(CodeSize == armrx::kExpectedCodeSize,
+			"JIT CodeSize drifted from contract (asm/C++ layout mismatch)");
+		ARMRX_ASSERT(PrologueSize == armrx::kExpectedPrologueSize,
+			"JIT PrologueSize drifted from contract (asm/C++ layout mismatch)");
+		ARMRX_ASSERT(MainLoopBegin == armrx::kExpectedMainLoopBegin,
+			"JIT MainLoopBegin drifted from contract (asm/C++ layout mismatch)");
+		ARMRX_ASSERT(ImulRcpLiteralsEnd == armrx::kExpectedImulRcpLiteralsEnd,
+			"JIT ImulRcpLiteralsEnd drifted from contract (asm/C++ layout mismatch)");
+	}
+
+	// Integer-register allocation is now the single source of truth in
+	// `include/armrx/jit_contract.h` (with static_assert invariants). Re-used here.
+	using armrx::IntRegMap;
 
 // NOTE: the per-program inline C* literal pool (formerly SuperscalarCpoolSlots,
 // 128 slots) was removed 2026-08-07 — it was dead code (emitCpoolImmediate

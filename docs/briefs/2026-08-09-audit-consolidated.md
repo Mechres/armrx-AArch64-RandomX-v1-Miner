@@ -164,12 +164,27 @@ Canonical constraints applied throughout:
 
 ## TIER 3 — Structural / maintenance debt (real hazards)
 
-### T3-A Add mechanically-checked JIT register/label contracts (Luna #1 #4, Luna #3 #7, Deepseek — VERIFIED)
-- `src/jit_compiler_a64_static.S:81-113` is an informal register-allocation comment block
-  (x0–x30 + v0–v15). C++ independently computes copied template sizes
-  (`jit_compiler_a64.cpp:120-133`) and patches labels/offsets.
-- Fix: compile-time offset assertions + a generated/register-contract table shared by C++ and
-  assembly. Directly addresses the historical hybrid-path register-clobber crashes.
+### T3-A Add mechanically-checked JIT register/label contracts (Luna #1 #4, Luna #3 #7, Deepseek — VERIFIED) — ✅ ADOPTED 2026-08-09
+- `src/jit_compiler_a64_static.S:81-131` is an informal register-allocation comment block
+  (x0–x30 + v0–v15). C++ independently computes template sizes from linker symbols
+  (`jit_compiler_a64.cpp:115-133`: `CodeSize`, `PrologueSize`, `MainLoopBegin`,
+  `ImulRcpLiteralsEnd`, `CalcDatasetItemSize`) and the integer-register map `IntRegMap[8]`.
+  If the assembly layout changes without a matching C++ constant update, the emitter
+  silently produces wrong-size / overlapping JIT code (the historical register-clobber
+  hazard class).
+- **Fix (branch `try/jit-contract` → merged to origin/main):** new
+  `include/armrx/jit_contract.h` is the single source of truth:
+  - `IntRegMap` moved here with `static_assert` invariants (8 entries, distinct, in
+    x0..x30) so the register contract is checked at compile time.
+  - `kExpected*` known-good label deltas (CodeSize=51516, PrologueSize=480,
+    MainLoopBegin=320, ImulRcpLiteralsEnd=49728). `jit_compiler_a64.cpp` validates the
+    *computed* deltas against these via a `[[gnu::constructor]]` check that aborts at
+    load if the asm/C++ layout ever drifts — converting silent corruption into a loud
+    failure.
+- **Correctness unchanged:** no emitted instruction differs. Gate (on-device, Lenovo):
+  `armrx_tests` Input1 actual == JIT hash byte-identical (`blake_rc=0`); the
+  `[[gnu::constructor]]` validator passes at load (no abort); `test_partial_dataset`
+  ALL PASSED.
 
 ### T3-B Typed A64 encoding layer (Luna #1 #10, Luna #3 #6 — VERIFIED, slightly overstated)
 - Raw constants exist: `MUL=0x9B007C00`, `UMULH=0x9BC07C00`, `SMULH=0x9B407C00`
