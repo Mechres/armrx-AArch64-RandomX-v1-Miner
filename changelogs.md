@@ -5,6 +5,19 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T5-A/T5-B: CI cross-build + benchmarks out of CTest
+- **Source:** Hermes-led T5-A/T5-B from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`). No armrx CI existed; benchmarks were
+  registered as CTest tests (slow/thermal-variant). Branch `try/t5-infra`, commit `9c189ed`.
+- **T5-A (honest scope):** added `.github/workflows/ci.yml` — `cross-build` job (ubuntu +
+  `crossbuild-essential-arm64`) cross-compiles the AArch64 JIT + test executables on every PR,
+  proving the JIT compiles in CI (audit's core complaint). `device-kat` job documents the
+  required on-device KAT gate but SKIPs without a self-hosted `aarch64-device` runner (not
+  faked). Side fix: migrated `tools/verify_seed_rotation.cpp` off the pre-T2-B raw-pointer
+  PartialDataset API (it had silently stopped building under `all`).
+- **T5-B:** removed `bench_armrx` / `bench_opcodes` / `bench_imul_magnitudes` from `add_test`
+  (kept as buildable opt-in targets). Verified: no `bench*` in `ctest -N`; cross build clean.
+
 ## 2026-08-09 — T4-A: make W^X JIT the default (RWX opt-out)
 - **Source:** Hermes-led T4-A from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`). On Linux AArch64, `RANDOMX_FORCE_SECURE`
