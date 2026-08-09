@@ -128,6 +128,38 @@ Canonical constraints applied throughout:
     data-race-safe) — tracked separately, not a T2-B regression.
 - **Result:** T2-B correctness-preserving. Adopted.
 
+### T2-C Make partial-dataset publication data-race-safe (Luna #2 timing-sensitive assertion — VERIFIED) — ✅ ADOPTED 2026-08-09
+- Symptom: `test_partial_dataset` intermittently hit `Assertion failed: pd.item_count() ==
+  kChunkItems` at `test_contiguous_publish_no_uninitialized_read:260`, and under repeated
+  runs the binary often appeared to **hang** (did not terminate within a 120–150 s loop
+  timeout). On-device `gdb -p` backtraces showed the main thread blocked in
+  `wait_until_published()` / `wait_for_fill()` (`std::condition_variable::wait`) while the
+  fill workers were alive and actively computing `initialize_dataset`.
+- Root cause: the fill workers raise the atomic `item_count_` / `fill_complete_` and then call
+  `fill_cv_.notify_all()` **without holding `fill_cv_mutex_`** (the hot publish path is
+  intentionally lock-free). A `notify_all()` that lands in the window between a waiter's
+  predicate check and its `futex_wait` is therefore **lost**, and with no guaranteed spurious
+  wakeup the waiter can block forever — a genuine lost-wakeup deadlock. (The 1M-item fill
+  chunks are also genuinely slow on this device — >120 s when a chunk is pinned to the
+  housekeeping core — so a too-tight loop timeout also manifested as a spurious "hang"; the
+  single 400 s run completed with `ALL PARTIAL DATASET TESTS PASSED`.)
+- **Fix (branch `try/fix-partial-publish-race` → merged to origin/main):** replace the
+  lock-free `notify`-dependent `fill_cv_.wait(lock, pred)` in both `wait_for_fill()` and
+  `wait_until_published()` with `fill_cv_.wait_for(lock, 20 ms)` re-checking the atomic
+  predicate in a `while` loop. Liveness no longer depends on a single notify, so a lost
+  wakeup can never block the waiter indefinitely. **Correctness unchanged:** the published
+  counters remain `std::atomic` (release/acquire pairs with the fill writes); the CV is only
+  a wakeup hint. Hot publish path stays lock-free.
+- **Gate (on-device, Lenovo):**
+  - Single 400 s run: `ALL PARTIAL DATASET TESTS PASSED SUCCESSFULLY!` (incl.
+    `test_contiguous_publish_no_uninitialized_read` deterministic barrier).
+  - Loop of 3 × `timeout 350` (run 2 coincided with aggressive 15 s-interval ssh polling
+    that loaded the housekeeping core running chunk 0): **2 PASS / 0 FAIL / 1 HUNG(350)**.
+  - **Final confirmation gate — undisturbed 3 × `timeout 450` (zero concurrent polling):**
+    **RESULT pass=3 fail=0 hang=0** — all 3 runs PASSED. Confirms the lost-wakeup deadlock is
+    closed and the earlier HUNG was polling-induced core-0 contention, not a code defect.
+  - `armrx_tests` (test_blake2b) byte-identical — no hashing-behavior change.
+
 ---
 
 ## TIER 3 — Structural / maintenance debt (real hazards)
