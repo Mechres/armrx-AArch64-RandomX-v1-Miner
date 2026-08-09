@@ -3,6 +3,7 @@
 #include "armrx/log.hpp"
 
 #include <algorithm>
+#include <cerrno>
 #include <cstring>
 #include <stdexcept>
 
@@ -183,7 +184,11 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     cpu_set_t cpus{};
     CPU_ZERO(&cpus);
     CPU_SET(static_cast<int>(cpu_id), &cpus);
-    pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+    if (pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus) != 0) {
+        ARMRX_LOG_WARN << "PartialDataset fill worker: CPU pinning to cpu " << cpu_id
+                       << " failed (" << std::strerror(errno)
+                       << ") — topology-aware fill NOT enforced for this worker";
+    }
 
     const auto total_items = end_item - start_item;
     const auto byte_offset = start_item * kRandomXDatasetItemBytes;
