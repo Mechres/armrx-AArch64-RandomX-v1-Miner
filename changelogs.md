@@ -5,6 +5,22 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — docs(T7): reconcile documentation drift
+- **Source:** Hermes-led T7 from the consolidated Luna/Deepseek audit. Doc-only; no code change.
+  Branch `try/t7-docsync`, commit `4d5c6f3`, merged `6acba99`.
+- **Adopted:** (1) `AGENTS.md` Architecture: fixed stale "All AES uses software T-table path"
+  → hardware AESE/AESD funnel is default on aarch64+crypto (Track-G NEON T-table also default
+  ON), matching Gotchas. (2) `closed-levers-ledger.md` — added "Authoritative source" header
+  (this file wins on status disagreements) + flagged historical `3,563` body figure superseded
+  by W1-1 census `5,224`. (3) `perf-tracking.md` — "Measurement provenance" note for the `3,563`
+  → `5,224` supersession (left historical mentions as-is). (4) `README.md` — "Hashrate figure
+  provenance" note clarifying 24.95 / ~26 / 26.65 / 30-32 / 13.37 H/s are different measurement
+  contexts, not contradictions.
+- **Audit overstatements (verified, NOT changed):** (a) the ledger's "Worker-local buffer reuse
+  (D2) — OPEN" is a *distinct* untried lever from README's adopted "Cross-hash boundary
+  pipelining (Track D2)" — ledger is correct; (b) `STRATEGY.md` Known-bugs items 117-180 are all
+  marked FIXED with dates — the audit misread them as stale.
+
 ## 2026-08-09 — build(ci): make .git_sha optional (clean-clone configure fix)
 - **Source:** user-reported GitHub CI configure error. `CMakeLists.txt` read `.git_sha`
   unconditionally with `file(READ .git_sha ...)`; `.git_sha` is gitignored (written by
