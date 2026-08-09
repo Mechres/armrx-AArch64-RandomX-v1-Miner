@@ -5,6 +5,19 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T3-B: name raw scratchpad/AND/bitfield A64 encoders
+- **Source:** Hermes-led T3-B from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  Committed `c770b57` (origin/main).
+- **Scope:** the `ARMV8A::` namespace already named core ALU/FP opcodes, but the scratchpad
+  memory-op and masking emitters still used bare hex bases. Added named constexprs
+  (`LDR_64_REG`, `LDR_64_REG_LSL3`, `LDR_64_SCALAR`, `LDR_32_REG`, `AND_IMM_32`,
+  `AND_IMM_64`, `AND_IMM_SHIFT`, `UBFX`) and replaced the raw literals at their emit sites.
+- **Pure naming change:** no emitted instruction differs (audit overstated the remaining raw
+  scope — vector FP/AES emitters are also raw but field-composed correctly; left as future
+  cleanup, not a defect). Gate: `armrx_tests` Input1 actual == JIT hash byte-identical;
+  `test_partial_dataset` ALL PASSED.
+
 ## 2026-08-09 — T3-A: make JIT register/label contract mechanical
 - **Source:** Hermes-led T3-A from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).

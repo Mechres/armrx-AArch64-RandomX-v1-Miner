@@ -193,13 +193,20 @@ Canonical constraints applied throughout:
   Re-verified on-device: validator passes, hashes byte-identical, partial-dataset
   ALL PASSED.
 
-### T3-B Typed A64 encoding layer (Luna #1 #10, Luna #3 #6 — VERIFIED, slightly overstated)
-- Raw constants exist: `MUL=0x9B007C00`, `UMULH=0x9BC07C00`, `SMULH=0x9B407C00`
-  (`jit_compiler_a64.cpp:93-95`, named constexprs) AND scattered raw hex for scratchpad
-  the memory-op encoders: `0x927d0000` (AND imm, :1585/1602/1637/2254), `0xf8606840` (LDR, :1610).
-- Audit overstatement: core ALU ops ARE named constexprs; only scratchpad AND/LDR encoders are
-  raw. Fix: constexpr encoders for ADD/AND/LDR/STR/MUL/UMULH/branches/SIMD + exhaustive encoding
-  tests against known disassembly.
+### T3-B Typed A64 encoding layer (Luna #1 #10, Luna #3 #6 — VERIFIED, slightly overstated) — ✅ ADOPTED 2026-08-09
+- The `ARMV8A::` namespace already named the core ALU/FP opcodes, but the scratchpad
+  memory-op and masking emitters still used bare hex bases: `LDR` `0xf8606840`/
+  `0xf8607840`/`0xfc606800`/`0xF8206840`, `AND`-imm `0x121A0000`/`0x92400000`/`0x927d0000`,
+  `UBFX` `0xD3400000`.
+- **Fix (committed `c770b57` on origin/main):** added named constexprs
+  (`LDR_64_REG`, `LDR_64_REG_LSL3`, `LDR_64_SCALAR`, `LDR_32_REG`, `AND_IMM_32`,
+  `AND_IMM_64`, `AND_IMM_SHIFT`, `UBFX`) and replaced the raw literals at their emit sites.
+- **Pure naming change:** no emitted instruction differs. Gate (on-device, Lenovo):
+  `armrx_tests` Input1 actual == JIT hash byte-identical; `test_partial_dataset` ALL PASSED.
+- Note: the audit overstated the scope — most per-instruction vector FP/AES emitters are
+  also still raw hex, but those are out of scope for a behavior-preserving naming pass and
+  carry no correctness risk (encodings are field-composed correctly). Left as a future
+  cleanup, not a defect.
 
 ### T3-C Single opcode-definition table (Luna #3 #10 — VERIFIED, NEW synthesis)
 - Opcode knowledge duplicated across: `vm.hpp:191-220` (handler decls), `vm.cpp:539-582`
