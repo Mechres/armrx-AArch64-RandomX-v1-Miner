@@ -138,17 +138,30 @@ static const size_t CalcDatasetItemSize =
 	// PrologueSize, MainLoopBegin, ImulRcpLiteralsEnd). If the hand-written AArch64
 	// assembly in jit_compiler_a64_static.S changes its layout without a matching
 	// update here, the emitter silently produces wrong-size / overlapping code.
-	// Validate the *computed* deltas against the known-good contract in
-	// include/armrx/jit_contract.h at load time, so any future drift fails loudly
-	// (abort) instead of corrupting the JIT buffer. No emitted instruction changes.
+	// Validate the deltas against the known-good contract in include/armrx/jit_contract.h
+	// at load time, so any future drift fails loudly (abort) instead of corrupting
+	// the JIT buffer. No emitted instruction changes.
+	//
+	// The deltas are computed INLINE here (not from the `static const size_t`
+	// globals above) because this [[gnu::constructor]] runs during the same dynamic
+	// init phase and its order vs. those initializers is unspecified -- reading the
+	// globals could observe them still zero-initialized and trip a false assert.
 	[[gnu::constructor]] static void ValidateJitLabelContract() {
-		ARMRX_ASSERT(CodeSize == armrx::kExpectedCodeSize,
+		const size_t codeSize = static_cast<size_t>(
+			(uint8_t*)randomx_init_dataset_aarch64_end - (uint8_t*)randomx_program_aarch64);
+		const size_t prologueSize = static_cast<size_t>(
+			(uint8_t*)randomx_program_aarch64_vm_instructions - (uint8_t*)randomx_program_aarch64);
+		const size_t mainLoopBegin = static_cast<size_t>(
+			(uint8_t*)randomx_program_aarch64_main_loop - (uint8_t*)randomx_program_aarch64);
+		const size_t imulRcpLiteralsEnd = static_cast<size_t>(
+			(uint8_t*)randomx_program_aarch64_imul_rcp_literals_end - (uint8_t*)randomx_program_aarch64);
+		ARMRX_ASSERT(codeSize == armrx::kExpectedCodeSize,
 			"JIT CodeSize drifted from contract (asm/C++ layout mismatch)");
-		ARMRX_ASSERT(PrologueSize == armrx::kExpectedPrologueSize,
+		ARMRX_ASSERT(prologueSize == armrx::kExpectedPrologueSize,
 			"JIT PrologueSize drifted from contract (asm/C++ layout mismatch)");
-		ARMRX_ASSERT(MainLoopBegin == armrx::kExpectedMainLoopBegin,
+		ARMRX_ASSERT(mainLoopBegin == armrx::kExpectedMainLoopBegin,
 			"JIT MainLoopBegin drifted from contract (asm/C++ layout mismatch)");
-		ARMRX_ASSERT(ImulRcpLiteralsEnd == armrx::kExpectedImulRcpLiteralsEnd,
+		ARMRX_ASSERT(imulRcpLiteralsEnd == armrx::kExpectedImulRcpLiteralsEnd,
 			"JIT ImulRcpLiteralsEnd drifted from contract (asm/C++ layout mismatch)");
 	}
 
