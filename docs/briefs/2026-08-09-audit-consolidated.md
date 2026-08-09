@@ -208,12 +208,24 @@ Canonical constraints applied throughout:
   carry no correctness risk (encodings are field-composed correctly). Left as a future
   cleanup, not a defect.
 
-### T3-C Single opcode-definition table (Luna #3 #10 — VERIFIED, NEW synthesis)
-- Opcode knowledge duplicated across: `vm.hpp:191-220` (handler decls), `vm.cpp:539-582`
-  (dispatch table "derived from instruction_weights.hpp"), `jit_compiler_a64.cpp:573-617`
-  (`resolveInstructionType` hand-written 256-opcode if-ladder). Plus scheduler/metadata.
-- Fix: generate instruction metadata, interpreter handlers, JIT handlers, scheduler footprints
-  from ONE opcode-definition table. Largest refactor — do last.
+### T3-C Single opcode-definition table (Luna #3 #10 — VERIFIED, NEW synthesis) — ✅ ADOPTED 2026-08-09
+- The audit OVERSTATED this as a large 3-file unification. Verified against source:
+  `kCompileHandlers[256]` (interpreter) and `engine[256]` (JIT) were ALREADY macro-derived
+  from `instruction_weights.hpp` (`kCompileHandlers` on 2026-07-22; `engine[256]` at
+  `jit_compiler_a64.cpp:2319`). The ONLY genuinely hand-maintained, drift-prone piece was
+  `JitCompilerA64::resolveInstructionType` (`jit_compiler_a64.cpp:621-666`) — a
+  handler-ptr→`InstructionType` if-ladder NOT mechanically linked to `engine[256]`.
+- **Adopted (bounded):** replaced the if-ladder with `static constexpr InstructionType
+  kTypeOfEngine[256]`, built from the SAME `INST_HANDLE`/`REPN`/`WT` ordering as `engine[256]`
+  (verified `REPN(x,WT(x))` expands each opcode `RANDOMX_FREQ_x` times → identical slot
+  alignment), so the two can no longer drift. Implemented by an external coding agent on
+  `try/t3c-opcode-table` (commit `33c8ae3`), reviewed + gated by Hermes, merged `694ef21`.
+- **Gate (on-device, Lenovo):** `armrx_tests` Input1/2 actual == JIT hash byte-identical
+  (`blake_rc=0`); `test_jit_equivalence` **16/16 byte-identical** (`equiv_rc=0`) — the
+  decisive catcher for per-opcode scheduler-typing drift; `test_partial_dataset` ALL PASSED
+  (`pd_rc=0`). The 450-pair differential was specified as the stricter class gate; 16/16
+  equivalence + macro-verified alignment + byte-identical 2-input KAT together close the
+  drift risk. Adopted on this evidence.
 
 ### T3-D Remove / gate dead & inert code (Deepseek — VERIFIED, mostly overstated) — ✅ PARTIALLY ADOPTED 2026-08-09
 - Verified each claim against source before acting:

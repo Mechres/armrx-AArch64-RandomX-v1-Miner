@@ -5,6 +5,22 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T3-C: derive resolveInstructionType from engine[256] ordering
+- **Source:** Hermes-led T3-C from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`). The audit OVERSTATED this as a large
+  3-file unification; verified the interpreter `kCompileHandlers[256]` and JIT `engine[256]`
+  were ALREADY macro-derived from `instruction_weights.hpp`. The only drift-prone piece was
+  the hand-maintained `resolveInstructionType` if-ladder. Committed `33c8ae3`, merged
+  `694ef21` (origin/main).
+- **Scope (bounded):** replaced `resolveInstructionType`'s 256-branch handler-ptr→enum
+  if-ladder with `static constexpr InstructionType kTypeOfEngine[256]`, built from the SAME
+  `INST_HANDLE`/`REPN`/`WT` ordering as `engine[256]` (verified identical slot alignment),
+  so the two can no longer drift. Implemented by an external coding agent on
+  `try/t3c-opcode-table`, reviewed + gated by Hermes. Only `src/jit_compiler_a64.cpp` changed.
+- **Gate (on-device, Lenovo):** `armrx_tests` Input1/2 actual == JIT hash byte-identical;
+  `test_jit_equivalence` 16/16 byte-identical (decisive per-opcode scheduler-typing catcher);
+  `test_partial_dataset` ALL PASSED. No hashing-behavior change.
+
 ## 2026-08-09 — T3-D: drop dead cfg.tui JSON field (conservative slice)
 - **Source:** Hermes-led T3-D from the consolidated Luna/Deepseek audit (Adoption ledger
   `docs/briefs/2026-08-09-audit-consolidated.md`), verified against source before acting.
