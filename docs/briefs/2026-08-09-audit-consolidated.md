@@ -77,7 +77,17 @@ Canonical constraints applied throughout:
 
 ## TIER 2 — Highest-value safe C++ wins (no asm needed)
 
-### T2-A Eliminate repeated RegisterFile copies (Luna #3 #4 / P1 — VERIFIED, standout)
+### T2-A Eliminate repeated RegisterFile copies (Luna #3 #4 / P1 — VERIFIED, standout) — ✅ ADOPTED 2026-08-09
+- Commit: `881f243` (fix) → merged `9662ea0` (origin/main).
+- Fix: 5 `std::memcpy(RegisterFile, 256B)` → `std::span<const std::byte>` over the
+  RegisterFile object directly (7-chain loop in `randomx_calculate_hash` + pipelined
+  variant, `hash_and_fill`, `get_final_result`, pipelined finalize). RegisterFile is
+  standard-layout + `alignas(16)`, so its object representation is exactly the bytes
+  BLAKE2b hashes — byte-identical to the old staging buffer. No behavior change.
+- **Gate:** on-device KATs green (Lenovo) — `test_blake2b` (Input1/Input2 + JIT
+  hashes byte-identical to reference, exit 0), `test_jit_equivalence` (16/16
+  byte-identical), `test_mining` (both subtests passed). Removes up to 7×256B copies
+  per hash on the main path. Best pure-C++ win; better than hand-written assembly.
 - `src/vm.cpp:981-987`: 7-chain Blake2b loop does `memcpy(reg_bytes.data(), &reg,
   sizeof(reg))` (256 bytes) every chain → up to **7×256-byte copies per hash**. RegisterFile is
   a contiguous standard-layout array (`include/armrx/vm.hpp:25-30`). Pass a read-only
