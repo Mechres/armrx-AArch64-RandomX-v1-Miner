@@ -5,6 +5,28 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-09 — T2-C: close lost-wakeup deadlock in PartialDataset fill waiters
+- **Source:** Hermes-led T2-C from the consolidated Luna/Deepseek audit (Adoption ledger
+  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  Branch `try/fix-partial-publish-race` → merged `79a7db2` (origin/main).
+- **Bug:** `PartialDataset::fill_worker` raises the atomic `item_count_`/`fill_complete_`
+  then calls `fill_cv_.notify_all()` **without holding `fill_cv_mutex_`** (the publish path
+  is intentionally lock-free). A `notify_all()` landing in the window between a waiter's
+  predicate check and its `futex_wait` is lost, and with no guaranteed spurious wakeup the
+  waiter blocks forever — a genuine lost-wakeup deadlock, observed as `test_partial_dataset`
+  intermittently hanging (and the `test_contiguous_publish_no_uninitialized_read:260`
+  `item_count()==kChunkItems` assert flaking).
+- **Fix:** `wait_for_fill()` and `wait_until_published()` now use `fill_cv_.wait_for(lock, 20ms)`
+  re-checking the atomic predicate in a `while` loop instead of the notify-dependent
+  `wait(lock, pred)`. Liveness no longer depends on a single notify. **Correctness unchanged:**
+  published counters stay `std::atomic` (release/acquire with the fill writes); the CV is only
+  a wakeup hint; hot publish path remains lock-free. No hashing-behavior change
+  (`armrx_tests` byte-identical).
+- **Gate:** single 400 s run `ALL PARTIAL DATASET TESTS PASSED`; undisturbed 3×`timeout 450`
+  loop `RESULT pass=3 fail=0 hang=0`. (An earlier `HUNG(350)` coincided with aggressive
+  15 s-interval ssh polling loading the housekeeping core running chunk 0; the undisturbed run
+  PASSED, confirming no genuine deadlock remains.)
+
 ## 2026-08-08 — adopt 3 correctness/cleanup branches from Luna follow-up audit
 - **Source:** Luna read-only audit (round 2) + Hermes on-device gating. 3 branches adopted
   into `main` via `git merge --no-ff`. All gated green on-device (Lenovo AArch64); `main`
