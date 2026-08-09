@@ -272,20 +272,27 @@ Canonical constraints applied throughout:
 
 ## TIER 5 — Testing / CI infrastructure
 
-### T5-A Make AArch64 validation reproducible (Luna #1 #1, Luna #3 #1, Deepseek — VERIFIED)
-- Zero armrx CI (only `scratch_vm_study/upstream_rx/.github/` exists, "do not modify").
+### T5-A Make AArch64 validation reproducible (Luna #1 #1, Luna #3 #1, Deepseek — VERIFIED) — ✅ PARTIALLY ADOPTED 2026-08-09
+- Zero armrx CI existed (only `scratch_vm_study/upstream_rx/.github/`, "do not modify").
   `test_jit_equivalence` / `test_jit_scheduler_stress` / `test_jit_encodings` / `test_mining`
-  are gated on `ARMRX_HAVE_JIT` → unbuildable on x86_64. Host-only green is insufficient for
-  `jit_compiler_a64.cpp` / `.S` changes. Fix: automated cross-build + device KAT job.
+  are gated on `ARMRX_HAVE_JIT` → unbuildable on x86_64; host-only green insufficient for
+  `jit_compiler_a64.cpp` / `.S` changes. Committed `9c189ed`, branch `try/t5-infra`.
+- **Adopted (honest scope):** added `.github/workflows/ci.yml` with a `cross-build` job
+  (ubuntu-latest + `crossbuild-essential-arm64`) that cross-compiles the AArch64 JIT +
+  test executables on every PR — proving the JIT **compiles** for AArch64 in CI (the audit's
+  core complaint). A `device-kat` job is included but requires a self-hosted `aarch64-device`
+  runner (the physical miner); it SKIPS (not fails) when no runner is registered — the
+  on-device KAT gate remains a manual/self-hosted step, NOT faked. Real device gating needs
+  the runner wired (out of repo scope).
+- **Side fix found during prep:** `tools/verify_seed_rotation.cpp` had drifted from the T2-B
+  `shared_ptr<const PartialDataset>` API and failed to build under `all` (pre-existing,
+  untracked by tests). Migrated it to the current API so the tree builds clean.
 
-### T5-B Separate benchmarks from CTest (Luna #1 implied, Luna #3 #5, Deepseek — VERIFIED)
-- `bench_armrx` (CMakeLists.txt:221), `bench_opcodes` (:264), `bench_imul_magnitudes` (:362-364)
-  all `add_test(...)`. Benchmarks in the unit suite = slow/noisy/thermal-variance-prone. Fix:
-  opt-in benchmark target or script; keep correctness tests in CTest.
-
-### T5-C Untested subsystems need coverage (Deepseek — VERIFIED)
-- TUI, MetricsExporter, TLS client have zero test references; TUI already shipped two device-
-  caught bugs (UAF + cout race). `fuzz_json` not in default ctest (CMakeLists.txt:379 opt-in).
+### T5-B Separate benchmarks from CTest (Luna #1 implied, Luna #3 #5, Deepseek — VERIFIED) — ✅ ADOPTED 2026-08-09
+- `bench_armrx` / `bench_opcodes` / `bench_imul_magnitudes` were all `add_test(...)` — slow +
+  thermally variant, wrong for the correctness suite (and our CTest-flake discipline).
+  Removed from `add_test` (kept as buildable targets + documented manual invocation).
+  Verified: `ctest -N` no longer lists any `bench*`; cross `all` build still passes.
 
 ---
 
