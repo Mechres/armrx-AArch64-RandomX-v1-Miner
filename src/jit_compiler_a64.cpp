@@ -111,6 +111,19 @@ constexpr uint32_t FMUL        = 0x6E60DC00;
 constexpr uint32_t FDIV        = 0x6E60FC00;
 constexpr uint32_t FSQRT       = 0x6EE1F800;
 
+// --- Scratchpad / masking base opcodes (T3-B: name the raw memory-op encoders) ---
+// These were previously bare hex literals at the emit sites. Naming them makes the
+// typed A64 encoding layer complete (the core ALU/FP ops above were already named)
+// without changing any emitted instruction.
+constexpr uint32_t AND_IMM_32      = 0x121A0000; // and  wd, wn, #imm (decode-bitmask)
+constexpr uint32_t AND_IMM_64      = 0x92400000; // and  xd, xn, #imm (decode-bitmask)
+constexpr uint32_t AND_IMM_SHIFT   = 0x927d0000; // and  Rd, Rn, #imm, lsl #p (used for scratchpad masking)
+constexpr uint32_t UBFX             = 0xD3400000; // ubfx xd, xn, #lsb, #width
+constexpr uint32_t LDR_64_REG      = 0xf8606840; // ldr  xd, [x2, xn]
+constexpr uint32_t LDR_64_REG_LSL3 = 0xf8607840; // ldr  xd, [x2, xn, lsl #3]
+constexpr uint32_t LDR_64_SCALAR   = 0xfc606800; // ldr  dN, [x2, xn]
+constexpr uint32_t LDR_32_REG      = 0xF8206840; // ldr  wd, [x2, xn]
+
 } // namespace ARMV8A
 
 static const size_t CodeSize = ((uint8_t*)randomx_init_dataset_aarch64_end) - ((uint8_t*)randomx_program_aarch64);
@@ -1001,10 +1014,10 @@ void JitCompilerA64::emitSpMix2(ProgramConfiguration& config, uint32_t& codePos)
 	emit32(ARMV8A::EOR | 10 | (IntRegMap[config.readReg0] << 5) | (IntRegMap[config.readReg1] << 16), code, codePos);
 
 	// ubfx x19, x10, #6, #width (width = Log2(RANDOMX_SCRATCHPAD_L3) - 6)
-	emit32(0xD3400000 | 19 | (10 << 5) | (6 << 16) | ((ScratchpadL3Log2 - 1) << 10), code, codePos);
+	emit32(ARMV8A::UBFX | 19 | (10 << 5) | (6 << 16) | ((ScratchpadL3Log2 - 1) << 10), code, codePos);
 
 	// ubfx x20, x10, #38, #width
-	emit32(0xD3400000 | 20 | (10 << 5) | (38 << 16) | ((32 + ScratchpadL3Log2 - 1) << 10), code, codePos);
+	emit32(ARMV8A::UBFX | 20 | (10 << 5) | (38 << 16) | ((32 + ScratchpadL3Log2 - 1) << 10), code, codePos);
 
 	codePos = ((uint8_t*)randomx_program_aarch64_v2_FE_mix) - ((uint8_t*)randomx_program_aarch64);
 	emitV2AesTweak(*this, flags, codePos);
@@ -1025,11 +1038,11 @@ void JitCompilerA64::generateProgram(Program& program, ProgramConfiguration& con
 
 	// and w20, w20, CacheLineAlignMask
 	codePos = (((uint8_t*)randomx_program_aarch64_cacheline_align_mask1) - ((uint8_t*)randomx_program_aarch64));
-	emit32(0x121A0000 | 20 | (20 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
+	emit32(ARMV8A::AND_IMM_32 | 20 | (20 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
 	// and w10, w10, CacheLineAlignMask
 	codePos = (((uint8_t*)randomx_program_aarch64_cacheline_align_mask2) - ((uint8_t*)randomx_program_aarch64));
-	emit32(0x121A0000 | 10 | (10 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
+	emit32(ARMV8A::AND_IMM_32 | 10 | (10 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
 	emitSpMix2(config, codePos);
 
@@ -1080,7 +1093,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 	if (useHybrid) {
 		// Patch hybrid-specific symbols (same values as the light path equivalents)
 		codePos = (((uint8_t*)randomx_program_aarch64_hybrid_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
-		emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
+		emit32(ARMV8A::AND_IMM_32 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
 		// Patch hybrid tweak (same v1/v2 selection as light path)
 		uint32_t tweak_src;
@@ -1106,7 +1119,7 @@ void JitCompilerA64::generateProgramLight(Program& program, ProgramConfiguration
 	} else {
 		// and w2, w2, CacheLineAlignMask
 		codePos = (((uint8_t*)randomx_program_aarch64_light_cacheline_align_mask) - ((uint8_t*)randomx_program_aarch64));
-		emit32(0x121A0000 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
+		emit32(ARMV8A::AND_IMM_32 | 2 | (2 << 5) | ((Log2(RANDOMX_DATASET_BASE_SIZE) - 7) << 10), code, codePos);
 
 		emitSpMix2(config, codePos);
 
@@ -1302,7 +1315,7 @@ void JitCompilerA64::generateSuperscalarHash(const SuperscalarProgramList& progr
 	for (size_t i = 0; i < programs.size(); ++i)
 	{
 		// and x11, x10, CacheSize / CacheLineSize - 1
-		emit32(0x92400000 | 11 | (10 << 5) | ((Log2(CacheSize / CacheLineSize) - 1) << 10), code, codePos);
+		emit32(ARMV8A::AND_IMM_64 | 11 | (10 << 5) | ((Log2(CacheSize / CacheLineSize) - 1) << 10), code, codePos);
 
 		p1 = ((uint8_t*)randomx_calc_dataset_item_aarch64_prefetch) + 4;
 		p2 = (uint8_t*)randomx_calc_dataset_item_aarch64_mix;
@@ -1617,7 +1630,7 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 	{
 		imm &= instr.getModMem() ? (RANDOMX_SCRATCHPAD_L1 - 1) : (RANDOMX_SCRATCHPAD_L2 - 1);
 
-		constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
+		constexpr uint32_t t = ARMV8A::AND_IMM_SHIFT | tmp_reg | (tmp_reg << 5);
 		constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 		constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
 
@@ -1632,9 +1645,9 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 			// E25 (2026-08-04): offset == 0 -> base is just src; skip the redundant
 			// ADD and mask src directly into tmp_reg. Equivalence-safe (same address,
 			// same ldr, no memory-order / CBRANCH-replay change). Saves 1 instruction.
-			// AND (immediate) encoding: opcode 0x927d0000, Rd=tmp_reg, Rn=src,
+			// AND (immediate) encoding: opcode ARMV8A::AND_IMM_SHIFT, Rd=tmp_reg, Rn=src,
 			// imm12 shift field = (Log2(size)-4) << 10.
-			constexpr uint32_t andBase = 0x927d0000 | tmp_reg; /* Rd = tmp_reg */
+			constexpr uint32_t andBase = ARMV8A::AND_IMM_SHIFT | tmp_reg; /* Rd = tmp_reg */
 			emit32((instr.getModMem()
 			            ? (andBase | (src << 5) | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10))
 			            : (andBase | (src << 5) | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10)))
@@ -1642,7 +1655,7 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 		}
 
 		// ldr tmp_reg, [x2, tmp_reg]
-		emit32(0xf8606840 | tmp_reg | (tmp_reg << 16), code, k);
+		emit32(ARMV8A::LDR_64_REG | tmp_reg | (tmp_reg << 16), code, k);
 	}
 	else
 	{
@@ -1650,7 +1663,7 @@ void JitCompilerA64::emitMemLoad(uint32_t dst, uint32_t src, Instruction& instr,
 		emitMovImmediate(tmp_reg, imm, code, k);
 
 		// ldr tmp_reg, [x2, tmp_reg, lsl 3]
-		emit32(0xf8607840 | tmp_reg | (tmp_reg << 16), code, k);
+		emit32(ARMV8A::LDR_64_REG_LSL3 | tmp_reg | (tmp_reg << 16), code, k);
 	}
 
 	codePos = k;
@@ -1669,14 +1682,14 @@ void JitCompilerA64::emitMemLoadFP(uint32_t src, Instruction& instr, uint8_t* /*
 		emitAddImmediate(tmp_reg, src, imm, code, k);
 	}
 
-	constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
+	constexpr uint32_t t = ARMV8A::AND_IMM_SHIFT | tmp_reg | (tmp_reg << 5);
 	constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 	constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
 
 	emit32(instr.getModMem() ? andInstrL1 : andInstrL2, code, k);
 
 	// ldr d<tmp_reg_fp>, [x2, tmp_reg]
-	emit32(0xfc606800 | (tmp_reg << 16) | (2 << 5) | tmp_reg_fp, code, k);
+	emit32(ARMV8A::LDR_64_SCALAR | (tmp_reg << 16) | (2 << 5) | tmp_reg_fp, code, k);
 
 	// sxtl tmp_reg_fp.2d, tmp_reg_fp.2s
 	emit32(0x0F20A400 | (tmp_reg_fp << 5) | tmp_reg_fp, code, k);
@@ -2286,7 +2299,7 @@ void JitCompilerA64::h_ISTORE(Instruction& instr, uint32_t& codePos)
 
 	emitAddImmediate(tmp_reg, dst, imm, code, k);
 
-	constexpr uint32_t t = 0x927d0000 | tmp_reg | (tmp_reg << 5);
+	constexpr uint32_t t = ARMV8A::AND_IMM_SHIFT | tmp_reg | (tmp_reg << 5);
 	constexpr uint32_t andInstrL1 = t | ((Log2(RANDOMX_SCRATCHPAD_L1) - 4) << 10);
 	constexpr uint32_t andInstrL2 = t | ((Log2(RANDOMX_SCRATCHPAD_L2) - 4) << 10);
 	constexpr uint32_t andInstrL3 = t | ((ScratchpadL3Log2 - 4) << 10);
@@ -2294,7 +2307,7 @@ void JitCompilerA64::h_ISTORE(Instruction& instr, uint32_t& codePos)
 	emit32((instr.getModCond() < StoreL3Condition) ? (instr.getModMem() ? andInstrL1 : andInstrL2) : andInstrL3, code, k);
 
 	// str src, [x2, tmp_reg]
-	emit32(0xF8206840 | src | (tmp_reg << 16), code, k);
+	emit32(ARMV8A::LDR_32_REG | src | (tmp_reg << 16), code, k);
 
 	codePos = k;
 }
