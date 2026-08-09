@@ -225,19 +225,16 @@ void test_contiguous_publish_no_uninitialized_read() {
     std::vector<unsigned> core_order = {0, 1, 2, 3};
 
     std::vector<unsigned> delays(kChunks, 0);
-    delays[1] = 500; // ms — middle chunk lags 0.5s
+    delays[1] = 5000; // ms — middle chunk lags 5s, far longer than 1M-item compute
+                      // on any AArch64 target, so the lag is reliably observable
+                      // (the old 500 ms lag could finish around the same time as
+                      // chunk 0, making the stall non-deterministic).
 
     std::atomic<bool> stop{false};
     std::atomic<bool> violation{false};
-    std::atomic<std::uint64_t> max_observed{0};
     std::thread reader([&] {
         while (!stop.load(std::memory_order_acquire)) {
             const std::uint64_t n = pd.item_count(); // acquire: sees only filled prefix
-            {
-                std::uint64_t m = max_observed.load(std::memory_order_relaxed);
-                while (n > m && !max_observed.compare_exchange_weak(m, n,
-                        std::memory_order_relaxed, std::memory_order_relaxed)) {}
-            }
             for (std::uint64_t i = 0; i < n; ++i) {
                 const auto expected = armrx::generate_dataset_item(*cache, i);
                 const auto* actual = pd.data() + i * armrx::kRandomXDatasetItemBytes;
@@ -251,21 +248,27 @@ void test_contiguous_publish_no_uninitialized_read() {
     });
 
     pd.start_fill(cache, core_order, /*exclude_cores=*/{}, delays);
+    // Deterministic mid-fill observation: wait until chunk 0 is published, then
+    // assert the lagging MIDDLE chunk (chunk 1, 500 ms) has NOT been skipped by
+    // contiguous publish. Replaces the old timing-dependent
+    // `max_observed < kTotalItems` assert, which could fail under ASan/TSan
+    // scheduling skew even when behavior was correct (the reader had to catch an
+    // intermediate item_count_ sample during the lag window). This barrier makes
+    // the check exact: chunk 0 done => item_count_ == kChunkItems; chunk 1's lag
+    // prevents any further advance until it finishes.
+    pd.wait_until_published(kChunkItems);
+    assert(pd.item_count() == kChunkItems);
     pd.wait_for_fill();   // the guard is the reader thread; waiting is still safe
     stop.store(true, std::memory_order_release);
     reader.join();
 
     assert(!violation.load(std::memory_order_acquire));
-    // The lagging middle chunk must have prevented item_count_ from advancing
-    // past the first chunk (64M) until chunk 1 finished — i.e. we should have
-    // observed a steady-state prefix < kTotalItems during the lag window.
-    assert(max_observed.load(std::memory_order_relaxed) < kTotalItems);
     assert(pd.item_count() == kTotalItems);
     assert(pd.fill_complete());
 
     std::cout << "[test_partial_dataset] test_contiguous_publish_no_uninitialized_read: "
               << "lagging middle chunk produced no uninitialized reads "
-              << "(max prefix observed during lag = " << max_observed.load() << ")\n";
+              << "(deterministic barrier confirmed contiguous publish stalled at chunk 0)\n";
 }
 
 } // anonymous namespace
