@@ -23,6 +23,11 @@
 - **Correctness unchanged:** no emitted instruction differs. Gate: `armrx_tests` Input1
   actual == JIT hash byte-identical; `test_partial_dataset` ALL PASSED; the load-time
   validator passes (no abort).
+- **Fixup (`ec7be96`):** the first cut compared the emitter's `static const size_t` template
+  sizes against the contract, but those are dynamic-init and the `[[gnu::constructor]]`
+  order vs. them is unspecified — it could observe them zero-initialized and fire a false
+  "drifted from contract" abort at load. The validator now computes the symbol deltas
+  inline (init-order independent). Re-verified on-device.
 
 ## 2026-08-09 — T2-C: close lost-wakeup deadlock in PartialDataset fill waiters
 - **Source:** Hermes-led T2-C from the consolidated Luna/Deepseek audit (Adoption ledger

@@ -185,6 +185,13 @@ Canonical constraints applied throughout:
   `armrx_tests` Input1 actual == JIT hash byte-identical (`blake_rc=0`); the
   `[[gnu::constructor]]` validator passes at load (no abort); `test_partial_dataset`
   ALL PASSED.
+- **Fixup (`ec7be96`):** first cut compared the emitter's `static const size_t`
+  template sizes against the contract; those globals are dynamic-init and the
+  constructor's order vs. them is unspecified, so it could observe them
+  zero-initialized and fire a false "drifted from contract" abort at load. The
+  validator now computes the symbol deltas inline (independent of init order).
+  Re-verified on-device: validator passes, hashes byte-identical, partial-dataset
+  ALL PASSED.
 
 ### T3-B Typed A64 encoding layer (Luna #1 #10, Luna #3 #6 — VERIFIED, slightly overstated)
 - Raw constants exist: `MUL=0x9B007C00`, `UMULH=0x9BC07C00`, `SMULH=0x9B407C00`
