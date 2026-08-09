@@ -39,8 +39,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y crossbuild-essential-arm64
+          # NOTE: we deliberately do NOT install OpenSSL dev headers. The shipping
+          # device build uses the musl toolchain, which has no OpenSSL, so TLS pool
+          # connections are compiled out there. To keep this CI job self-sufficient
+          # AND representative of the real deploy, we disable the optional OpenSSL
+          # find below (CMAKE_DISABLE_FIND_PACKAGE_OpenSSL) — the JIT path
+          # (jit_compiler_a64.cpp / .S) compiles with or without TLS, so this still
+          # closes the audit's "prove the AArch64 JIT compiles" gate.
+          # If you later want CI to also compile-check the TLS path, instead add:
+          #   sudo dpkg --add-architecture arm64
+          #   sudo apt-get install -y libssl-dev:arm64
+          # and drop the CMAKE_DISABLE_FIND_PACKAGE_OpenSSL flag.
 
-      - name: Configure (AArch64 cross, glibc)
+      - name: Configure (AArch64 cross, glibc, TLS disabled to match musl deploy)
         run: |
           cmake -S . -B build-cross \
             -DCMAKE_BUILD_TYPE=Release \
@@ -48,7 +59,8 @@ jobs:
             -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
             -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
             -DARMRX_BUILD_TESTS=ON \
-            -DARMRX_DISABLE_LTO=ON
+            -DARMRX_DISABLE_LTO=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE
 
       - name: Build library + tests (compile-check JIT for AArch64)
         run: cmake --build build-cross -j"$(nproc)"
