@@ -25,7 +25,8 @@ option(ARMRX_FAST_MATH "Enable -Ofast / -ffast-math for floating-point speed" OF
 option(ARMRX_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(ARMRX_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(ARMRX_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
-set(ARMRX_PGO "OFF" CACHE STRING "Profile-Guided Optimization: OFF, GENERATE, or USE")
+option(ARMRX_PGO "Profile-Guided Optimization: OFF, GENERATE, or USE" OFF)
+option(ARMRX_SECURE_JIT "Enforce W^X on the JIT code buffer (default ON = hardened; OFF = RWX fast path, -DRANDOMX_FORCE_SECURE not set)" ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -165,6 +166,11 @@ endif()
 if(ARMRX_ENABLE_NEON_TTABLE_AES)
     target_compile_definitions(armrx_core PRIVATE ARMRX_ENABLE_NEON_TTABLE_AES)
     message(STATUS "NEON T-table AES enabled (experimental)")
+endif()
+
+if(ARMRX_SECURE_JIT)
+    target_compile_definitions(armrx_core PUBLIC RANDOMX_FORCE_SECURE)
+    message(STATUS "W^X JIT enforced (RANDOMX_FORCE_SECURE) — RWX fast path disabled")
 endif()
 
 if(ARMRX_ENABLE_ASAN)
