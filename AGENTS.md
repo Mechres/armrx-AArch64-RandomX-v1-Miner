@@ -62,7 +62,7 @@ Experimental flags (all default OFF, all verified but not adopted — exception:
 - `ARMRX_DISABLE_LTO=ON` — workaround for GCC 15 + musl LTO crashes
 
 ## Architecture
-- **AArch64**: `-march=armv8-a+crypto`, `ARMRX_HAVE_JIT=1`. NEON AES paths were removed (AESE/AESD instruction ordering incompatible with RandomX round spec — AddRoundKey at start vs end). All AES uses software T-table path.
+- **AArch64**: `-march=armv8-a+crypto`, `ARMRX_HAVE_JIT=1`. NEON AES paths were removed (AESE/AESD instruction ordering incompatible with RandomX round spec — AddRoundKey at start vs end). On `aarch64+crypto` the **hardware AESE/AESD funnel is the default** AES path (zero-key form, byte-identical to the T-table path, gated on `__ARM_FEATURE_AES`); the NEON T-table software path (Track G) is also enabled by default for throughput. See Gotchas below.
 - **x86_64**: Interpreted VM only (JIT sources silently excluded)
 - **Memory modes**: Auto-selected via `MemAvailable` check with 256 MiB OS reserve. Light: 256 MiB cache, Fast: 2080 MiB dataset
 

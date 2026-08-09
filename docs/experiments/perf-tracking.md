@@ -4,6 +4,13 @@
 > Goal: STOP re-running the same territory (the snake-eating-its-tail failure mode).
 > Rules at bottom — read before starting any new measurement.
 
+> **Measurement provenance.** Figures predating the 2026-08-01 W1-1 census
+> (`docs/experiments/w11-instruction-census.md`) cite a superscalar body of
+> **3,563 A64 instr/call** — that snapshot is **superseded**: the census re-counted
+> the live body at **5,224 A64 instr/call** (×16,384 calls/hash = 85.59 M, 71.9% of
+> the 118.96 M total). Historical `3,563` mentions below describe the measurement
+> context at the time and are left as-is for traceability; do not treat them as current.
+
 ---
 
 ## 0. STANDING FACTS (do not re-litigate without new evidence)

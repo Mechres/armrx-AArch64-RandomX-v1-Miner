@@ -59,7 +59,20 @@ Phase 5 (PGO's claimed +19.3% didn't reproduce either).
 | **Light mode JIT + `--dataset-mb=512`** | 8 | **~30–32 H/s** | ~3.8 H/s | **Recommended real-world config.** Caching a 512 MiB dataset prefix for direct JIT loads trades a one-time fill wait (~175s) at startup for ~30–32 H/s steady (vs ~26 H/s plain) — validated on-device. See Quick Start. |
 | **Interpreted Fallback** | 1 | 0.44 H/s | 0.44 H/s | Portable bytecode fallback — not re-measured this pass, ratio to JIT is approximate |
 
-> [!TIP]
+> **Hashrate figure provenance.** The numbers above are *plain* (no `--dataset-mb`)
+> pinned bench figures on this device. Different measurement contexts give
+> different 8-worker figures — all valid, not contradictory:
+> - **24.95 H/s** — plain pinned bench, 8w (this table, row above).
+> - **~26 H/s** — plain bench *without* pinning, or real-pool without `--dataset-mb`
+>   (cache/network overhead shifts it slightly).
+> - **26.65 H/s** — real-pool 8w, 1209 s (`docs/TESTING.md`), the authoritative
+>   *deployed* number.
+> - **~30–32 H/s** — recommended `--dataset-mb=512` real-world config (row above).
+> - **13.37 H/s** — a separate `--full-hash-only` aggregate bench (`ROADMAP.md`); that
+>   harness measures a different workload slice and is not directly comparable.
+> The superscalar body size quoted in older docs (3,563 A64 instr/call) is
+> **superseded** by the W1-1 census: **5,224 A64 instr/call** (`docs/experiments/w11-instruction-census.md`).
+
 > Pinned execution (`--workers=8` on physical cores) avoids OS scheduling overhead, yielding higher throughput and lower variance than unpinned runs. There is no lower-worker-count "free lunch" on this device — going from 8 down to fewer workers trades real throughput for lower heat/power, it does not recover the same hashrate at a lower core count.
 
 > [!TIP]

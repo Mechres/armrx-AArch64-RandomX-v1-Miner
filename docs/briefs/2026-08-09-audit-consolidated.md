@@ -317,21 +317,33 @@ Deferred (not a diag-log gap, separate workstream):
 
 ---
 
-## TIER 7 — Documentation drift (Deepseek + Luna #1 #5 — VERIFIED; includes audit corrections)
+## TIER 7 — Documentation drift (Deepseek + Luna #1 #5 — VERIFIED; includes audit corrections) — ✅ ADOPTED (partial) 2026-08-09
 
-- README 8w = 24.95 H/s is stale (pre-Lever-3 plain bench); authoritative real-pool ≈ 26.65 H/s.
-  README / ROADMAP / STRATEGY disagree on the figure.
-- `docs/closed-levers-ledger.md:128-131` D2 still says "Worker-local buffer reuse (D2) — OPEN,
-  untried" but it was ADOPTED as Luna C2 on 2026-08-08 (README:177). Ledger not updated.
-- STRATEGY.md "Known bugs" lists already-fixed items (fill stall, TUI bugs, SIGINT, OOO publish).
-- ⚠️ **Audit correction:** AGENTS.md does NOT self-contradict on AES. Architecture section
-  (:65) is stale ("All AES uses software T-table path"), but Gotchas (:70) correctly states
-  "Hardware AESE/AESD IS now used as the default aarch64+crypto AES funnel." Fix the Architecture
-  line, not a "self-contradiction."
-- Action: mark `closed-levers-ledger.md` as the single authoritative optimization-status source
-  (it currently has 0 "authoritative/only source" markers despite AGENTS.md asserting it should
-  be); flag historical measurements clearly. Also fix the stale "3,563 instructions" figure
-  (incl. in `2026-08-09-superscalar-disassembly-findings.md` — real body = 5,224 per census).
+Adopted (doc-only; committed on `try/t7-docsync`, merged):
+- **AGENTS.md:65** stale AES line (`"All AES uses software T-table path"`) — FIXED to state
+  the hardware AESE/AESD funnel is the default on aarch64+crypto, with Track-G NEON T-table
+  also default-ON. Matches Gotchas:70 (audit's own correction was right).
+- **`closed-levers-ledger.md`** — added an "Authoritative source" header note (this file wins
+  on status disagreements) + flagged that historical `3,563` body figures are superseded by the
+  W1-1 census `5,224` body. Satisfies the audit's "mark ledger authoritative + flag historical."
+  (Nothing else in the ledger changed — see overstatements below.)
+- **`docs/experiments/perf-tracking.md`** — added a "Measurement provenance" note: pre-W1-1
+  `3,563 A64 instr/call` is superseded by `5,224` (left historical mentions as-is for
+  traceability). Addresses the "stale 3,563 figure" without rewriting history.
+- **README.md** hashrate table — added a "Hashrate figure provenance" note clarifying that
+  24.95 (plain pinned bench) / ~26 / 26.65 (real pool) / 30-32 (`--dataset-mb=512`) / 13.37
+  (`--full-hash-only` bench) are *different measurement contexts*, not contradictions, and noted
+  the 3,563→5,224 supersession. Pre-empts the "README/ROADMAP/STRATEGY disagree" observation.
+
+Overstated / NOT changed (verified against source):
+- **D2 "OPEN but adopted as Luna C2"** — FALSE. The ledger's "Worker-local buffer reuse (D2)"
+  (closed-levers-ledger.md:128) is a **distinct, genuinely-untried** lever from README's adopted
+  "Cross-hash boundary pipelining (Track D2)". Ledger is correct; no change.
+- **STRATEGY.md "Known bugs lists already-fixed items"** — FALSE. Items 117-180 are all marked
+  FIXED with root-cause + date; only 192+ (fill stall, OOO publish, --pool-test cursor) are OPEN.
+  The audit misread FIXED entries as stale.
+- No fabricated symbols / phantom line numbers. Audit's AES correction + authoritative-source
+  + 3,563-provenance actions were legitimate and adopted.
 
 ---
 

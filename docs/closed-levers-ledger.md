@@ -1,5 +1,14 @@
 # Closed-Levers Ledger (armrx)
 
+> **Authoritative source.** This ledger is the single standing record of
+> optimization-lever status (adopted / open / closed / dead) for armrx. When
+> other docs (README, ROADMAP, STRATEGY, RETROSPECTIVE, `docs/archived/*`) disagree
+> on a lever's status or a historical measurement, **this file wins**. Historical
+> measurement figures quoted here or elsewhere may predate later re-baselines
+> (e.g. the superscalar body was re-counted at **5,224 A64 instr/call** by the
+> W1-1 census, `docs/experiments/w11-instruction-census.md`, superseding earlier
+> `3,563` snapshots) — treat such numbers as dated, not authoritative.
+
 **Purpose:** A single standing record of every optimization lever that was closed
 (reverted / dead / not-adopted), noting (a) the DISTINCT DESIGNS tried, (b) whether the
 kill criterion was PER-DESIGN or PER-FAMILY, and (c) whether a per-family re-attempt is
