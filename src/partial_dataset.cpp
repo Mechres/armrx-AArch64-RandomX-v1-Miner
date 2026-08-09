@@ -75,6 +75,9 @@ PartialDataset::~PartialDataset() {
         item_count_.load(std::memory_order_acquire) >= allocated_items_;
     if (!fill_finished && stop_) {
         stop_->store(true, std::memory_order_release);
+        // Wake any wait_for_fill()/wait_until_published() waiter so a cancelled
+        // fill does not block forever (predicate also checks stop_).
+        fill_cv_.notify_all();
     }
 
     for (auto& t : fill_threads_) {
@@ -228,6 +231,9 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
                                                    std::memory_order_relaxed)) {
             // another worker published further; loop
         }
+        // Wake any wait_for_fill()/wait_until_published() waiter now that the
+        // contiguous bound advanced (deterministic mid-fill observation).
+        fill_cv_.notify_all();
         // If we made no progress, another worker will handle further advances
         // when its chunk completes. Terminate.
         if (cursor == prev) break;
@@ -239,6 +245,8 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     if (!stop->load(std::memory_order_acquire) &&
         contiguous_done_.load(std::memory_order_acquire) >= allocated_items_) {
         fill_complete_.store(true, std::memory_order_release);
+        // Wake wait_for_fill() (and any wait_until_published) — full completion.
+        fill_cv_.notify_all();
     }
 
     ARMRX_LOG_DEBUG << "PartialDataset worker on cpu " << cpu_id
@@ -246,13 +254,16 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
 }
 
 void PartialDataset::wait_for_fill() {
-    while (!fill_complete_.load(std::memory_order_acquire)) {
-        // Check if all items are done
-        if (item_count_.load(std::memory_order_acquire) >= allocated_items_) {
-            fill_complete_.store(true, std::memory_order_release);
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // Wait for fill completion via condition variable (replaces the old 100 ms
+    // poll loop, which added wakeup latency and test flakiness under TSAN/ASan
+    // scheduling skew). Wakes on fill_complete_ OR cancellation (stop_) so a
+    // cancelled fill never blocks forever.
+    {
+        std::unique_lock<std::mutex> lk(fill_cv_mutex_);
+        fill_cv_.wait(lk, [this] {
+            return fill_complete_.load(std::memory_order_acquire) ||
+                   stop_->load(std::memory_order_acquire);
+        });
     }
 
     // Log fill completion once per process (multiple workers may observe it).
@@ -274,6 +285,14 @@ void PartialDataset::wait_for_fill() {
         // clears this under the same mutex; this clears the trailing ones.
         fill_threads_.clear();
     }
+}
+
+void PartialDataset::wait_until_published(std::size_t count) {
+    std::unique_lock<std::mutex> lk(fill_cv_mutex_);
+    fill_cv_.wait(lk, [this, count] {
+        return item_count_.load(std::memory_order_acquire) >= count ||
+               stop_->load(std::memory_order_acquire);
+    });
 }
 
 } // namespace armrx

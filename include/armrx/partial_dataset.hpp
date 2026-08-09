@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <condition_variable>
 #include <memory>
 #include <span>
 #include <vector>
@@ -89,6 +90,14 @@ public:
     /// join() of the same threads.
     void wait_for_fill();
 
+    /// Block until at least `count` items are published (the contiguous prefix
+    /// [0, count) is fully initialized). Replaces timing-dependent test polling:
+    /// a test can observe a deterministic mid-fill state (e.g. a lagging chunk
+    /// has NOT been skipped by contiguous publish) without relying on the
+    /// scheduler catching an intermediate item_count_ sample. Returns once
+    /// item_count_ >= count or the fill is cancelled (stop_ set).
+    void wait_until_published(std::size_t count);
+
 private:
     std::byte* data_ = nullptr;
     std::size_t allocated_items_ = 0;
@@ -110,6 +119,12 @@ private:
     mutable std::vector<std::thread> fill_threads_;
     // Guards the fill-thread join in wait_for_fill() against concurrent callers.
     mutable std::mutex fill_join_mutex_;
+    // Condition variable + mutex backing wait_for_fill() and wait_until_published():
+    // replaces the old 100 ms poll loop (test flakiness / wakeup latency). Notified
+    // by fill_worker when item_count_ advances or fill_complete_ is set, and by the
+    // destructor on cancellation so a waiter never blocks forever.
+    mutable std::mutex fill_cv_mutex_;
+    std::condition_variable fill_cv_;
     // Keeps the Argon2dCache alive while fill threads are running
     std::shared_ptr<const Argon2dCache> cache_holder_;
     // Shared independently of PartialDataset so a worker never needs the object
