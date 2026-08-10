@@ -399,14 +399,17 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         CPU_ZERO(&cpus);
         unsigned int cpu_id = core_order_[thread_id % big_core_count_];
         CPU_SET(static_cast<int>(cpu_id), &cpus);
-        pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+        // sched_setaffinity(0, ...) is portable across glibc, musl, and
+        // Android/bionic (which lacks pthread_setaffinity_np). Equivalent to
+        // pthread_setaffinity_np(pthread_self(), ...) on Linux.
+        sched_setaffinity(0, sizeof(cpus), &cpus);
     } else if (affinity_mode_ == AffinityMode::All) {
         // Pin to all cores sequentially
         cpu_set_t cpus{};
         CPU_ZERO(&cpus);
         unsigned int cpu_id = core_order_[thread_id % core_order_.size()];
         CPU_SET(static_cast<int>(cpu_id), &cpus);
-        pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus);
+        sched_setaffinity(0, sizeof(cpus), &cpus);
     }
     // If AffinityMode::Unpinned, skip pinning and let the OS handle scheduling
 
