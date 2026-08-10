@@ -417,9 +417,13 @@ struct AliasedScratchpad {
     std::byte*  base          = nullptr;
     std::size_t virtual_bytes = 0;
     int         fd            = -1;
+    bool        ok            = false;
 
     static AliasedScratchpad create(std::size_t alias_bytes, std::size_t virtual_bytes) {
         AliasedScratchpad result;
+#if !defined(__ANDROID__)
+        // memfd_create is a Linux syscall exposed by glibc/musl but NOT by
+        // Android/bionic's headers. On Android this sub-bench is skipped.
         result.virtual_bytes = virtual_bytes;
 
         int fd = static_cast<int>(::memfd_create("armrx_l1_bench", 0));
@@ -441,6 +445,11 @@ struct AliasedScratchpad {
 
         result.base = static_cast<std::byte*>(reservation);
         result.fd = fd;
+        result.ok = true;
+#else
+        (void)alias_bytes; (void)virtual_bytes;
+        result.ok = false;
+#endif
         return result;
     }
 };
@@ -468,9 +477,17 @@ void bench_scratchpad_locality(bool use_l1_alias) {
 
     AliasedScratchpad aliased;
     if (use_l1_alias) {
+#if defined(__ANDROID__)
+        // memfd_create is unavailable on Android/bionic; the L1-alias experiment
+        // cannot be constructed portably here. Skip it (the real-scratchpad
+        // baseline sub-bench below still runs and is the comparable measurement).
+        std::cout << "[bench] L1-aliased sub-bench SKIPPED on Android (no memfd_create)\n";
+        return;
+#else
         constexpr std::size_t kAliasBytes = 16384; // 16 KiB -- Cortex-A53 L1 D-cache size
         aliased = AliasedScratchpad::create(kAliasBytes, armrx::kRandomXScratchpadBytes);
         vm.override_scratchpad_for_bench(aliased.base, armrx::kRandomXScratchpadBytes);
+#endif
     }
 
     // One more full run() so the compiled program reflects current state

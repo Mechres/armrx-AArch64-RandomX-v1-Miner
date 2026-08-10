@@ -180,11 +180,13 @@ void PartialDataset::fill_worker(std::shared_ptr<const Argon2dCache> cache_holde
     if (stop->load(std::memory_order_acquire)) return;
     if (delay_ms > 0) std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
 
-    // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern)
+    // Explicit CPU pinning (mirrors worker_loop()'s AffinityMode::All pattern).
+    // sched_setaffinity(0, ...) is portable across glibc, musl, and Android/bionic
+    // (which lacks pthread_setaffinity_np).
     cpu_set_t cpus{};
     CPU_ZERO(&cpus);
     CPU_SET(static_cast<int>(cpu_id), &cpus);
-    if (pthread_setaffinity_np(pthread_self(), sizeof(cpus), &cpus) != 0) {
+    if (sched_setaffinity(0, sizeof(cpus), &cpus) != 0) {
         ARMRX_LOG_WARN << "PartialDataset fill worker: CPU pinning to cpu " << cpu_id
                        << " failed (" << std::strerror(errno)
                        << ") — topology-aware fill NOT enforced for this worker";
