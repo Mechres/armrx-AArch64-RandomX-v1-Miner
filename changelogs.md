@@ -5,6 +5,18 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-10 — docs: correct DAG scheduler stale root cause + closure label
+- **Source:** post-audit re-review (Deepseek 🔴 #2). `docs/briefs/2026-08-06-dag-scheduler-attempt.md:13`
+  and `ROADMAP.md:37` claimed the DAG regression was "reorder forces a longer emitted sequence"
+  (order-dependent codegen). Branch `try/t8-dag-docfix`, commit `525488f`, merged `1d15d88`.
+- **Correction (grounded in 2026-08-07 changelog `:418,429`):** emitted length is **order-invariant**
+  under the DAG scheduler; the −14.3% H/s was **planner runtime overhead** (O(n²) hazard-matrix build +
+  ~9 heap allocs/hash, `sys` time tripled), not more instructions. Also downgraded the overstated
+  "exhaustively closed" label to "current implementation closed-negative; family not exhaustively
+  disproven" — a cheap planner (bitmap hazard matrix, schedule reuse) is a legitimate reopening variant
+  (small expected ROI, E20's 0.73% legal-move rate). Doc-only; no code change. Recorded in
+  `docs/briefs/2026-08-10-postaudit-consolidated.md` §2C(b).
+
 ## 2026-08-10 — fix(test): hybrid --dataset-mb>0 KAT resolved (README correct, stale comment fixed)
 - **Source:** post-audit re-review (Deepseek 🔴 #1) flagged a contradiction: `README.md:167-171`
   says hybrid `--dataset-mb>0` is "✅ correct and recommended (verified on-device same-nonce)" while
