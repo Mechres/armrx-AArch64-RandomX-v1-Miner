@@ -22,8 +22,9 @@
 - **Tiers 1–7:** shipped and merged (separate doc). Not re-litigated here.
 - **Tier 8:** the only remaining audit area — gated, deferred, low-priority.
 - **Fleet:** Lenovo (primary, fixed 765 MHz), Redmi 7A/pine (DVFS, ~1708 MHz,
-  ~80 H/s — best measurement platform), Unisoc SC9863A (A55, 6 reachable cores,
-  3.86 GiB RAM — never benchmarked; only device capable of fast mode).
+  ~80 H/s — best measurement platform), Unisoc SC9863A (A55 big.LITTLE, 1.2/1.6 GHz,
+  3.86 GiB RAM — **fleet re-validation DONE 2026-08-10**: native Termux build + correctness
+  KATs PASS on Cortex-A55, ~21.84 H/s @ 8 workers; the only fast-mode-capable device).
 - **Perf ceiling:** armrx is ~90% of XMRig per-cluster (cluster-normalized);
   remaining ~10–12% gap is an **instruction-count** gap, not stalls/scheduling.
   IPC is *better* than XMRig (0.731 vs 0.612). Superscalar body = 5,224 A64

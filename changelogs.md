@@ -5,6 +5,21 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-10 — fix(port): Android/bionic portability (fleet re-validation on Unisoc Cortex-A55)
+- **Source:** fleet re-validation (Tier 8 #3) on the Unisoc SC9863A (Cortex-**A55**, Termux/Android
+  11, bionic). Native Termux build surfaced two portability defects that block the whole fleet build
+  on Android: `mining_engine.cpp` + `partial_dataset.cpp` used `pthread_setaffinity_np` (glibc/musl-only;
+  bionic lacks it) → replaced with portable `sched_setaffinity(0, …)` (equiv on Linux). `bench_armrx.cpp`
+  used `memfd_create` (no bionic header) → guarded under `#if !defined(__ANDROID__)`; the L1-alias
+  sub-bench prints SKIPPED on Android (the real-scratchpad baseline still runs). Branch `try/t8-android-port`,
+  commit `6f87db4`, merged `cb96ef9`.
+- **Fleet re-validation result (Unisoc, A55 big.LITTLE, native clang, SECURE_JIT=OFF for Android SELinux):**
+  `test_jit_equivalence` **16/16 byte-identical**, `armrx_tests` Input1/Input2 JIT hashes == reference
+  KAT, `test_mining` **ALL PASSED** (incl. `test_light_mode_partial_dataset_matches_reference` hybrid
+  KAT). armrx is **correct on Cortex-A55** — first new microarch validated. Hashrate: **~21.84 H/s**
+  aggregate @ 8 workers (light mode, 500-hash window) — baseline for this 1.2/1.6 GHz tablet. No code
+  behavior change on glibc/musl; Android build + A55 correctness now established.
+
 ## 2026-08-10 — fix(jit): remove unsafe Newton-Raphson FDIV/FSQRT opt-in path
 - **Source:** post-audit re-review (Deepseek latent clobber). `h_FDIV_M`/`h_FSQRT_R` (under
   `ARMRX_JIT_FAST_DIV_SQRT`) clobbered v0–v3 at runtime, corrupting the IMUL_RCP literal pool that
