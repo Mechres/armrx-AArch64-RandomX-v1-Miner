@@ -438,17 +438,20 @@ void test_light_mode_seed_rotation_rebuilds_partial_dataset() {
     //
     // We verify the buffer DIRECTLY (byte-compare against
     // generate_dataset_item(seedB, i)) rather than via the engine's
-    // end-to-end hash. Rationale: the RandomX *hybrid partial-dataset
-    // consumption path* (the JIT reading cached prefix items) is, on its own,
-    // an independent piece of functionality that is currently NOT producing
-    // correct end-to-end hashes on-device (a single non-rotated job with
-    // --dataset-mb>0 is also wrong vs a light reference) — see README's
-    // "not adopted for production" note. Asserting the engine hash here would
-    // conflate the rotation fix with that separate issue and fail regardless
-    // of this fix. generate_dataset_item() is the same reference
-    // test_partial_dataset already byte-validates, so this check is
-    // platform-independent and isolates exactly what this fix changed: the
-    // buffer rebuild on rotation.
+    // end-to-end hash. Rationale: this isolates exactly what the rotation
+    // fix changed (the buffer rebuild on rotation) from the separate
+    // end-to-end hybrid-consistency check. NOTE (2026-08-10): an earlier
+    // version of this comment claimed the hybrid consumption path "is
+    // currently NOT producing correct end-to-end hashes on-device" — that
+    // was stale. The sibling test
+    // test_light_mode_partial_dataset_matches_reference() asserts the engine
+    // hash against a clean light-mode reference VM for the same nonce and
+    // PASSES on-device (JIT) — see README's "Hybrid partial dataset" note
+    // (✅ correct and recommended). The hybrid --dataset-mb>0 path is
+    // verified correct end-to-end; this buffer-byte check is a belt-and-
+    // suspenders isolation of the rotation rebuild specifically.
+    // generate_dataset_item() is the same reference test_partial_dataset
+    // already byte-validates, so this check is platform-independent.
     assert(pd->fill_complete());
     assert(pd->item_count() == kPartialItems);
     constexpr std::size_t kVerifyItems = 256; // spot-check first 256 items
