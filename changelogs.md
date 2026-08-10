@@ -5,6 +5,21 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-10 — fix(test): hybrid --dataset-mb>0 KAT resolved (README correct, stale comment fixed)
+- **Source:** post-audit re-review (Deepseek 🔴 #1) flagged a contradiction: `README.md:167-171`
+  says hybrid `--dataset-mb>0` is "✅ correct and recommended (verified on-device same-nonce)" while
+  `tests/test_mining.cpp:438-448` claimed the hybrid consumption path "is currently NOT producing
+  correct end-to-end hashes on-device." Branch `try/t8-hybrid-kat`, commit `139bfd3`, merged `a6b0667`.
+- **On-device gate:** built aarch64-musl `test_mining`, ran on Lenovo. The sibling test
+  `test_light_mode_partial_dataset_matches_reference` is the same-nonce end-to-end KAT (hashes with
+  the partial-dataset hybrid path, asserts `engine_hash == light-reference_hash` for same nonce).
+  Result: `TEST_MINING_RC=0`, `ALL MINING TESTS PASSED`, including that test. **README is correct;
+  the `:438-448` comment was STALE** (false claim of on-device wrong hashes). The recommended
+  `--dataset-mb=512` config is verified safe — no live wrong-hash bug.
+- **Change:** corrected the stale test comment to reflect the verified-correct state (kept the
+  buffer-byte check as an isolation of the rotation-rebuild fix). README unchanged. Also recorded the
+  resolution in `docs/briefs/2026-08-10-postaudit-consolidated.md` §4.
+
 ## 2026-08-10 — ci: disable optional OpenSSL in cross-build (TLS header fix)
 - **Source:** GitHub Actions `cross-build` job failed compiling `tls_client.cpp`
   (`fatal error: openssl/opensslconf.h: No such file or directory`). Copilot suggested
