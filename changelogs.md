@@ -5,6 +5,20 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-08-10 — fix(jit): remove unsafe Newton-Raphson FDIV/FSQRT opt-in path
+- **Source:** post-audit re-review (Deepseek latent clobber). `h_FDIV_M`/`h_FSQRT_R` (under
+  `ARMRX_JIT_FAST_DIV_SQRT`) clobbered v0–v3 at runtime, corrupting the IMUL_RCP literal pool that
+  `emitMovImmediate` reads via smov/umov (v0–v15) — a latent wrong-hash bug when the OFF-by-default
+  flag was flipped ON. Measured −1.1% regression; frozen since 2026-07-21 (independently traced in
+  `docs/archived/audits/independent-audit_2026-08-07.md:35`). Branch `try/t8-fdiv-remove`, commit
+  `4dc9738`, merged `6e2c1d8`.
+- **Change:** deleted the NR handlers + the `ARMRX_ENABLE_JIT_FAST_DIV_SQRT` CMake option; `h_FDIV_M`
+  /`h_FSQRT_R` now emit native FDIV/FSQRT only. The NR path was dead code under the OFF flag, so the
+  live emission is byte-identical to the prior shipping build. **On-device gate (Lenovo):** `test_jit_equivalence`
+  16/16 byte-identical, `armrx_tests` Input1/Input2 JIT hashes match the reference KAT exactly.
+  Latent wrong-hash trap eliminated; no live behavior change. AGENTS.md / REASONIX.md flag lists
+  updated (flag removed, reconstruct note for v16–v31 if ever re-attempted).
+
 ## 2026-08-10 — docs: correct DAG scheduler stale root cause + closure label
 - **Source:** post-audit re-review (Deepseek 🔴 #2). `docs/briefs/2026-08-06-dag-scheduler-attempt.md:13`
   and `ROADMAP.md:37` claimed the DAG regression was "reorder forces a longer emitted sequence"
