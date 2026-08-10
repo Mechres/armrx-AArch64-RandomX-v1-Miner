@@ -17,8 +17,31 @@
   `test_jit_equivalence` **16/16 byte-identical**, `armrx_tests` Input1/Input2 JIT hashes == reference
   KAT, `test_mining` **ALL PASSED** (incl. `test_light_mode_partial_dataset_matches_reference` hybrid
   KAT). armrx is **correct on Cortex-A55** — first new microarch validated. Hashrate: **~21.84 H/s**
-  aggregate @ 8 workers (light mode, 500-hash window) — baseline for this 1.2/1.6 GHz tablet. No code
-  behavior change on glibc/musl; Android build + A55 correctness now established.
+  aggregate @ 8 workers (light mode, 500-hash window) — **this was a short-window artifact; the real
+  light/all/8w baseline is 33.61 H/s** (2026-08-10 re-measurement, 200 s window, see the Unisoc device
+  doc). No code behavior change on glibc/musl; Android build + A55 correctness now established.
+
+## 2026-08-10 — docs: fleet re-validation measurements + pine stable-clock correction
+- **Source:** post-audit fleet re-validation (Tier 8 #3/#5). All device-side, no code change.
+  Committed docs only; the working brief (`docs/briefs/2026-08-10-postaudit-consolidated.md`)
+  stays untracked per project discipline (agent-prompt artifact).
+- **Unisoc SC9863A (Cortex-A55, Termux) real baselines:** prior ~21.84 H/s figure was a
+  short-window artifact — corrected to **light/all/8w = 33.61 H/s** (200 s window,
+  beats Lenovo A53 isolcpus 28.4). Also measured: light/big-only/4w 25.98, light/big-only/8w
+  33.44, light/all/4w 26.01, **fast/big-only/4w = 41.89** (only fleet device with enough RAM
+  for the 2080 MiB dataset). `--affinity-mode` irrelevant at equal worker count (big-only ≈ all),
+  weakening the co-tenant-fill premise. IP is DHCP (`.206`→`.218`); `sshd` auto-starts via
+  termux-boot. Written up in `devices/unisoc-sc9863a-termux.md`.
+- **Redmi 7A (pine, SDM439) stable-clock correction (SAFETY):** the 2026-08-09 doc claimed
+  **1708 MHz was the stable ceiling (~80 H/s)**. CORRECTED: 1708 **crashes after 10–15 min**
+  under sustained load; the only step that survives a long run is **1497 MHz (1497600)**,
+  measured **63.11 H/s** light/8w (≈linear scaling: 1w 10.08 → 8w 63.11). The 69.39 H/s
+  baseline was at uncapped 1958 (the wedge step). Updated the hazard section, pin recipe
+  (`/etc/local.d/cpufreq.start` → 1497600), verify line, and added a topology matrix in
+  `devices/xiaomi-redmi-7a-sdm439.md`. **Operational:** never run pine sustained above 1497.
+- **AES generator audit (#2):** disassembled the aarch64 binary — 63 `aese` + 117 vector AES
+  ops; `aes.hpp:350-369` XORs the 16-byte `AesBlock` via `veorq_u8` (`uint8x16_t`) = single
+  128-bit `eor`, NOT a scalar byte loop. Compiler already vectorized; no optimization to make.
 
 ## 2026-08-10 — fix(jit): remove unsafe Newton-Raphson FDIV/FSQRT opt-in path
 - **Source:** post-audit re-review (Deepseek latent clobber). `h_FDIV_M`/`h_FSQRT_R` (under

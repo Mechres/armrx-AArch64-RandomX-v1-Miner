@@ -10,9 +10,11 @@ Referred to as **pine** in conversation (pmOS device codename `xiaomi-pine`).
 > `performance` governor, fan-cooled, light mode, zero throttling).
 > NOTE: this was measured at the uncapped 1958 MHz fast-cluster clock, which
 > later proved to wedge under pool load (see [Clock-instability hazard](#-clock-instability-hazard-2026-08-09-concluded)).
-> The **stable** operating point is the fast cluster capped to **1708 MHz**
-> (~80 H/s) — see below. Treat 69.39 H/s as a best-case local number, not the
-> sustainable pool rate.
+> **Corrected 2026-08-10:** the stable operating point is the fast cluster
+> capped to **1497 MHz (1497600)** — **~63 H/s** at 8 workers. The previously
+> cited 1708 MHz is **NOT stable** (crashes after 10–15 min of sustained load);
+> only 1497 holds indefinitely. Treat 69.39 H/s (measured uncapped at 1958) as a
+> best-case local number, not a sustainable pool rate.
 
 All values below were read from the running device on 2026-08-08.
 
@@ -389,29 +391,34 @@ clock is capped. Confirmed by a controlled test:
 - Capped fast cluster to its 960000 floor (slow cluster → 768000): **survived
   781 s / 9 job rotations / 50.8 H/s, zero crashes** — matching the Lenovo.
 
-**Operational rule:** do **not** mine pine at 1958 MHz (the fast cluster's top
-step). Cap the fast cluster to **1708 MHz** (its highest stable step) for safe
-operation:
+**Operational rule (CORRECTED 2026-08-10):** do **not** mine pine at 1958 MHz
+(the fast cluster's top step) **and do not run sustained loads at 1708 MHz** —
+both wedge/crash. Cap the fast cluster to **1497 MHz (1497600)**, the only step
+that survives indefinitely, for safe operation:
 
 ```sh
-# stable pine: fast cluster pinned to 1708 MHz (userspace), slow cluster at full 1459
+# stable pine: fast cluster pinned to 1497 MHz (userspace), slow cluster at full 1459
 echo userspace | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_governor
-echo 1708800  | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_setspeed
+echo 1497600  | sudo tee /sys/devices/system/cpu/cpufreq/policy0/scaling_setspeed
 echo performance | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_governor
 echo 1459200  | sudo tee /sys/devices/system/cpu/cpufreq/policy1/scaling_max_freq
 ```
 
-- Stable throughput at 1708/1459 MHz: **~80 H/s** (matches the original uncapped
-  speed, but without the wedge).
-- Clock-sweep results (2026-08-09), each run several job rotations under pool
-  load: **960 ✓, 1497 ✓, 1708 ✓, 1958 ✗ (wedges @ job 3 / ~173–210s)**. So
-  1708 MHz is the highest stable fast-cluster step; 1958 is the only step above
-  it and it is not attainable on this board.
+- Stable throughput at 1497/1459 MHz: **~63 H/s** light mode, 8 workers
+  (measured 63.11 H/s, 2026-08-10, local `--mine` benchmark, no crash, CPU ≤49°C,
+  run duration ~19 min). The earlier ~80 H/s figure was at 1708 MHz, which is
+  now known to be unstable (see below) — do not use it as a target.
+- Clock-sweep results, each run several job rotations under pool load:
+  - **2026-08-09:** 960 ✓, 1497 ✓, 1708 ✓ (short-window), 1958 ✗ (wedges @ job 3 / ~173–210s).
+  - **2026-08-10 (CORRECTION):** 1708 MHz is **NOT stable under sustained load** —
+    it crashes after **10–15 minutes** (well beyond the short 2026-08-09 windows
+    that passed). **1497 MHz (1497600) is the highest step that survives a long
+    run.** So the stable ceiling was overstated on 2026-08-09; use 1497, not 1708.
 - The fault at 1958 is a hardware V/F margin (SoC not stable at that clock under
   the JIT-recompile current spike), confirmed NOT a supply issue (bench PSU swap
   still wedged) and NOT a software bug. Out of scope for armrx code.
 - The 86 H/s briefly seen at 1958 before wedging is **not safely attainable**;
-  ~80 H/s at 1708 is the practical max.
+  ~63 H/s at 1497 is the practical, sustainable max.
 
 ### Permanent clock pin (OpenRC `local.d`, 2026-08-09)
 
@@ -420,17 +427,19 @@ installed as a boot hook (pmOS uses OpenRC, not systemd):
 
 - File: `/etc/local.d/cpufreq.start` (mode 0755), already in the `default`
   runlevel via the `local` service.
-- Contents: fast cluster (policy0) → `userspace` + `scaling_setspeed=1708800`;
+- Contents: fast cluster (policy0) → `userspace` + `scaling_setspeed=1497600`;
   slow cluster (policy1) → `performance` + `scaling_max_freq=1459200`; re-assert
   after 1 s (the cpufreq driver on this kernel occasionally rounds a setspeed
   up to the next table step, so the re-assert guards against that).
 - Verify after any reboot: `cat /sys/devices/system/cpu/cpufreq/policy*/scaling_cur_freq`
-  must read `1708800 1459200`. If it reads `1958400 ...`, the hook did not fire
-  (or a setspeed rounding slipped through) — re-run `sudo /etc/local.d/cpufreq.start`.
-- **Note:** the cpufreq driver silently rounds any off-table frequency request
-  UP to the nearest table step (e.g. writing 1830000 yields 1958400). Only the
-  five table steps stick: 960 / 1305 / 1497 / 1708 / 1958. 1708 is the highest
-  stable one.
+  must read `1497600 1459200`. If it reads `1708800` or `1958400 ...`, the hook
+  did not fire (or a setspeed rounding slipped through) — re-run
+  `sudo /etc/local.d/cpufreq.start` and confirm it reads `1497600`.
+- **Note (CORRECTED 2026-08-10):** the cpufreq driver silently rounds any
+  off-table frequency request UP to the nearest table step (e.g. writing 1830000
+  yields 1958400). Only the five table steps stick: 960 / 1305 / 1497 / 1708 /
+  1958. **1708 is NOT safe for sustained runs (crashes 10–15 min); 1497 is the
+  highest stable step for a long pool run.**
 - **PSU swap (2026-08-09) ruled out the supply:** replacing the LM2596 with a
   clean regulated bench/desk PSU at the same voltage, clock left uncapped, still
   wedged at ~job 3 / ~210s. The fault is the **SoC's V/F margin at 1958 MHz**,
@@ -439,6 +448,37 @@ installed as a boot hook (pmOS uses OpenRC, not systemd):
 - Root-cause analysis and the discriminating experiment are in
   `docs/briefs/2026-08-08-pine-pool-segfault.md` (with the rejected JIT-race
   hypothesis, kept for record).
+
+### Topology / worker-count matrix (2026-08-10)
+
+Measured with the fast cluster clamped to **1497 MHz (1497600)** — the stable
+ceiling — slow cluster at full 1459 MHz. Local `--mine` benchmark (pool `:1111`
+is BLOCKED from pine's network egress, so no real-pool run possible here).
+200 s per config, 30 s warmup, steady-state over the post-warmup window.
+
+| Mode | Workers | **Steady H/s** | worker spread (w0 / w4) |
+|---|---|---|---|
+| light | 1 | **10.08** | 10.08 |
+| light | 2 | **19.14** | 9.39 |
+| light | 4 | **35.10** | 8.95 |
+| light | 8 | **63.11** | 8.42 / 7.49 |
+| auto (8w) | 8 | **63.04** | 7.97 / 7.45 |
+
+**Findings:**
+- **Near-linear scaling** with worker count (≈ +87% per doubling): 10 / 19 / 35
+  / 63 H/s at 1 / 2 / 4 / 8 workers. 8 workers = 63.11 H/s.
+- The 2026-08-08 **69.39 H/s** baseline was at the uncapped 1958 MHz fast cluster;
+  at the stable 1497 MHz ceiling it is **63.11 H/s** — the ~9% drop is the clock
+  reduction (1958 → 1497), not a regression.
+- `auto` selected **light** (requires only ~528 MiB) and matched the manual
+  light/8w figure (63.04 vs 63.11) — confirms auto mode + the matrix are
+  consistent.
+- **No crash** over the ~19 min total run; CPU peaked at 49°C (vs the 1708
+  crash zone). The 1497 clamp held end-to-end.
+- **Fast mode not run on this build:** the 2026-08-08 pine binary lacks
+  `--dataset-mb`, and free RAM (~1.39 GiB) is below the 2080 MiB fast threshold,
+  so `auto` correctly stays light. A fast-mode matrix is a separate task (needs a
+  build with `--dataset-mb` + more free RAM).
 
 ### Procedure for subsequent runs
 

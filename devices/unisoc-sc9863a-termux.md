@@ -166,11 +166,17 @@ this one, and codegen differences are a real confounder when comparing hashrate.
 ## Access
 
 ```sh
-ssh u0_a203@192.168.10.206 -p 8022
+ssh u0_a203@192.168.10.218 -p 8022
 ```
 
 Note the non-standard port **8022** (Termux `sshd` default). The user is
 `u0_a203` (Android app UID 10203).
+
+**IP is DHCP-assigned and changes on reboot** (observed `.206` → `.218` on 2026-08-10).
+**Always re-probe both `.206` and `.218` at session start** before trusting either.
+`sshd` auto-starts via `termux-boot` (`~/.termux/boot/start-sshd.sh` → `termux-wake-lock;
+sshd`), so the device is reachable after reboot once it gets a lease — no manual app-open
+needed.
 
 ## Why this device matters
 
@@ -190,18 +196,47 @@ Lenovo closure.
 
 **However**, the cpuset restriction weakens the premise: only 2 big cores are
 reachable, so the "spare big core" headroom the experiment assumes is halved.
-Whether the big cores actually idle during a mining run **still needs
-measuring** — it has not been confirmed.
+Measured 2026-08-10: the big cores do **NOT** idle — `--affinity-mode` is irrelevant at
+equal worker count (big-only ≈ all), which means armrx's `sched_setaffinity` already
+saturates the reachable big cores. The co-tenant-fill premise is therefore **further
+weakened**; the `try/hybrid-cotenant-fill` re-attempt is unlikely to win here.
 
 ### Only possible fast-mode measurement
 
 With ~2.4 GiB available it is the sole fleet candidate for a fast-mode
 (2080 MiB dataset) run, which the two sub-2 GB pmOS devices cannot do.
 
+### Measured baselines (2026-08-10, real `pool-test` run)
+
+Run on the live device (`Cpus_allowed_list: 0-5`, i.e. 4 LITTLE + 2 big cores
+reachable). herominers `:1111` reachable. Light configs = 200 s windows; fast re-run =
+900 s (the 2080 MiB `init_dataset` exceeds a 200 s window under no-hugepage Termux, so
+the first fast attempt read 0.00 — window-too-short, not a device fault).
+
+| Mode | Affinity | Workers | Steady H/s |
+|---|---|---|---|
+| light | all | 8 | **33.61** |
+| light | big-only | 4 | 25.98 |
+| light | big-only | 8 | 33.44 |
+| light | all | 4 | 26.01 |
+| **fast** | **big-only** | **4** | **41.89** |
+
+Labelling required by §Benchmarking notes: effective cores = 6 (4 LITTLE + 2 big), mode
+selected confirmed (light vs fast), toolchain = Termux clang/Bionic, µarch = A55.
+
+**Findings:** (1) the old ~21.84 bench figure is an artifact; real light/all/8w = 33.61,
+**beating the Lenovo A53 isolcpus 28.4**. (2) `--affinity-mode` is irrelevant at equal
+worker count (big-only ≈ all); **worker count is the only lever** (8w≈33.6 vs 4w≈26.0).
+(3) **fast mode is the best config** (41.89 with *fewer* workers) — and the only mode this
+4 GB device can hold. 41.89 is a conservative floor; the warm tail was still ~106 H/s INST
+at t=900 because init consumed the early window.
+
 ## Remaining unknowns
 
-- [ ] Do the big cores actually idle during a mining run? (co-tenant premise)
-- [ ] Does armrx select fast mode in practice, under real Android memory pressure?
+- [x] Do the big cores actually idle during a mining run? **No** (2026-08-10: affinity
+      irrelevant ⇒ reachable big cores already saturated). Co-tenant premise dead here.
+- [x] Does armrx select fast mode in practice? **Yes** — fast selected cleanly at
+      ~2.6 GiB MemAvailable; ran at **41.89 H/s** (see baselines above).
 - [ ] Sustained vs peak behaviour, given thermal state is unobservable
 - [ ] Whether Android migrates the process out of `cpuset:/foreground` mid-run
 - [ ] Cooling arrangement (tablet form factor, passive)
