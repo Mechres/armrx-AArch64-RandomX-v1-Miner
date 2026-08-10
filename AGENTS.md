@@ -57,7 +57,6 @@ CMake requires `LANGUAGES C CXX ASM`. On AArch64: JIT + hardware AES/NEON auto-e
 Experimental flags (all default OFF, all verified but not adopted — exception: `ARMRX_ENABLE_NEON_TTABLE_AES` (Track G) is **default ON** since 2026-08-01, +28.8% AES primitive throughput):
 - `ARMRX_PGO=GENERATE|USE` — profile-guided optimization (GCC only, LTO must be off; measured null on current code)
 - `ARMRX_ENABLE_NEON_AES=ON` — NEON vector-permute AES (~19.4% slower on Cortex-A53)
-- `ARMRX_ENABLE_JIT_FAST_DIV_SQRT=ON` — Newton-Raphson FDIV/FSQRT (−1.1% hashrate)
 - `ARMRX_FAST_MATH=ON` — `-Ofast` / `-ffast-math`
 - `ARMRX_DISABLE_LTO=ON` — workaround for GCC 15 + musl LTO crashes
 
