@@ -134,11 +134,14 @@ found open. Current honest state:
   into the hottest code region (superscalar body ≈ 80.5% of all instructions). Pure
   dead-code removal; `armrx_tests` reference hashes byte-identical. Portable
   code-quality / I-cache win, no behavioral change.
-- **Worker-local buffer reuse (D2)** — **OPEN, untried.** `worker_loop`
-  (`src/mining_engine.cpp`) reallocates `block_input` / `next_block` per job-change
-  (and copies per iteration). A reusable per-worker buffer (allocate once, `resize`
-  only on job change) would avoid repeated heap traffic. Portable, low-risk, small
-  expected impact. Not yet attempted.
+- **Worker-local buffer reuse (D2)** — **ADOPTED (ledger corrected 2026-08-10).** `worker_loop`
+  (`src/mining_engine.cpp:476-477`) already declares `block_input` / `next_block` as
+  **per-worker local vectors**, and `:554` copies the job template into the existing
+  buffer (`resize` only on job change) — no per-iteration heap realloc. The reusable
+  per-worker buffer was therefore already realized; the prior "OPEN, untried" label was
+  stale (post-audit re-review, Luna #7 / Deepseek closure-finding #7, both source-verified).
+  Portable, low-risk, small expected impact. **Distinct from "Cross-hash boundary
+  pipelining (Track D2)"** (README:166, also adopted) — that is a different D2 lever.
 - **Cross-LTO (D1)** — **build-conditional, not a code lever.** LTO is wired in
   CMake (`ARMRX_DISABLE_LTO`, off by default) but disabled on the musl cross
   toolchain (GCC 15 + musl crash history). On a non-musl AArch64 build (Debian/

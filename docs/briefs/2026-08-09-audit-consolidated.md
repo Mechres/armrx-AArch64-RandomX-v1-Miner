@@ -336,9 +336,14 @@ Adopted (doc-only; committed on `try/t7-docsync`, merged):
   the 3,563→5,224 supersession. Pre-empts the "README/ROADMAP/STRATEGY disagree" observation.
 
 Overstated / NOT changed (verified against source):
-- **D2 "OPEN but adopted as Luna C2"** — FALSE. The ledger's "Worker-local buffer reuse (D2)"
-  (closed-levers-ledger.md:128) is a **distinct, genuinely-untried** lever from README's adopted
-  "Cross-hash boundary pipelining (Track D2)". Ledger is correct; no change.
+- **D2 "OPEN but adopted as Luna C2"** — RESCINDED 2026-08-10. The 2026-08-09 note below
+  asserted the ledger's "Worker-local buffer reuse (D2)" was a *distinct, untried* lever and
+  "correct." Post-audit re-review (Luna #7 / Deepseek closure-finding #7) + Hermes source check
+  proved otherwise: `src/mining_engine.cpp:476-477` declares `block_input`/`next_block` as
+  per-worker local vectors and `:554` reuses them (`resize` only on job change) — the reuse is
+  **already adopted**. The ledger line was STALE, not correct. Corrected in `closed-levers-ledger.md`
+  (D2 → ADOPTED, 2026-08-10). README's "Cross-hash boundary pipelining (Track D2)" remains a
+  *separate* adopted D2 lever.
 - **STRATEGY.md "Known bugs lists already-fixed items"** — FALSE. Items 117-180 are all marked
   FIXED with root-cause + date; only 192+ (fill stall, OOO publish, --pool-test cursor) are OPEN.
   The audit misread FIXED entries as stale.
