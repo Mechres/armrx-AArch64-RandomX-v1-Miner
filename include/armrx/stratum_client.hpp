@@ -217,7 +217,6 @@ private:
     // Handshake synchronization
     std::promise<bool> subscribe_done_;
     std::atomic<bool> subscribe_ok_{false};
-    mutable unsigned subscribe_try_{0};  // which subscribe format to try next
 
     // Reconnect configuration
     unsigned max_retries_{10};

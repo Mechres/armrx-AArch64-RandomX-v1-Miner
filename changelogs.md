@@ -21,6 +21,26 @@
   light/all/8w baseline is 33.61 H/s** (2026-08-10 re-measurement, 200 s window, see the Unisoc device
   doc). No code behavior change on glibc/musl; Android build + A55 correctness now established.
 
+## 2026-08-10 — fix(stratum): remove inert `subscribe_try_` 4-format fallback (#6)
+- **Source:** post-audit small-bug backlog (Deepseek #4). `subscribe_try_` (mutable
+  counter in `stratum_client.hpp`) was **never incremented** — `build_subscribe_msg()`
+  always computed `idx = subscribe_try_ % 4 == 0`, so only `formats[0]` (`["armrx/1.0"]`)
+  was ever sent, and a failed subscribe retried the whole connection (same format) rather
+  than advancing to another. The 4-format `mining.subscribe` array + `methods[]` + `idx`
+  machinery was **misleading dead code** (audit: "either fix or delete").
+- **Change:** deleted `subscribe_try_`, the `formats[]`/`methods[]` arrays, and the `idx`
+  indirection; `build_subscribe_msg()` now emits the single canonical
+  `{"method":"mining.subscribe","params":[["armrx/1.0"]]}` directly. **Behavior unchanged**
+  (identical to the only format ever previously sent). TUI cursor restore was already
+  handled (`tui->shutdown()` before `std::_Exit` + `atexit` belt-and-suspenders). TUI/metrics
+  unit tests need an interactive/network harness and are out of scope for this backlog
+  (stratum/TLS already covered by `test_pool_protocol`).
+- **Verification:** host + cross builds clean (no `subscribe_try` symbol); built
+  `stratum_client.cpp.o` contains `["armrx/1.0"]` and zero `XMRig/6.21.0` / `"monero"` /
+  empty-`[]` variants; `test_pool_protocol` PASSES (real subscribe handshake against mock
+  server). Full host ctest regression gate pending. (`src/stratum_client.cpp`,
+  `include/armrx/stratum_client.hpp`)
+
 ## 2026-08-10 — docs: fleet re-validation measurements + pine stable-clock correction
 - **Source:** post-audit fleet re-validation (Tier 8 #3/#5). All device-side, no code change.
   Committed docs only; the working brief (`docs/briefs/2026-08-10-postaudit-consolidated.md`)

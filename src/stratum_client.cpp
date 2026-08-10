@@ -312,21 +312,13 @@ void StratumClient::set_reconnect_config(unsigned max_retries, unsigned base_del
 std::string StratumClient::build_subscribe_msg() const {
     const auto id = request_id_.fetch_add(1);
     handshake_req_id_ = id;
-    static const char* formats[] = {
-        "[\"armrx/1.0\"]",
-        "[\"armrx/1.0\",\"monero\"]",
-        "[]",
-        "[\"XMRig/6.21.0\"]",
-    };
-    static const char* methods[] = {
-        "mining.subscribe",
-        "mining.subscribe",
-        "mining.subscribe",
-        "mining.subscribe",
-    };
-    unsigned num_formats = 4;
-    unsigned idx = subscribe_try_ % num_formats;
-    return armrx::json::rpc_envelope(id, methods[idx], formats[idx]);
+    // Single canonical subscribe format. The prior 4-format fallback was inert:
+    // subscribe_try_ was never incremented, so only formats[0] was ever sent, and
+    // a failed subscribe retried the whole connection (same format) rather than
+    // advancing to another. Removed the misleading dead indirection (audit #6).
+    static const char* format = "[\"armrx/1.0\"]";
+    static const char* method = "mining.subscribe";
+    return armrx::json::rpc_envelope(id, method, format);
 }
 
 std::string StratumClient::build_login_msg() const {
