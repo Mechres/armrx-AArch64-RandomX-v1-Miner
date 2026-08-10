@@ -40,9 +40,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // Verify the JIT code buffer layout: the .fill directive in static.S reserves
 // RANDOMX_PROGRAM_MAX_SIZE * 32 * 4 bytes (12288 AArch64 instruction slots).
 // Worst-case emission per RandomX instruction is ~20 AArch64 words
-// (h_FDIV_M/h_FSQRT_R under ARMRX_JIT_FAST_DIV_SQRT); the 32-word budget
-// leaves headroom. Do NOT shrink the .fill in static.S below the fast
-// div/sqrt worst case.
+// (the historical Newton-Raphson FDIV/FSQRT path); the native FDIV/FSQRT form
+// is a single word. The 32-word budget leaves headroom. Do NOT shrink the
+// .fill in static.S below the historical fast div/sqrt worst case.
 // RANDOMX_PROGRAM_MAX_SIZE is fixed at 384 per the RandomX v1 spec.
 static_assert(RANDOMX_PROGRAM_MAX_SIZE == 384, "Upstream RandomX v1 constant");
 #include "armrx/superscalar.hpp"
@@ -2069,41 +2069,12 @@ void JitCompilerA64::h_FDIV_M(Instruction& instr, uint32_t& codePos)
 	// bif tmp_reg_fp, or_mask_reg, and_mask_reg
 	emit32(0x6EE01C00 | tmp_reg_fp | (30 << 5) | (29 << 16), code, k);
 
-#ifdef ARMRX_JIT_FAST_DIV_SQRT
-	// Newton-Raphson SIMD 2D double precision division: v_dst / v28
-	// Scratch registers: v0-v2 (safe — not used by other instruction handlers)
-
-	// frecpe v0.2d, v28.2d  — reciprocal estimate of divisor
-	emit32(0x4EE1D800 | 0 | (tmp_reg_fp << 5), code, k);
-
-	// Iteration 1: frecps + fmul
-	emit32(0x4E60FC00 | 1 | (tmp_reg_fp << 5) | (0 << 16), code, k); // frecps v1.2d, v28.2d, v0.2d
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);        // fmul v0.2d, v0.2d, v1.2d
-
-	// Iteration 2: frecps + fmul
-	emit32(0x4E60FC00 | 1 | (tmp_reg_fp << 5) | (0 << 16), code, k);
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);
-
-	// Iteration 3: frecps + fmul
-	emit32(0x4E60FC00 | 1 | (tmp_reg_fp << 5) | (0 << 16), code, k);
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);
-
-	// Markstein correction for correctly-rounded division:
-	// q = a * y
-	emit32(ARMV8A::FMUL | 1 | (dst << 5) | (0 << 16), code, k); // fmul v1.2d, v_dst.2d, v0.2d
-
-	// r = a - b * q  (v2 = v_dst; fmls v2.2d, v28.2d, v1.2d)
-	emit32(0x4EA01C00 | 2 | (dst << 5) | (dst << 16), code, k);       // mov v2.16b, v_dst.16b
-	emit32(0x4EE0CC00 | 2 | (tmp_reg_fp << 5) | (1 << 16), code, k);  // fmls v2.2d, v28.2d, v1.2d
-
-	// q' = q + r * y  (fmla v1.2d, v2.2d, v0.2d)
-	emit32(0x4E60CC00 | 1 | (2 << 5) | (0 << 16), code, k);  // fmla v1.2d, v2.2d, v0.2d
-
-	// mov v_dst.16b, v1.16b
-	emit32(0x4EA01C00 | dst | (1 << 5) | (1 << 16), code, k);
-#else
+	// Native FDIV (the only emitted form). The Newton-Raphson variant that
+	// used to live here (gated on ARMRX_JIT_FAST_DIV_SQRT) clobbered v0-v3 at
+	// runtime, corrupting the IMUL_RCP literal pool that emitMovImmediate
+	// reads via smov/umov — a latent wrong-hash bug when enabled, and a
+	// measured -1.1% regression. Removed 2026-08-10 (see post-audit brief).
 	emit32(ARMV8A::FDIV | dst | (dst << 5) | (tmp_reg_fp << 16), code, k);
-#endif
 
 	codePos = k;
 }
@@ -2112,57 +2083,10 @@ void JitCompilerA64::h_FSQRT_R(Instruction& instr, uint32_t& codePos)
 {
 	const uint32_t dst = (instr.dst % 4) + 20;
 
-#ifdef ARMRX_JIT_FAST_DIV_SQRT
-	uint32_t k = codePos;
-	// Newton-Raphson SIMD 2D double precision square root: sqrt(v_dst)
-	// Scratch registers: v0, v1, v2, v3
-
-	// frsqrte v0.2d, v_dst.2d  — reciprocal sqrt estimate
-	emit32(0x6EE1D800 | 0 | (dst << 5), code, k);
-
-	// Iteration 1: y_sq = y*y; step = frsqrts(a, y_sq); y = y*step
-	emit32(ARMV8A::FMUL | 1 | (0 << 5) | (0 << 16), code, k);        // fmul v1.2d, v0.2d, v0.2d
-	emit32(0x4EE0FC00 | 1 | (dst << 5) | (1 << 16), code, k);         // frsqrts v1.2d, v_dst.2d, v1.2d
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);        // fmul v0.2d, v0.2d, v1.2d
-
-	// Iteration 2
-	emit32(ARMV8A::FMUL | 1 | (0 << 5) | (0 << 16), code, k);
-	emit32(0x4EE0FC00 | 1 | (dst << 5) | (1 << 16), code, k);
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);
-
-	// Iteration 3
-	emit32(ARMV8A::FMUL | 1 | (0 << 5) | (0 << 16), code, k);
-	emit32(0x4EE0FC00 | 1 | (dst << 5) | (1 << 16), code, k);
-	emit32(ARMV8A::FMUL | 0 | (0 << 5) | (1 << 16), code, k);
-
-	// Markstein correction for correctly-rounded sqrt:
-	// g = a * y  (initial sqrt estimate)
-	emit32(ARMV8A::FMUL | 1 | (dst << 5) | (0 << 16), code, k);  // fmul v1.2d, v_dst.2d, v0.2d
-
-	// r = a - g^2  (v2 = v_dst; fmls v2.2d, v1.2d, v1.2d)
-	emit32(0x4EA01C00 | 2 | (dst << 5) | (dst << 16), code, k);   // mov v2.16b, v_dst.16b
-	emit32(0x4EE0CC00 | 2 | (1 << 5) | (1 << 16), code, k);       // fmls v2.2d, v1.2d, v1.2d
-
-	// h = 0.5 * y
-	emit32(0x6F03F403, code, k);                                   // fmov v3.2d, #0.5
-	emit32(ARMV8A::FMUL | 3 | (3 << 5) | (0 << 16), code, k);    // fmul v3.2d, v3.2d, v0.2d
-
-	// g' = g + r * h  (fmla v1.2d, v2.2d, v3.2d)
-	emit32(0x4E60CC00 | 1 | (2 << 5) | (3 << 16), code, k);       // fmla v1.2d, v2.2d, v3.2d
-
-	// Handle zero input: if a[i] == 0.0, result should be 0.0 not NaN
-	// fcmeq v2.2d, v_dst.2d, #0.0  — lane mask: all-ones where a==0
-	emit32(0x4EE0D800 | 2 | (dst << 5), code, k);
-	// bic v1.16b, v1.16b, v2.16b  — zero out lanes where input was 0
-	emit32(0x4E601C00 | 1 | (1 << 5) | (2 << 16), code, k);
-
-	// mov v_dst.16b, v1.16b
-	emit32(0x4EA01C00 | dst | (1 << 5) | (1 << 16), code, k);
-
-	codePos = k;
-#else
+	// Native FSQRT (the only emitted form). Newton-Raphson variant removed
+	// 2026-08-10: same v0-v3 clobber hazard + -1.1% regression; reconstruct
+	// with v16-v31 (outside the IMUL_RCP pool v0-v15) if ever re-attempted.
 	emit32(ARMV8A::FSQRT | dst | (dst << 5), code, codePos);
-#endif
 }
 
 void JitCompilerA64::h_CBRANCH(Instruction& instr, uint32_t& codePos)
