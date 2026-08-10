@@ -41,6 +41,25 @@
   server). Full host ctest regression gate pending. (`src/stratum_client.cpp`,
   `include/armrx/stratum_client.hpp`)
 
+## 2026-08-10 — measure(D2): E2E A/B of cross-hash pipelining — measured NULL (#8)
+- **Source:** post-audit small-bug backlog (Deepseek §2B: D2 pipelining "⚠️ Unmeasured,
+  not closed"). Added a compile guard `ARMRX_DISABLE_D2_PIPELINE` at `vm.cpp` Part D:
+  default calls `hash_and_fill_aes_interleaved_x4` (interleaved, current shipping path);
+  with the guard it calls the sequential pair `hash_aes_1r_x4` + `fill_aes_1r_x4`. The
+  guard is measurement infra only (revertable; not a shipped flag).
+- **Correctness gate (on-device, Lenovo AArch64):** `test_jit_equivalence` 16/16
+  byte-identical for **both** the interleaved and sequential builds — the toggle is
+  behavior-preserving (KAT also green on host: `test_aes_hash` + `test_mining` PASS).
+- **E2E A/B (Lenovo @ fixed 765MHz, light/8w, 200s, 30s warmup):** interleaved
+  **27.01 H/s** vs sequential **27.25 H/s** = **+0.9% favoring sequential** (noise).
+  The microbench's −2.77% *AES-time* (IPC 1.735→1.787) does **NOT** reach
+  end-to-end H/s on the in-order A53 — overlapping the AES fill does not hide enough
+  latency to move throughput. **D2 pipelining = measured NULL at E2E.**
+- **Disposition:** closed-neutral. Default left interleaved (not a regression), but the
+  lever should not be credited as a win; README `Track D2` status corrected ✅→⚠️
+  (measured-null). Flip the default to sequential (drop the interleave) if the code
+  complexity isn't wanted — pending user decision. Ledger updated. (`src/vm.cpp`)
+
 ## 2026-08-10 — docs: fleet re-validation measurements + pine stable-clock correction
 - **Source:** post-audit fleet re-validation (Tier 8 #3/#5). All device-side, no code change.
   Committed docs only; the working brief (`docs/briefs/2026-08-10-postaudit-consolidated.md`)

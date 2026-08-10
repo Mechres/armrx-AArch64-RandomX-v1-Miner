@@ -1071,11 +1071,24 @@ void randomx_calculate_hash_pipelined(
     std::memcpy(hash_state.data(), &current_reg.a, sizeof(AesState));
 
     // ── Part D: Interleaved AES hash + fill ──
+    // D2 cross-hash-boundary pipelining: overlap AES finalization of hash N with
+    // AES fill of hash N+1. Default ON. ARMRX_DISABLE_D2_PIPELINE selects the
+    // sequential pair (hash_aes_1r_x4 then fill_aes_1r_x4) for the E2E A/B that
+    // proves the interleave is a real win (Deepseek §2B: "unmeasured, not closed").
+#if defined(ARMRX_DISABLE_D2_PIPELINE)
+    hash_aes_1r_x4(
+        machine->scratchpad_span(),
+        hash_state);
+    fill_aes_1r_x4(
+        reinterpret_cast<AesState&>(*next_seed.data()),
+        std::span<std::byte>(next_scratchpad, scratchpad_size));
+#else
     hash_and_fill_aes_interleaved_x4(
         machine->scratchpad_span(),
         std::span<std::byte>(next_scratchpad, scratchpad_size),
         hash_state, next_seed    // next_seed is consumed by fill
     );
+#endif
 
     // Part D's fill phase writes its final AES state back into next_seed
     // (the AesState it consumed) — the exact key init_scratchpad would have
