@@ -55,10 +55,12 @@
   The microbench's −2.77% *AES-time* (IPC 1.735→1.787) does **NOT** reach
   end-to-end H/s on the in-order A53 — overlapping the AES fill does not hide enough
   latency to move throughput. **D2 pipelining = measured NULL at E2E.**
-- **Disposition:** closed-neutral. Default left interleaved (not a regression), but the
-  lever should not be credited as a win; README `Track D2` status corrected ✅→⚠️
-  (measured-null). Flip the default to sequential (drop the interleave) if the code
-  complexity isn't wanted — pending user decision. Ledger updated. (`src/vm.cpp`)
+- **Disposition:** closed-neutral. Both paths byte-identical (KAT 16/16), so the toggle
+  is behavior-preserving. **User decision (2026-08-11): flip default to sequential** —
+  the interleave earns nothing, so the simpler sequential pair (`hash_aes_1r_x4` +
+  `fill_aes_1r_x4`) is now the default; the interleaved path stays behind
+  `ARMRX_ENABLE_D2_PIPELINE` for re-measurement. README `Track D2` status corrected
+  ✅→⚠️ (measured-null) and notes the flipped default. Ledger updated. (`src/vm.cpp`)
 
 ## 2026-08-10 — docs: fleet re-validation measurements + pine stable-clock correction
 - **Source:** post-audit fleet re-validation (Tier 8 #3/#5). All device-side, no code change.
