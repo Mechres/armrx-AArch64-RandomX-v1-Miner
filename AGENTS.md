@@ -67,7 +67,6 @@ Experimental flags (all default OFF, all verified but not adopted — exception:
 
 ## Gotchas
 - AES T-table bugs were fixed (encrypt column permutation + decrypt column permutation) — see `docs/postmortems/aes-ttable-bug-postmortem.md`. Hardware AESE/AESD IS now used as the default aarch64+crypto AES funnel (zero-key form: `AESE`/`AESD` with a zero round key + `AESMC`/`AESIMC` + trailing real-key XOR — byte-identical to the T-table path, gated on `__ARM_FEATURE_AES` in `include/armrx/aes.hpp`). The 2026-07-20 revert was a *direct* `aese(state,key)` form (AddRoundKey-first = wrong order); the zero-key compensation fixes it. The tower-field NEON software path (Track G) remains available under `ARMRX_ENABLE_NEON_AES`.
-- `scratch_vm_study/` — standalone, own CMakeLists.txt, embedded upstream RandomX reference. **Do not modify** — changes don't affect main build.
 - TLS pool connections require OpenSSL at build time (`find_package(OpenSSL QUIET)`). Disabled silently if not found.
 - Multiple `--pool=host:port` flags enable automatic failover after 5 retries with 2s cooldown.
 - `.clang-format` and `.clang-tidy` exist (LLVM base, Allman braces, 120-col). No CI enforcement, but match their style when editing.
