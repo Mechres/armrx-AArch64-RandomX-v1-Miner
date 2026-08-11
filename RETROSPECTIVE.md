@@ -65,7 +65,7 @@ The JIT compiler emits AArch64 machine code for all 256 RandomX opcodes, with Co
 
 ### Phase 2 — Architecture & Tooling (July 18–19)
 
-P2 refactoring sprint: structured logger, TUI dashboard, Prometheus metrics, `--jit-dump` infrastructure, opcode frequency analyzer, JIT determinism/encoding tests, hot-path reductions (template copy elimination, superscalar heap churn), memory tier upgrades (MAP_HUGETLB for dataset/cache/scratchpad). The project's documentation infrastructure (changelogs.md, ROADMAP.md, PLAN.md) took its mature form here.
+P2 refactoring sprint: structured logger, TUI dashboard, Prometheus metrics, `--jit-dump` infrastructure, opcode frequency analyzer, JIT determinism/encoding tests, hot-path reductions (template copy elimination, superscalar heap churn), memory tier upgrades (MAP_HUGETLB for dataset/cache/scratchpad). The project's documentation infrastructure (changelogs.md, docs/archived/roadmap.md, PLAN.md) took its mature form here.
 
 ### Phase 3 — First Critical Fixes (July 20–22)
 
@@ -341,7 +341,7 @@ The project succeeded at understanding the problem fully — it just turned out 
 
 This project's documentation is unusual: it treats negative results as first-class outputs. Every attempt that measured as null or regression has a full writeup — root cause, measurement protocol, raw numbers, reversion rationale. The `docs/experiments/` directory has more dead ends than wins, and that's by design.
 
-The reason is simple: on a single-developer project spanning 18 days with multiple AI agents cycling in and out, the documentation *is* the continuity mechanism. A developer returning in six months — or another agent being dropped into the repo cold — should be able to read `docs/experiments/`, `changelogs.md`, and `ROADMAP.md` and know exactly what was tried, what happened, and why something isn't being pursued further, without having to re-derive any of the evidence. This is the most reusable output of the project for anyone else attempting RandomX on Cortex-A-class hardware: not the code, but the proof that several obvious-looking optimization categories are dead ends.
+The reason is simple: on a single-developer project spanning 18 days with multiple AI agents cycling in and out, the documentation *is* the continuity mechanism. A developer returning in six months — or another agent being dropped into the repo cold — should be able to read `docs/experiments/`, `changelogs.md`, and `docs/archived/roadmap.md` and know exactly what was tried, what happened, and why something isn't being pursued further, without having to re-derive any of the evidence. This is the most reusable output of the project for anyone else attempting RandomX on Cortex-A-class hardware: not the code, but the proof that several obvious-looking optimization categories are dead ends.
 
 ---
 
@@ -354,7 +354,7 @@ Every experiment, dead end, and adopted change is documented:
 - `docs/experiments/` — 12+ writeups of individual experiments, both wins and reverts
 - `docs/archived/audits/` — 5 independent code reviews (3 for the scheduler alone)
 - `docs/postmortems/` — root-cause analysis for critical bugs (AES T-table, dataset corruption, pool deadlock)
-- `docs/plans/20260727/master-plan-20260727.md` — the final synthesis: 10 tracks, all either done or gated
+- `docs/archived/plans/20260727/master-plan-20260727.md` — the final synthesis: 10 tracks, all either done or gated
 
 The project's honest record — every measured result, every reverted attempt, every wrong assumption corrected — is as much the output as the code itself.
 

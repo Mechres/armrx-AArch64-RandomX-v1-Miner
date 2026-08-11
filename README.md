@@ -39,7 +39,7 @@
 
 Measurements conducted on an **8× Cortex-A53 CPU** (Lenovo, MSM8929 /
 Snapdragon 415, running postmarketOS — a genuine two-cluster big.LITTLE-shaped part;
-see `ROADMAP.md`'s Baseline section for the cache-topology finding, and
+see `docs/archived/roadmap.md`'s Baseline section for the cache-topology finding, and
 [`devices/lenovo-vibe-k5-msm8929.md`](devices/lenovo-vibe-k5-msm8929.md) for the full
 hardware reference). **Clock:** the device
 has **no cpufreq / OPP table** (`scaling_cur_freq` empty), so it runs at a fixed
@@ -68,7 +68,7 @@ Phase 5 (PGO's claimed +19.3% didn't reproduce either).
 > - **26.65 H/s** — real-pool 8w, 1209 s (`docs/TESTING.md`), the authoritative
 >   *deployed* number.
 > - **~30–32 H/s** — recommended `--dataset-mb=512` real-world config (row above).
-> - **13.37 H/s** — a separate `--full-hash-only` aggregate bench (`ROADMAP.md`); that
+> - **13.37 H/s** — a separate `--full-hash-only` aggregate bench (`docs/archived/roadmap.md`); that
 >   harness measures a different workload slice and is not directly comparable.
 > The superscalar body size quoted in older docs (3,563 A64 instr/call) is
 > **superseded** by the W1-1 census: **5,224 A64 instr/call** (`docs/experiments/w11-instruction-census.md`).
@@ -197,20 +197,20 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 | Doc | What it's for |
 |---|---|
 | [`RETROSPECTIVE.md`](RETROSPECTIVE.md) | Full project retrospective — 210 commits, 18 days, 10 performance tracks. Start here. |
-| [`ROADMAP.md`](ROADMAP.md) | Post-alpha status — points to RETROSPECTIVE.md for the full story. |
+| [`docs/archived/roadmap.md`](docs/archived/roadmap.md) | Post-alpha status — points to RETROSPECTIVE.md for the full story. |
 | [`changelogs.md`](changelogs.md) | Post-alpha changelog — alpha record preserved at `docs/archived/alpha-changelogs.md`. |
 | [`docs/archived/audits/combined-audit-20260731.md`](docs/archived/audits/combined-audit-20260731.md) | Consolidated next-steps audit from AGY (Gemini) + Reasonix (DeepSeek). Prioritized T0–T3. (Archived — historical.) |
 | [`docs/archived/audits/`](docs/archived/audits/) | Archived alpha-phase audits — correctness, security, performance reviews. |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
 | [`docs/open-experiments/`](docs/open-experiments/) | 🧪 **Open experiments for the community** — reproducible A/B tests anyone can run on their own AArch64 device to help settle unproven performance ideas. See below. |
 | [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. |
-| [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
+| [`docs/archived/plans/20260727/master-plan-20260727.md`](docs/archived/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
 | [`devices/`](devices/) | Hardware reference for each AArch64 test device — cluster topology, frequency scaling, thermal limits, and measured gotchas. Read before interpreting any benchmark number. |
 | [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives and alpha archives. |
 
 `RETROSPECTIVE.md` carries the full narrative for every phase. The master plan at
-`docs/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
+`docs/archived/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
 Archived phase narratives are in `docs/archived/plan_completed_phases_1-5.md` (Phases 1–5),
 the full why-and-how behind everything already shipped.
 

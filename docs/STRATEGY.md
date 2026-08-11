@@ -222,7 +222,7 @@ The 95.2%→parity goal was **earned by measurement** (E24 + real-pool verificat
 
 ## Entry points for the next agent / session
 1. `docs/TESTING.md` — how to measure (the only valid commands).
-2. `docs/plans/era2-plan.md` — the concrete Phase 0/1/2 steps.
+2. `docs/archived/plans/era2-plan.md` — the concrete Phase 0/1/2 steps.
 3. `docs/experiments/m1-miner-to-miner-pmu-diff.md`, `ab-e24-8w.md`, `perf-tracking.md` — the
    evidence that closed Era I.
 4. `docs/audits/` — GLM, opencode, reasonix, gemini audits (context, some stale — check dates).

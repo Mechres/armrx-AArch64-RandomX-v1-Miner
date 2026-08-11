@@ -2,7 +2,7 @@
 
 These documents are kept for reference but are superseded by newer versions
 in the parent `docs/` directory or by [`RETROSPECTIVE.md`](../../RETROSPECTIVE.md)
-(the full project narrative) and [`docs/plans/20260727/master-plan-20260727.md`](../../docs/plans/20260727/master-plan-20260727.md)
+(the full project narrative) and [`docs/archived/plans/20260727/master-plan-20260727.md`](../../docs/archived/plans/20260727/master-plan-20260727.md)
 (the still-active strategic plan).
 
 | File | Superseded by | Reason |
