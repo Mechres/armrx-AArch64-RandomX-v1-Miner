@@ -202,6 +202,7 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 | [`docs/archived/audits/combined-audit-20260731.md`](docs/archived/audits/combined-audit-20260731.md) | Consolidated next-steps audit from AGY (Gemini) + Reasonix (DeepSeek). Prioritized T0–T3. (Archived — historical.) |
 | [`docs/archived/audits/`](docs/archived/audits/) | Archived alpha-phase audits — correctness, security, performance reviews. |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
+| [`docs/open-experiments/`](docs/open-experiments/) | 🧪 **Open experiments for the community** — reproducible A/B tests anyone can run on their own AArch64 device to help settle unproven performance ideas. See below. |
 | [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. |
 | [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
@@ -212,3 +213,24 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 `docs/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
 Archived phase narratives are in `docs/archived/plan_completed_phases_1-5.md` (Phases 1–5),
 the full why-and-how behind everything already shipped.
+
+## 🧪 Open Experiments — Help Wanted
+
+We can only validate performance hypotheses on the few AArch64 devices we own
+(a couple of Cortex-A53 boards and one A55 tablet). Many performance ideas
+depend on microarch behavior we **cannot** observe here — pipeline depth,
+MAC-interlock latency, cache/memory profiles that vary across Cortex-A5x/A7x
+and vendor implementations.
+
+**`docs/open-experiments/`** is a set of reproducible A/B tests anyone can run in
+a few minutes — no code changes, consensus-safe (byte-identical hashes). If you
+have an AArch64 device (SBC, phone, TV box, server) and a terminal, you can help:
+
+1. Pick an experiment from [`docs/open-experiments/`](docs/open-experiments/).
+2. Build + run it (commands are in each file).
+3. Report your numbers via an issue/discussion titled `[open-exp] <name> — <device>`.
+
+The most valuable result is a device that **disagrees** with our fleet — that's
+the signal an idea is worth building. See
+[`docs/open-experiments/README.md`](docs/open-experiments/README.md) for the
+full how-to and report template.
