@@ -53,7 +53,7 @@ The three high-severity findings are resolved+merged, but the following are expl
 | 4 | **Unisoc fast-mode run** — only device with 4 GB to fit 2080 MiB dataset | T8-3 | ✅ resolved 2026-08-10 (fast/big-only/4w = **41.89** H/s; only fast-capable fleet device) |
 | 5 | **Redmi re-validation** (T8-3) — topology/fast-mode matrix | T8-3 | ✅ resolved 2026-08-10 — pine (Redmi 7A, SDM439), fast cluster clamped to **1497600** (1.497 GHz stable ceiling; 1708 crashes after 10-15min, 1958 wedges). Local `--mine` (pool :1111 BLOCKED on pine). Light-mode worker sweep: 1w=10.08, 2w=19.14, 4w=35.10, 8w=**63.11** H/s (≈linear; matches 69.39 baseline measured at 1708, the ~9% delta = clock clamp). `auto` selected light + 63.04 (consistent). No crash, CPU≤49°C. **Fast mode is STRUCTURALLY IMPOSSIBLE on pine: 2 GB total RAM < 2080 MiB fast dataset (short even before the OS), so the light-mode matrix (1/2/4/8w) is the complete pine characterization — no fast-mode run can ever fit.** |
 | 6 | **Small bug backlog** — TUI cursor restore, inert `subscribe_try_` fallback, TUI/metrics/TLS tests | Deepseek #4 | 🟡 partial — TUI cursor restore already fixed (tui->shutdown() called before std::_Exit + atexit belt-and-suspenders); inert `subscribe_try_` 4-format fallback REMOVED (never incremented, always sent formats[0]; emits single canonical `["armrx/1.0"]` now); TUI/metrics tests need interactive/network harness (stratum/TLS covered by test_pool_protocol) |
-| 7 | **Open-source prep** — LICENSE file + remove hardcoded wallet @ `src/cli_parser.cpp:443` | Deepseek #5 | ⏸️ user-deferred (still open) |
+| 7 | **Open-source prep** — LICENSE file (license choice undecided) | Deepseek #5 | ⏸️ user-deferred (still open). **Wallet stays** — user decided 2026-08-11 the hardcoded `--pool-test` wallet is NOT to be removed. Only the LICENSE addition remains, and the license choice is undecided. |
 | 8 | **D2 pipelining** — "⚠️ Unmeasured, not closed" per Deepseek §2B | Deepseek §2B | ✅ resolved 2026-08-10 — E2E A/B: interleaved 27.01 vs sequential 27.25 H/s (noise, NULL). **2026-08-11: default flipped to sequential** (interleave earns nothing; `ARMRX_ENABLE_D2_PIPELINE` keeps interleaved opt-in). Both paths KAT 16/16 byte-identical. On `try/d2-default-sequential`, pending adopt. |
 
 The §3 experimental ideas (Luna 8 + Deepseek 5) are **deferred by design**, not closed.
@@ -196,7 +196,7 @@ Blake2b/Argon2 asm rewrite, more JIT scheduler reorderings, more literal-pool de
 
 **Hermes additions:**
 - Fix the ledger "worker-local buffer reuse" staleness (§4, verified safe).
-- Open-source prep (LICENSE + remove hardcoded wallet at `src/cli_parser.cpp:443`) remains user-deferred.
+- Open-source prep: LICENSE addition remains user-deferred (license choice undecided). **Wallet stays** — user decided 2026-08-11 the hardcoded `--pool-test` wallet is NOT removed.
 
 ---
 
