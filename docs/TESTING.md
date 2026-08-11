@@ -208,7 +208,7 @@ In order. A change that fails any gate is reverted (per "revert-on-failure" disc
 3. **Superscalar stress — `test_jit_superscalar_scheduler_stress`** (200 pairs, ~35 min).
    Secondary gate for the superscalar emission path.
 4. **1w + 8w H/s** via `bench_armrx --full-hash-only --perf-ready` (1w) and the §3 pool method
-   (8w). Compare against the baselines in STRATEGY.md. A real win = improves the *target
+   (8w). Compare against the baselines in docs/archived/strategy.md. A real win = improves the *target
    metric* (the one Phase 0 locks) without regression on the other.
 
 All four must pass before a change is "shipped" (committed as a real optimization, not a
@@ -250,7 +250,7 @@ artifact and is **superseded** by the 2026-08-06 gated-window re-baseline (101.1
 IPC 0.667). The intermediate "113.8M / IPC 0.662" figure was pre-AES and is also
 superseded. armrx is **~7% heavier** than XMRig on instructions (101.10M vs 94.5M at
 1w); the 95.2% 8w-parity gap is cluster-contention throughput loss, not a per-worker
-instr/IPC difference. See STRATEGY.md / p0-instruction-count-resolution.md.
+instr/IPC difference. See docs/archived/strategy.md / p0-instruction-count-resolution.md.
 
-See STRATEGY.md / p0-instruction-count-resolution.md — Phase 0 resolved the lever to
+See docs/archived/strategy.md / p0-instruction-count-resolution.md — Phase 0 resolved the lever to
 **instruction count** (armrx ~7% heavier at 1w: 101.10M vs 94.5M); the IPC branch is deprioritized.

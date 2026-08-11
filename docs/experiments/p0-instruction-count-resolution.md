@@ -26,7 +26,7 @@ across worker count (113.8M).**
 
 ## What this overturns
 1. **M1 8w armrx 103.5M was a measurement artifact** (pool `Total` undercount), exactly as
-   STRATEGY.md predicted. Real armrx instr/hash = **113.8M** at both 1w and 8w.
+   docs/archived/strategy.md predicted. Real armrx instr/hash = **113.8M** at both 1w and 8w.
 2. **The w11 census "armrx 89.5M (leaner than XMRig 101.4M)" was WRONG.** The gated window says
    armrx is **113.8M** — i.e. armrx is **+15% HEAVIER** than XMRig (98.9M from M1), not leaner.
    The census used a mis-divided/non-500 hash count. The gated `--perf-ready` is authoritative.
@@ -49,6 +49,6 @@ opcode(s) where armrx emits ~15% more. Candidates from GLM: `*_M` consumer (`add
 emitMemLoad), CBRANCH form, ISWAP_R (3-MOV), INEG_R. Implement each behind an `ARMRX_*` flag
 (TESTING.md §6), gate (KAT→450→200→8w H/s), keep only if it reduces instr/hash without regression.
 
-## Correction to STRATEGY.md / era2-plan.md
+## Correction to docs/archived/strategy.md / era2-plan.md
 The "armrx may be leaner (89.5M)" framing is wrong. Update to: armrx = 113.8M instr/hash
 (gated), +15% heavier than XMRig; lever = density; Phase 1b is the path (not the IPC branch).

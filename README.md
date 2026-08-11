@@ -39,8 +39,8 @@
 
 Measurements conducted on an **8× Cortex-A53 CPU** (Lenovo, MSM8929 /
 Snapdragon 415, running postmarketOS — a genuine two-cluster big.LITTLE-shaped part;
-see `ROADMAP.md`'s Baseline section for the cache-topology finding, and
-[`devices/lenovo-vibe-k5-msm8929.md`](devices/lenovo-vibe-k5-msm8929.md) for the full
+see `docs/archived/roadmap.md`'s Baseline section for the cache-topology finding, and
+[`docs/devices/lenovo-vibe-k5-msm8929.md`](docs/devices/lenovo-vibe-k5-msm8929.md) for the full
 hardware reference). **Clock:** the device
 has **no cpufreq / OPP table** (`scaling_cur_freq` empty), so it runs at a fixed
 firmware-set **~765 MHz** — the "~1.1/1.4 GHz" figure in older docs was retracted
@@ -68,7 +68,7 @@ Phase 5 (PGO's claimed +19.3% didn't reproduce either).
 > - **26.65 H/s** — real-pool 8w, 1209 s (`docs/TESTING.md`), the authoritative
 >   *deployed* number.
 > - **~30–32 H/s** — recommended `--dataset-mb=512` real-world config (row above).
-> - **13.37 H/s** — a separate `--full-hash-only` aggregate bench (`ROADMAP.md`); that
+> - **13.37 H/s** — a separate `--full-hash-only` aggregate bench (`docs/archived/roadmap.md`); that
 >   harness measures a different workload slice and is not directly comparable.
 > The superscalar body size quoted in older docs (3,563 A64 instr/call) is
 > **superseded** by the W1-1 census: **5,224 A64 instr/call** (`docs/experiments/w11-instruction-census.md`).
@@ -149,13 +149,13 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 *   **Security hardeners (S1–S8):** ✅ Fully active.
 *   **Prometheus Metrics Server:** ✅ Operational.
 *   **Emitter lookahead scheduler:** ✅ Adopted — small, measured, reproducible IPC win.
-*   **Superscalar generator timing-model A53 re-tune (2026-08-07):** ❌ **NOT adopted — all three designs failed (2026-08-07 independent review).** Designs A + B (full x86 2-MUL port model) broke reference hashes and were reverted. Design C (`91f5b2f`, later reverted by `8cdf311`) set `dependent_=true` on the MUL op in `IMULH_R`/`ISMULH_R` — **provably a no-op** (the generator calls `scheduleMop(..., scheduleCycle, scheduleCycle)`, so `depCycle == cycle` and the dependent adjustment is inert). HEAD vs reverted tree emit **byte-identical** superscalar programs; the earlier "H/s parity / `other_interlock_stall` halved 23.3→11.63M" reading was run-to-run/thermal noise. The family is recorded as **CLOSED-as-failed** (no working design); the real interlock win belongs to E24 (3-instr `MOVZ`/`MOVN`+`MOVK`, `other_interlock_stall` 23.3→6.18M/hash). See `docs/briefs/2026-08-07-superscalar-timing-model.md` and `docs/closed-levers-ledger.md`.
+*   **Superscalar generator timing-model A53 re-tune (2026-08-07):** ❌ **NOT adopted — all three designs failed (2026-08-07 independent review).** Designs A + B (full x86 2-MUL port model) broke reference hashes and were reverted. Design C (`91f5b2f`, later reverted by `8cdf311`) set `dependent_=true` on the MUL op in `IMULH_R`/`ISMULH_R` — **provably a no-op** (the generator calls `scheduleMop(..., scheduleCycle, scheduleCycle)`, so `depCycle == cycle` and the dependent adjustment is inert). HEAD vs reverted tree emit **byte-identical** superscalar programs; the earlier "H/s parity / `other_interlock_stall` halved 23.3→11.63M" reading was run-to-run/thermal noise. The family is recorded as **CLOSED-as-failed** (no working design); the real interlock win belongs to E24 (3-instr `MOVZ`/`MOVN`+`MOVK`, `other_interlock_stall` 23.3→6.18M/hash). See `docs/archived/briefs/2026-08-07-superscalar-timing-model.md` and `docs/closed-levers-ledger.md`.
 *   **PGO compiler profiles:** ⚠️ Tooling integrated into CMake and works end-to-end, but measured
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
 *   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
 *   **NEON T-table AES AddRoundKey (Track G):** ✅ **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%); E2E A/B (2026-08-01): **+1.68% H/s, −2.07% cycles, −4.93% instructions**. Enabled by default since 2026-08-01. See `docs/experiments/neon-ttable-aes.md`, `docs/experiments/track-g-e2e-ab.md`.
-*   **Hardware AESE/AESD AES funnel (Item 1, 2026-08-03):** ✅ **Adopted as the default aarch64+crypto AES path.** `encrypt_transform`/`decrypt_transform` now use the **zero-key** `vaesmcq_u8(vaeseq_u8(s, zero))` / `vaesimcq_u8(vaesdq_u8(s, zero))` form (byte-identical to the T-table path; gated on `__ARM_FEATURE_AES`), replacing ~10.7M T-table instructions/hash with 3 NEON ops. **Perf (CORRECTED 2026-08-06 re-baseline):** the original A/B reported −16.7% (107.36M → 89.47M, "below XMRig") but the 89.47M was a **contaminated-divisor artifact** (ungated division). A reproducible gated 500-hash re-baseline gives **−5.8% (107.36M → 101.10M)** at 1w; armrx at 101.10M is **~7% HEAVIER** than XMRig (94.5M) at 1w. The 2026-07-20 "AESE incompatible" revert was a *direct* `aese(state,key)` form (AddRoundKey-first = wrong order); the zero-key compensation fixes it. See `docs/briefs/2026-08-03-hardware-aes-item1.md`, `docs/measurements/2026-08-06-head-rebaseline.md`.
+*   **Hardware AESE/AESD AES funnel (Item 1, 2026-08-03):** ✅ **Adopted as the default aarch64+crypto AES path.** `encrypt_transform`/`decrypt_transform` now use the **zero-key** `vaesmcq_u8(vaeseq_u8(s, zero))` / `vaesimcq_u8(vaesdq_u8(s, zero))` form (byte-identical to the T-table path; gated on `__ARM_FEATURE_AES`), replacing ~10.7M T-table instructions/hash with 3 NEON ops. **Perf (CORRECTED 2026-08-06 re-baseline):** the original A/B reported −16.7% (107.36M → 89.47M, "below XMRig") but the 89.47M was a **contaminated-divisor artifact** (ungated division). A reproducible gated 500-hash re-baseline gives **−5.8% (107.36M → 101.10M)** at 1w; armrx at 101.10M is **~7% HEAVIER** than XMRig (94.5M) at 1w. The 2026-07-20 "AESE incompatible" revert was a *direct* `aese(state,key)` form (AddRoundKey-first = wrong order); the zero-key compensation fixes it. See `docs/archived/briefs/2026-08-03-hardware-aes-item1.md`, `docs/measurements/2026-08-06-head-rebaseline.md`.
 *   **W4 phase-2 — superscalar C* literal pool (dedicated PC-relative region):** ✅ **Correct, full gate set PASS (2026-08-02).** `IADD_C*`/`IXOR_C*` load their immediate from a dedicated per-program PC-relative literal pool (1 `LDR` vs 2–3 `MOVZ/MOVN+MOVK+ALU`), closing phase-1's shared-region collision. Root-cause of the 15+ prior failure iterations: the offset formula's spurious `-8` (A64 `LDR (literal)` targets `k + off*4`, no `+8`) made every C* load hit the previous slot — masked by a circular self-check. Fixed + Luna's sign-extend fix → all 703 pooled ops resolve correctly. **SUPERSEDED 2026-08-04 by E24:** the 2-instr pooled form was *too dense* for the in-order A53 — it put only one load between program-adjacent multiplies and saturated the 4-cycle MAC interlock (`other_interlock_stall` 23.3M/hash, 2.12× XMRig). E24 reverted this path to the 3-instr `MOVZ`/`MOVN`+`MOVK` form (XMRig-style), which pads the multiply gaps and **won +7.1% H/s (4.77→5.11, beating XMRig 5.04)** with interlocks dropping to 6.18M/hash (below XMRig). The W4 pool machinery was removed as dead code. See `changelogs.md` (2026-08-02 / E24 2026-08-04) and `docs/experiments/perf-tracking.md` (E24).
 *   **Hugepages verified on device (E9, 2026-08-03):** ✅ armrx's 256 MiB light-mode cache was confirmed running on **4 KiB pages** (`MAP_HUGETLB` failed — `HugePages_Total: 0`), falling back to anonymous + THP (which collapsed nothing). Reserved 256×2 MiB hugepages as root (`echo 256 | sudo tee /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages`); `/proc/<pid>/smaps` now shows `KernelPageSize: 2048 kB`. Live bench **+0.8% H/s (4.75 → 4.79)** — much smaller than XMRig's "up to 50%" headline because on this in-order A53 the bottleneck is the memory-latency wall (L1D 3cyc / L2 17cyc / DRAM 129ns, single port), not TLB misses. Free and correct; stays on. Plain `echo 256 > /sys/...` fails for non-root (the redirect runs as the invoking non-root shell, before sudo takes effect) — `sudo tee` is required.
 *   **Dataset-derivation load-batching (E12, 2026-08-03):** 🔻 **NULL — precisely understood.** Tried to pipeline the superscalar-constant loads in `rx_calc_dataset_item` (XMRig batches them via `ldp`; armrx was serial). Rewrote to overlap loads via x12/x13; gates stay green (test_jit_equivalence 16/16, test_mining real shares) but **H/s unchanged (4.75, median 210.3 ms) and IPC 0.552 vs 0.554 baseline**. Root cause: the load stream is **dependency-bound, not load-port-bound** — each `eor` waits 3 cycles for its constant regardless of overlap; deeper overlap (x14–x17) is forbidden because those regs are live across the call in JIT code (prologue only saves x0–x13). The "simple load-batching" hypothesis is exhausted; the 0.551→0.648 IPC gap lives elsewhere (main-VM program emission — E13). Two implementation bugs found and fixed along the way: `adr`+`ldp` to the `.quad` literals segfaults (they sit outside the JIT `CodeSize` copy window; pooled `ldr` is required), and x14–x17 clobbering corrupts caller-live regs. See `docs/experiments/next-iteration-plan.md` (E11/E12/E13).
@@ -197,18 +197,40 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 | Doc | What it's for |
 |---|---|
 | [`RETROSPECTIVE.md`](RETROSPECTIVE.md) | Full project retrospective — 210 commits, 18 days, 10 performance tracks. Start here. |
-| [`ROADMAP.md`](ROADMAP.md) | Post-alpha status — points to RETROSPECTIVE.md for the full story. |
+| [`docs/archived/roadmap.md`](docs/archived/roadmap.md) | Post-alpha status — points to RETROSPECTIVE.md for the full story. |
 | [`changelogs.md`](changelogs.md) | Post-alpha changelog — alpha record preserved at `docs/archived/alpha-changelogs.md`. |
 | [`docs/archived/audits/combined-audit-20260731.md`](docs/archived/audits/combined-audit-20260731.md) | Consolidated next-steps audit from AGY (Gemini) + Reasonix (DeepSeek). Prioritized T0–T3. (Archived — historical.) |
 | [`docs/archived/audits/`](docs/archived/audits/) | Archived alpha-phase audits — correctness, security, performance reviews. |
 | [`docs/experiments/`](docs/experiments/) | Measured performance attempts — both adopted wins and honest, documented reverts. |
+| [`docs/open-experiments/`](docs/open-experiments/) | 🧪 **Open experiments for the community** — reproducible A/B tests anyone can run on their own AArch64 device to help settle unproven performance ideas. See below. |
 | [`docs/archived/plans/`](docs/archived/plans/) | Archived performance plans — all tracks A–J completed or closed. |
-| [`docs/plans/20260727/master-plan-20260727.md`](docs/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
+| [`docs/archived/plans/20260727/master-plan-20260727.md`](docs/archived/plans/20260727/master-plan-20260727.md) | Still-active strategic master plan with ranked priorities. |
 | [`docs/postmortems/`](docs/postmortems/) | Root-cause writeups for past critical bugs (dataset corruption, pool-failover deadlock, AES T-table). |
-| [`devices/`](devices/) | Hardware reference for each AArch64 test device — cluster topology, frequency scaling, thermal limits, and measured gotchas. Read before interpreting any benchmark number. |
+| [`docs/devices/`](docs/devices/) | Hardware reference for each AArch64 test device — cluster topology, frequency scaling, thermal limits, and measured gotchas. Read before interpreting any benchmark number. |
 | [`docs/archived/`](docs/archived/) | Superseded material — completed-phase narratives and alpha archives. |
 
 `RETROSPECTIVE.md` carries the full narrative for every phase. The master plan at
-`docs/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
+`docs/archived/plans/20260727/master-plan-20260727.md` is the still-active reference for any future restart.
 Archived phase narratives are in `docs/archived/plan_completed_phases_1-5.md` (Phases 1–5),
 the full why-and-how behind everything already shipped.
+
+## 🧪 Open Experiments — Help Wanted
+
+We can only validate performance hypotheses on the few AArch64 devices we own
+(a couple of Cortex-A53 boards and one A55 tablet). Many performance ideas
+depend on microarch behavior we **cannot** observe here — pipeline depth,
+MAC-interlock latency, cache/memory profiles that vary across Cortex-A5x/A7x
+and vendor implementations.
+
+**`docs/open-experiments/`** is a set of reproducible A/B tests anyone can run in
+a few minutes — no code changes, consensus-safe (byte-identical hashes). If you
+have an AArch64 device (SBC, phone, TV box, server) and a terminal, you can help:
+
+1. Pick an experiment from [`docs/open-experiments/`](docs/open-experiments/).
+2. Build + run it (commands are in each file).
+3. Report your numbers via an issue/discussion titled `[open-exp] <name> — <device>`.
+
+The most valuable result is a device that **disagrees** with our fleet — that's
+the signal an idea is worth building. See
+[`docs/open-experiments/README.md`](docs/open-experiments/README.md) for the
+full how-to and report template.
