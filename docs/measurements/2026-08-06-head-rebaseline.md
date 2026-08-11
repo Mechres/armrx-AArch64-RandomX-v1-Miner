@@ -73,7 +73,7 @@ the mining engine (`--mine --workers=8`) under `isolcpus` (see Action item 3).
    artifact; replace with the reproducible −5.8% (107.36M → 101.10M) and strike "armrx now below
    XMRig on instruction count." Keep the correctness-KAT evidence (hw==T-table, golden pins) — that
    part is solid; only the perf attribution is wrong.
-2. **Reconcile `ROADMAP.md` / `STRATEGY.md`** "Item 1 closed the residual gap / below XMRig" wording
+2. **Reconcile `ROADMAP.md` / `docs/archived/strategy.md`** "Item 1 closed the residual gap / below XMRig" wording
    with the corrected ~7%-heavier-1w reality (H/s parity still holds).
 3. **8w number:** `bench_armrx --full-hash-only` is single-threaded (ignores `--workers`), so a
    clean 8w instr/cycle re-baseline from this tool is **not possible**. The authoritative 8w figure
