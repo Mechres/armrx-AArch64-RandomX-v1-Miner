@@ -11,8 +11,10 @@ read as current state.
 
 1. **`docs/closed-levers-ledger.md`** — single source of truth for what's been
    tried, what's adopted, and what's dead. READ THIS FIRST before any perf work.
-2. **`docs/briefs/`** — briefs for in-flight / adopted / closed optimization
-   attempts (each marked OPEN / ADOPTED / CLOSED).
+2. **`docs/archived/briefs/`** — historical one-run optimization briefs
+   (marked OPEN / ADOPTED / CLOSED). The live working dir `docs/briefs/` is
+   recreated per agent run and intentionally NOT committed (one-time artifacts);
+   once a run concludes its brief is moved here for reference.
 3. **`RETROSPECTIVE.md`** (repo root) — full project retrospective.
 4. **`docs/changelogs.md`**, **`README.md`** (Status table) — shipped state.
 

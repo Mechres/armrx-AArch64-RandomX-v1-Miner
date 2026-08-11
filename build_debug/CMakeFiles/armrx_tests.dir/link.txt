@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -flto=auto -fno-fat-lto-objects -Wl,--dependency-file=CMakeFiles/armrx_tests.dir/link.d CMakeFiles/armrx_tests.dir/tests/test_blake2b.cpp.o -o armrx_tests  libarmrx_core.a /usr/lib/libssl.so /usr/lib/libcrypto.so -lhwloc

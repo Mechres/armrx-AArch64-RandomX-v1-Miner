@@ -64,7 +64,7 @@
 
 ## 2026-08-10 — docs: fleet re-validation measurements + pine stable-clock correction
 - **Source:** post-audit fleet re-validation (Tier 8 #3/#5). All device-side, no code change.
-  Committed docs only; the working brief (`docs/briefs/2026-08-10-postaudit-consolidated.md`)
+  Committed docs only; the working brief (`docs/archived/briefs/2026-08-10-postaudit-consolidated.md`)
   stays untracked per project discipline (agent-prompt artifact).
 - **Unisoc SC9863A (Cortex-A55, Termux) real baselines:** prior ~21.84 H/s figure was a
   short-window artifact — corrected to **light/all/8w = 33.61 H/s** (200 s window,
@@ -99,7 +99,7 @@
   updated (flag removed, reconstruct note for v16–v31 if ever re-attempted).
 
 ## 2026-08-10 — docs: correct DAG scheduler stale root cause + closure label
-- **Source:** post-audit re-review (Deepseek 🔴 #2). `docs/briefs/2026-08-06-dag-scheduler-attempt.md:13`
+- **Source:** post-audit re-review (Deepseek 🔴 #2). `docs/archived/briefs/2026-08-06-dag-scheduler-attempt.md:13`
   and `ROADMAP.md:37` claimed the DAG regression was "reorder forces a longer emitted sequence"
   (order-dependent codegen). Branch `try/t8-dag-docfix`, commit `525488f`, merged `1d15d88`.
 - **Correction (grounded in 2026-08-07 changelog `:418,429`):** emitted length is **order-invariant**
@@ -108,7 +108,7 @@
   "exhaustively closed" label to "current implementation closed-negative; family not exhaustively
   disproven" — a cheap planner (bitmap hazard matrix, schedule reuse) is a legitimate reopening variant
   (small expected ROI, E20's 0.73% legal-move rate). Doc-only; no code change. Recorded in
-  `docs/briefs/2026-08-10-postaudit-consolidated.md` §2C(b).
+  `docs/archived/briefs/2026-08-10-postaudit-consolidated.md` §2C(b).
 
 ## 2026-08-10 — fix(test): hybrid --dataset-mb>0 KAT resolved (README correct, stale comment fixed)
 - **Source:** post-audit re-review (Deepseek 🔴 #1) flagged a contradiction: `README.md:167-171`
@@ -123,7 +123,7 @@
   `--dataset-mb=512` config is verified safe — no live wrong-hash bug.
 - **Change:** corrected the stale test comment to reflect the verified-correct state (kept the
   buffer-byte check as an isolation of the rotation-rebuild fix). README unchanged. Also recorded the
-  resolution in `docs/briefs/2026-08-10-postaudit-consolidated.md` §4.
+  resolution in `docs/archived/briefs/2026-08-10-postaudit-consolidated.md` §4.
 
 ## 2026-08-10 — ci: disable optional OpenSSL in cross-build (TLS header fix)
 - **Source:** GitHub Actions `cross-build` job failed compiling `tls_client.cpp`
@@ -168,7 +168,7 @@
 
 ## 2026-08-09 — T6: surface swallowed errors (diagnostics gaps)
 - **Source:** Hermes-led T6 from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`). Logging/counter-only fixes (no behavior
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`). Logging/counter-only fixes (no behavior
   change). Branch `try/t6-diag`, commit `eea37fd`, merged `a09cfe4`.
 - **Adopted:** (1) `metrics.hpp` `socket()` failure now logs `strerror(errno)`; (2)
   `handle_set_difficulty` `catch(...)` now logs the malformed difficulty instead of swallowing;
@@ -184,7 +184,7 @@
 
 ## 2026-08-09 — T5-A/T5-B: CI cross-build + benchmarks out of CTest
 - **Source:** Hermes-led T5-A/T5-B from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`). No armrx CI existed; benchmarks were
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`). No armrx CI existed; benchmarks were
   registered as CTest tests (slow/thermal-variant). Branch `try/t5-infra`, commit `9c189ed`.
 - **T5-A (honest scope):** added `.github/workflows/ci.yml` — `cross-build` job (ubuntu +
   `crossbuild-essential-arm64`) cross-compiles the AArch64 JIT + test executables on every PR,
@@ -197,7 +197,7 @@
 
 ## 2026-08-09 — T4-A: make W^X JIT the default (RWX opt-out)
 - **Source:** Hermes-led T4-A from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`). On Linux AArch64, `RANDOMX_FORCE_SECURE`
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`). On Linux AArch64, `RANDOMX_FORCE_SECURE`
   was NOT auto-defined, so the JIT code buffer defaulted to RWX (a known exploit primitive).
   Committed `d90b487`, merged `93aae9d` (origin/main).
 - **Change:** added `ARMRX_SECURE_JIT` CMake option **defaulting ON** (W^X via
@@ -211,7 +211,7 @@
 
 ## 2026-08-09 — T3-C: derive resolveInstructionType from engine[256] ordering
 - **Source:** Hermes-led T3-C from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`). The audit OVERSTATED this as a large
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`). The audit OVERSTATED this as a large
   3-file unification; verified the interpreter `kCompileHandlers[256]` and JIT `engine[256]`
   were ALREADY macro-derived from `instruction_weights.hpp`. The only drift-prone piece was
   the hand-maintained `resolveInstructionType` if-ladder. Committed `33c8ae3`, merged
@@ -227,7 +227,7 @@
 
 ## 2026-08-09 — T3-D: drop dead cfg.tui JSON field (conservative slice)
 - **Source:** Hermes-led T3-D from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`), verified against source before acting.
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`), verified against source before acting.
   Committed `b929d50` (origin/main).
 - **Scope (safe slice only):** `AppConfig::tui` JSON parse (`config.cpp`) + field
   (`config.hpp`) were dead — only the CLI `--tui`/`opts_.use_tui` path drives the TUI
@@ -240,7 +240,7 @@
 
 ## 2026-08-09 — T3-B: name raw scratchpad/AND/bitfield A64 encoders
 - **Source:** Hermes-led T3-B from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
   Committed `c770b57` (origin/main).
 - **Scope:** the `ARMV8A::` namespace already named core ALU/FP opcodes, but the scratchpad
   memory-op and masking emitters still used bare hex bases. Added named constexprs
@@ -253,7 +253,7 @@
 
 ## 2026-08-09 — T3-A: make JIT register/label contract mechanical
 - **Source:** Hermes-led T3-A from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
   Committed `d19bcb6` (origin/main).
 - **Hazard:** the JIT emitter derived template sizes from linker symbols
   (`CodeSize`, `PrologueSize`, `MainLoopBegin`, `ImulRcpLiteralsEnd`) and an integer-register
@@ -277,7 +277,7 @@
 
 ## 2026-08-09 — T2-C: close lost-wakeup deadlock in PartialDataset fill waiters
 - **Source:** Hermes-led T2-C from the consolidated Luna/Deepseek audit (Adoption ledger
-  `docs/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
+  `docs/archived/briefs/2026-08-09-audit-consolidated.md`), gated on-device (Lenovo AArch64).
   Branch `try/fix-partial-publish-race` → merged `79a7db2` (origin/main).
 - **Bug:** `PartialDataset::fill_worker` raises the atomic `item_count_`/`fill_complete_`
   then calls `fill_cv_.notify_all()` **without holding `fill_cv_mutex_`** (the publish path
@@ -345,7 +345,7 @@
   A53, light, 8w): **+0.91% (26.38 → 26.62 H/s, wins in both orderings)** — real but small.
 - **Gate discipline honored:** every merge gated on-device before the next (test_jit_equivalence
   16/16 / test_pool_protocol all / test_mining + A/B); no rollbacks needed. Audit artifact:
-  `docs/briefs/2026-08-07-source-verified-audit.md` (untracked working doc).
+  `docs/archived/briefs/2026-08-07-source-verified-audit.md` (untracked working doc).
 
 ## 2026-08-07 (late) — device perf A/B: `--main-thread-policy` lever measured as NO-OP
 - **Decisive gate for the core-0/main-thread deprioritization lever** (branch
@@ -510,7 +510,7 @@
   t≈164 s). `test_partial_dataset` + `test_mining` KATs PASS.
 - Added `--pool-test` default test pool/wallet in `cli_parser.cpp` (TEST creds,
   not production) and `tools/time_partial_fill.cpp` diagnostic (CMake). See
-  `docs/briefs/2026-08-07-warmup-ramp-tier1-and-tier2-scope.md`. (Hermes: Tier-1
+  `docs/archived/briefs/2026-08-07-warmup-ramp-tier1-and-tier2-scope.md`. (Hermes: Tier-1
   implementation + on-device verification)
 
 ## 2026-08-04
@@ -525,7 +525,7 @@
 - Updated `docs/STRATEGY.md` "Known bugs" list to mark both FIXED with root cause + verification. (Hermes: source fix + host SIGINT smoke test + native + cross build green; `test_mining` KAT 16/16 passes)
 
 ## 2026-08-06 (late) — plan DAG list-scheduler attempt (NO code yet; external agent)
-- Wrote `docs/briefs/2026-08-06-dag-scheduler-attempt.md`: a **different-shape** attempt at beating XMRig's residual instruction-mix edge. Post-double-trap rule (W3-2 memory-op scheduler + E26 load-hoist segfault) requires a NEW approach shape + a DIFFERENT external planner — Hermes stays the skeptical gate; the planner is executed externally.
+- Wrote `docs/archived/briefs/2026-08-06-dag-scheduler-attempt.md`: a **different-shape** attempt at beating XMRig's residual instruction-mix edge. Post-double-trap rule (W3-2 memory-op scheduler + E26 load-hoist segfault) requires a NEW approach shape + a DIFFERENT external planner — Hermes stays the skeptical gate; the planner is executed externally.
 
 ## 2026-08-06 (latest) — DAG list-scheduler attempt: CLOSED (negative, not adopted)
 - External planner (luna) implemented `scheduleProgramDag()` behind `ARMRX_DAG_SCHED=1` (default OFF, legacy scheduler ships). **Correctness: all 4 gates PASS on-device silicon** — `test_jit_equivalence` 16/16, `test_jit_determinism`, `test_jit_dataset_2way` (40020/40020), `test_jit_scheduler_stress` 450/450 + `test_jit_superscalar_scheduler_stress` 200/200 pairs byte-identical, `test_mining` real shares. The different shape (multiply-anchored DAG, `*_M` never an anchor, `hasHazard()` reused verbatim) **successfully avoided the W3-2 trap**.
@@ -536,7 +536,7 @@
   | M1 | DAG | 189.24M | 127.33M | 0.673 | 4.39 |
   | M2 | DAG | 189.34M | 127.33M | 0.673 | 4.38 |
   DAG = **+10.3% cycles, +11.9% instr, −14.3% H/s** (reproducible M1≈M2). **Root cause (corrected 2026-08-07 audit):** NOT "longer emitted sequence" — per-opcode emitted length is order-invariant (IMUL_RCP/CBRANCH are `is_fixed` anchors, DAG returns identity when not ready). The regression is **per-hash planner runtime**: an O(n²) hazard matrix (32,576 `hasHazard` evals/compile) + ~9 heap allocs/hash, executed once per hash. Device logs prove it: **sys time tripled** (2.13s→7.5s, malloc/mmap churn) while instr/hash rose +13.56M (113.77M→127.33M, reproducible). The "+13.6M extra instructions" count is the *planner executing*, not extra emitted code. H/s −14.3% = compile cost growing from ~1.76% to ~16% of hash time.
-- **Verdict:** JIT scheduler reordering is now **exhaustively closed** as a lever on this silicon (prior closed: `*_M` memory-op scheduler / W3-2, peephole / E20, PRFM / T2-1, dual-issue / T2-2). The residual ~4.6% gap is instruction *mix* / *count*, not ordering — and reordering only made count worse. **Code kept gated** (`ARMRX_DAG_SCHED=1`) as a documented negative result; not enabled, not deleted. Remaining real lever = worker-cluster placement (fast cluster 0-3), NOT JIT emission. (`src/jit_compiler_a64.cpp` `scheduleProgramDag`, `include/armrx/jit_compiler_a64.hpp`; brief `docs/briefs/2026-08-06-dag-scheduler-attempt.md`)
+- **Verdict:** JIT scheduler reordering is now **exhaustively closed** as a lever on this silicon (prior closed: `*_M` memory-op scheduler / W3-2, peephole / E20, PRFM / T2-1, dual-issue / T2-2). The residual ~4.6% gap is instruction *mix* / *count*, not ordering — and reordering only made count worse. **Code kept gated** (`ARMRX_DAG_SCHED=1`) as a documented negative result; not enabled, not deleted. Remaining real lever = worker-cluster placement (fast cluster 0-3), NOT JIT emission. (`src/jit_compiler_a64.cpp` `scheduleProgramDag`, `include/armrx/jit_compiler_a64.hpp`; brief `docs/archived/briefs/2026-08-06-dag-scheduler-attempt.md`)
 
 ## 2026-08-06 (final) — two TUI bugs reported (OPEN, not fixed)
 - **TUI segfaults with `ARMRX_DAG_SCHED=1` (OPEN).** `armrx --tui` under the DAG scheduler runs ~10-20s with valid per-worker H/s, then `Segmentation fault`. Hashing is correct (matches the 16/16 + 450/200 gates); the crash is in the TUI render/shutdown path under DAG emission order. Non-TUI pool mining is fine under DAG. Only bites if DAG is enabled + `--tui`. Recorded in `docs/STRATEGY.md` Known bugs (OPEN).
@@ -553,13 +553,13 @@
 
 - **`--pool-test` self-terminating pool measurement mode (E16 enablement).** Added a `--pool-test` flag (cli_parser.hpp/.cpp + help) that makes `run_pool_mining` honor `--seconds` (self-terminates via `std::_Exit(0)` right after printing a per-worker summary — skips the pool/engine teardown that otherwise hangs waiting on the network/worker threads) and prints `worker[0..N]` H/s + CPU max temp at the end, matching the `--mine` benchmark shape. Pool correctness is unchanged (still connects/submits shares); only run length + reporting differ. No credentials in source — these are supplied via `--pool/--wallet/--password` CLI arguments. Purpose: reproducible A/B sweeps on the REAL pool workload without needing `sudo kill -9` (no sudo access is available on the device). Cross-build clean; `test_cli_parser` passes. Discovered via this feature: the device **thermally throttles memory throughput at 60°C** (~4.7× crash 1w: 3.19 H/s @46°C → 0.68 H/s @60°C for identical work), making temperature an uncontrolled confound in all prior E15/E16 absolute numbers — re-measurement must control temp. (`src/miner_app.cpp`, `include/armrx/miner_app.hpp`, `src/cli_parser.cpp`, `include/armrx/cli_parser.hpp`)
 
-- **Hardware AESE/AESD AES adopted as the default aarch64+crypto funnel (Item 1 of the residual-gap roadmap — THE lever).** Overrode `encrypt_transform`/`decrypt_transform` in `include/armrx/aes.hpp` with the **zero-key hardware form** (`vaesmcq_u8(vaeseq_u8(s, zero))` / `vaesimcq_u8(vaesdq_u8(s, zero))` + trailing real-key XOR already present in the callers), gated on `__ARM_FEATURE_AES` (defined under the existing `-march=armv8-a+crypto`). The scalar T-table bodies are renamed `*_ttable` and kept as the `#else` fallback + KAT oracle; `aes_encrypt_round_ttable`/`aes_decrypt_round_ttable` added for the oracle. **Why it was previously "incompatible":** the 2026-07-20 attempt fed `AESE` the *real* round key, and AESE applies AddRoundKey **first** (RandomX applies it **last**) → wrong round. The zero-key compensation (AddRoundKey becomes a no-op, AESMC does MixColumns, trailing EOR applies the real key) is byte-identical to the T-table path and matches armrx's own JIT v2 FE_mix (`jit_compiler_a64_static.S:425-489`) + upstream `intrin_portable.h:476-484` (which ran `--verify` on this silicon in W1-4). **Single funnel:** every AES path (the 5 x4 hash/fill fns in `src/aes_hash.cpp` call `encrypt_transform`/`decrypt_transform` directly under `ARMRX_ENABLE_NEON_TTABLE_AES`; `aes_generator.cpp` routes through `aes_encrypt_round`) rides the override — ~25 lines in the header, ZERO edits to `aes_hash.cpp`/`aes_generator.cpp`/`CMakeLists.txt`. **Verification (device, gated W11/T1-2, B-M-B-M, core 3, 500 hashes, non-isolated):** hw == T-table over 60,000 random blocks (`tools/aes_kat_check.cpp` extended as the oracle); `test_aes_hash` golden pins; `test_mining` real shares; `test_jit_equivalence` 16/16; determinism; dataset_2way; encodings — all PASS. **Perf (CORRECTED 2026-08-06 re-baseline):** the original A/B reported instr/hash **107.36M → 89.47M (−16.7%)** — that 89.47M figure was a **contaminated-divisor artifact** (non-500-window / ungated division, the project's own flagged pitfall). The reproducible HEAD re-baseline (two runs, identical to 0.00006%) gives **101.10M instr/hash** at HEAD, i.e. AES saves **107.36M → 101.10M = −5.8%** (modest, real, not the 16.7% first claimed). armrx at 101.10M is **~7% HEAVIER than XMRig (94.5M)** at 1w — the earlier "armrx now below XMRig / largest win in project history" wording was wrong; the **correctness** evidence (hw==T-table, golden pins, real shares) is solid and unchanged. H/s parity still holds (1w 5.11 vs XMRig 5.04, E24 real-pool) because armrx's better IPC (0.667 vs ~0.654) compensates the heavier instruction count. See `docs/measurements/2026-08-06-head-rebaseline.md`. Host x86_64 ctest 9/9 unchanged (hw branch compiled out). Doc fixes: `aes.hpp` Track-G comment, `AGENTS.md` ("NEON AES disabled" → adopted), `docs/postmortems/aes-ttable-bug-postmortem.md` (records the corrected re-adoption). See `docs/briefs/2026-08-03-hardware-aes-item1.md`, `docs/audits/residual-gap-optimization-roadmap.md`, `docs/measurements/2026-08-03-post-w4-baseline.md`. (Hermes: brief + source edit + KAT oracle + cross-build + device gates + B-M-B-M perf A/B + doc fixes — by directive, easy verified change done directly rather than via Reasonix)
+- **Hardware AESE/AESD AES adopted as the default aarch64+crypto funnel (Item 1 of the residual-gap roadmap — THE lever).** Overrode `encrypt_transform`/`decrypt_transform` in `include/armrx/aes.hpp` with the **zero-key hardware form** (`vaesmcq_u8(vaeseq_u8(s, zero))` / `vaesimcq_u8(vaesdq_u8(s, zero))` + trailing real-key XOR already present in the callers), gated on `__ARM_FEATURE_AES` (defined under the existing `-march=armv8-a+crypto`). The scalar T-table bodies are renamed `*_ttable` and kept as the `#else` fallback + KAT oracle; `aes_encrypt_round_ttable`/`aes_decrypt_round_ttable` added for the oracle. **Why it was previously "incompatible":** the 2026-07-20 attempt fed `AESE` the *real* round key, and AESE applies AddRoundKey **first** (RandomX applies it **last**) → wrong round. The zero-key compensation (AddRoundKey becomes a no-op, AESMC does MixColumns, trailing EOR applies the real key) is byte-identical to the T-table path and matches armrx's own JIT v2 FE_mix (`jit_compiler_a64_static.S:425-489`) + upstream `intrin_portable.h:476-484` (which ran `--verify` on this silicon in W1-4). **Single funnel:** every AES path (the 5 x4 hash/fill fns in `src/aes_hash.cpp` call `encrypt_transform`/`decrypt_transform` directly under `ARMRX_ENABLE_NEON_TTABLE_AES`; `aes_generator.cpp` routes through `aes_encrypt_round`) rides the override — ~25 lines in the header, ZERO edits to `aes_hash.cpp`/`aes_generator.cpp`/`CMakeLists.txt`. **Verification (device, gated W11/T1-2, B-M-B-M, core 3, 500 hashes, non-isolated):** hw == T-table over 60,000 random blocks (`tools/aes_kat_check.cpp` extended as the oracle); `test_aes_hash` golden pins; `test_mining` real shares; `test_jit_equivalence` 16/16; determinism; dataset_2way; encodings — all PASS. **Perf (CORRECTED 2026-08-06 re-baseline):** the original A/B reported instr/hash **107.36M → 89.47M (−16.7%)** — that 89.47M figure was a **contaminated-divisor artifact** (non-500-window / ungated division, the project's own flagged pitfall). The reproducible HEAD re-baseline (two runs, identical to 0.00006%) gives **101.10M instr/hash** at HEAD, i.e. AES saves **107.36M → 101.10M = −5.8%** (modest, real, not the 16.7% first claimed). armrx at 101.10M is **~7% HEAVIER than XMRig (94.5M)** at 1w — the earlier "armrx now below XMRig / largest win in project history" wording was wrong; the **correctness** evidence (hw==T-table, golden pins, real shares) is solid and unchanged. H/s parity still holds (1w 5.11 vs XMRig 5.04, E24 real-pool) because armrx's better IPC (0.667 vs ~0.654) compensates the heavier instruction count. See `docs/measurements/2026-08-06-head-rebaseline.md`. Host x86_64 ctest 9/9 unchanged (hw branch compiled out). Doc fixes: `aes.hpp` Track-G comment, `AGENTS.md` ("NEON AES disabled" → adopted), `docs/postmortems/aes-ttable-bug-postmortem.md` (records the corrected re-adoption). See `docs/archived/briefs/2026-08-03-hardware-aes-item1.md`, `docs/audits/residual-gap-optimization-roadmap.md`, `docs/measurements/2026-08-03-post-w4-baseline.md`. (Hermes: brief + source edit + KAT oracle + cross-build + device gates + B-M-B-M perf A/B + doc fixes — by directive, easy verified change done directly rather than via Reasonix)
 
 ## 2026-08-02
-- **W4 phase-2 — dedicated superscalar C* literal pool: SOLVED (correctness) + no regression.** The dense per-program PC-relative literal pool for `IADD_C*`/`IXOR_C*` (phase-1's shared-region collision is avoided by giving the superscalar path its OWN 512 B–1 KiB inline pool) is now correct and passes the full device gate set: `test_jit_equivalence` 16/16 byte-identical, `test_jit_dataset_2way`, `test_jit_determinism`, `test_jit_scheduler_stress` (450 pairs), `test_jit_superscalar_scheduler_stress` (200 pairs) — all `EXIT=0`, no FAIL. **Root cause of the prior 15+ failure iterations:** the offset formula carried a `- 8` (`off = (litpos - k - 8)/4`), which on A64 `LDR (literal)` (target `= k + off*4`, NO `+8` — that's an A32/T32 quirk) made every pooled C* op load from `litpos - 8` (the previous slot / pre-pool garbage) → silent hash mismatch. The `k + 8` convention had been "proven" by a **circular runtime self-check** that recomputed the target with the same wrong formula, so `match=1` was guaranteed regardless. A QEMU + on-device micro-test settled the PC semantics empirically (`target = k + off*4`), and the fix (drop `-8`, mirror the proven IMUL_RCP loader `off = (literal_pos - codePos)/4`) made all 703 pooled C* ops land on valid sign-extended constants. Luna's earlier sign-extension fix (RandomX C* constants are SIGNED → pool entry must be sign-extended 32→64) was also required; both bugs had to be fixed together. **Perf:** instruction count drops (C* sites 2–3 instr → 1 `LDR`), but hashrate is latency-neutral on the in-order A53 — pooled `--mine` = 4.32 H/s vs documented baseline 4.27 H/s (non-isolated, 1 worker), i.e. **no regression** and consistent with W3's finding that fewer instructions ≠ faster here. This is NOT the earlier W3 NEON-vector-pool attempt (which scattered ~714 loads and thrashed cache, −16% to −20% H/s) — the PC-relative inline pool sits adjacent to code and stays cache-clean. The `aarch64-ldr-literal-pool` skill was corrected (the `k+8` formula + circular self-check are now flagged as the trap that cost the iterations). See `docs/briefs/w4-phase2-investigation-notes.md` and `session-ses_0416.md`. (Hermes: gate takeover + docs; Kimi K3: root-cause solve via hardware micro-test + byte-stream diff; Luna: sign-extend fix; Reasonix: unavailable)
+- **W4 phase-2 — dedicated superscalar C* literal pool: SOLVED (correctness) + no regression.** The dense per-program PC-relative literal pool for `IADD_C*`/`IXOR_C*` (phase-1's shared-region collision is avoided by giving the superscalar path its OWN 512 B–1 KiB inline pool) is now correct and passes the full device gate set: `test_jit_equivalence` 16/16 byte-identical, `test_jit_dataset_2way`, `test_jit_determinism`, `test_jit_scheduler_stress` (450 pairs), `test_jit_superscalar_scheduler_stress` (200 pairs) — all `EXIT=0`, no FAIL. **Root cause of the prior 15+ failure iterations:** the offset formula carried a `- 8` (`off = (litpos - k - 8)/4`), which on A64 `LDR (literal)` (target `= k + off*4`, NO `+8` — that's an A32/T32 quirk) made every pooled C* op load from `litpos - 8` (the previous slot / pre-pool garbage) → silent hash mismatch. The `k + 8` convention had been "proven" by a **circular runtime self-check** that recomputed the target with the same wrong formula, so `match=1` was guaranteed regardless. A QEMU + on-device micro-test settled the PC semantics empirically (`target = k + off*4`), and the fix (drop `-8`, mirror the proven IMUL_RCP loader `off = (literal_pos - codePos)/4`) made all 703 pooled C* ops land on valid sign-extended constants. Luna's earlier sign-extension fix (RandomX C* constants are SIGNED → pool entry must be sign-extended 32→64) was also required; both bugs had to be fixed together. **Perf:** instruction count drops (C* sites 2–3 instr → 1 `LDR`), but hashrate is latency-neutral on the in-order A53 — pooled `--mine` = 4.32 H/s vs documented baseline 4.27 H/s (non-isolated, 1 worker), i.e. **no regression** and consistent with W3's finding that fewer instructions ≠ faster here. This is NOT the earlier W3 NEON-vector-pool attempt (which scattered ~714 loads and thrashed cache, −16% to −20% H/s) — the PC-relative inline pool sits adjacent to code and stays cache-clean. The `aarch64-ldr-literal-pool` skill was corrected (the `k+8` formula + circular self-check are now flagged as the trap that cost the iterations). See `docs/archived/briefs/w4-phase2-investigation-notes.md` and `session-ses_0416.md`. (Hermes: gate takeover + docs; Kimi K3: root-cause solve via hardware micro-test + byte-stream diff; Luna: sign-extend fix; Reasonix: unavailable)
 
 ## 2026-08-01
-- **W4 — dense NEON literal-pool for C* immediates: phase-1 FAILED correctness, REVERTED.** Learned the technique from the BSD upstream reference (`scratch_vm_study/upstream_rx`): its `generateSuperscalarHash` resets `num32bitLiterals = 0` so `IADD_C*`/`IXOR_C*` pool into a dense 64-slot NEON literal region via fixed-index `UMOV`/`SMOV` (order-independent), achieving **104.8M instr/hash @ IPC 1.54** vs armrx's 132.7M @ 1.369. armrx's `emitMovImmediate` (jit_compiler_a64.cpp:1240) already has this exact path but is pinned to `num32bitLiterals = 64` in `generateSuperscalarHash` (line 1105) to forbid C* pooling. Un-pinned to 0 (Reasonix) → `test_jit_equivalence` **FAIL** seed_0 (JIT≠interpreter). **Root cause:** `ImulRcpLiteralsEnd` is a SINGLE region shared by main-VM `generateProgram` AND superscalar — un-pinning let superscalar C* ops overwrite the main VM's literals → deterministic mismatch. The reference separates the regions; armrx does not. Reverted; equivalence re-confirmed 16/16. **Technique is valid (reference proves it on this silicon) but needs a DEDICATED superscalar literal region + NEON reg allocation + static.S reservation — phase-2-class, deferred.** Evidence: dense-pool works, but armrx's shared-buffer layout makes a naive port unsafe. See `docs/briefs/brief-w4-cpool.md`. (Hermes: brief + device A/B gates + revert; Reasonix: one-line edit)
+- **W4 — dense NEON literal-pool for C* immediates: phase-1 FAILED correctness, REVERTED.** Learned the technique from the BSD upstream reference (`scratch_vm_study/upstream_rx`): its `generateSuperscalarHash` resets `num32bitLiterals = 0` so `IADD_C*`/`IXOR_C*` pool into a dense 64-slot NEON literal region via fixed-index `UMOV`/`SMOV` (order-independent), achieving **104.8M instr/hash @ IPC 1.54** vs armrx's 132.7M @ 1.369. armrx's `emitMovImmediate` (jit_compiler_a64.cpp:1240) already has this exact path but is pinned to `num32bitLiterals = 64` in `generateSuperscalarHash` (line 1105) to forbid C* pooling. Un-pinned to 0 (Reasonix) → `test_jit_equivalence` **FAIL** seed_0 (JIT≠interpreter). **Root cause:** `ImulRcpLiteralsEnd` is a SINGLE region shared by main-VM `generateProgram` AND superscalar — un-pinning let superscalar C* ops overwrite the main VM's literals → deterministic mismatch. The reference separates the regions; armrx does not. Reverted; equivalence re-confirmed 16/16. **Technique is valid (reference proves it on this silicon) but needs a DEDICATED superscalar literal region + NEON reg allocation + static.S reservation — phase-2-class, deferred.** Evidence: dense-pool works, but armrx's shared-buffer layout makes a naive port unsafe. See `docs/archived/briefs/brief-w4-cpool.md`. (Hermes: brief + device A/B gates + revert; Reasonix: one-line edit)
 - **W3 register-hoist: considered and REJECTED (infeasible) — perf-optimization pursuit CLOSED**
 - **W3-2 — memory-op scheduler extension: CONFIRMED UNSAFE, closed (bisection executed):** Re-applied the `*_M` `is_long_latency` change to `computeFootprint()` (the exact change that previously hung/diverged) and ran the scheduler stress suite on device. `test_scheduler_bisect` `--budget=N` sweep (unset + 0..8 + 16/32/64, all PASS) showed the **main-VM** path is correct under the change — but the proper stress gates caught the divergence the 16-pair equivalence check missed: `test_jit_scheduler_stress` (450 pairs) **FAIL** `seed_0` and `test_jit_superscalar_scheduler_stress` (200 pairs) **FAIL** `seed_4`. The memory-op scheduler extension reproduces a **deterministic JIT/interpreter divergence** under stress coverage → W3-2 closed as a dead end with evidence. The `ARMRX_MAX_SWAPS` hook only gates `scheduleProgram` (main-VM), not `scheduleSuperscalarProgram`; the superscalar path was the one that diverged first. The speculative `*_M` change was reverted; the bisection instrument (hook + `--budget` test mode) stays as proven-useful diagnostic infrastructure. Do not re-enable memory-op scheduling. See `docs/experiments/w3-2-swap-budget-bisect.md`. (Hermes: design + code + cross-build + device A/B + stress sweep + revert + docs; Reasonix briefly usable then hit limits)
 - **W3-2 — scheduler swap-budget bisection harness (diagnostic instrumentation, done):** Added an `ARMRX_MAX_SWAPS` env-gated swap budget to the emitter scheduler (`scheduleProgram` in `src/jit_compiler_a64.cpp`) to enable binary-search isolation of the memory-op scheduler divergence that previously caused a JIT/interpreter hash mismatch and was reverted unidentified (`docs/experiments/memory-op-scheduler-attempt.md`). The hook wraps the two existing swap-commit sites: budget `N>0` permits exactly N swaps then falls back to original order; `0` = no swaps; unset/`-1` = unchanged (full scheduler). Re-reads the env every call so a driver can sweep budgets in one process. Public `computeMainEmitOrder` accessor added (mirrors `computeSuperscalarEmitOrder`). New `tests/test_scheduler_bisect.cpp` asserts JIT==interpreter across budgets {unset,0,1,100000}; registered in the `if(ARMRX_HAVE_JIT)` block with a 600s timeout. **Verification (device, AArch64 cross-build): all 4 settings pass — the hook never changes which program executes, only emission order.** This is the instrument that unblocks W3-2 by enabling binary-search isolation of the memory-op-divergence bisection. Written directly by Hermes because all three coders were down (Cursor usage limit; Reasonix DeepSeek 402; AGY broken model pin) and the no-source-edit rule was lifted for this diagnostic. See `docs/experiments/w3-2-swap-budget-bisect.md`. (Hermes: design + code + cross-build + device A/B + docs)
