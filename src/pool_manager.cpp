@@ -61,6 +61,24 @@ void PoolManager::connect_to_current() {
     if (current_idx_ >= pools_.size()) return;
     const auto& entry = pools_[current_idx_];
 
+    // Take the OLD client out from under the lock, then destroy it UNLOCKED
+    // (audit: pool-replacement deadlock). ~StratumClient() calls disconnect(),
+    // which joins the reader/reconnect threads -- and their error callback
+    // (miner_app.cpp wires it to current_pool_name(), a stratum_mutex_
+    // reader) can be in flight right at this moment (retry exhaustion racing
+    // a failover is the realistic trigger). The dedicated disconnect() path
+    // already avoids holding the lock across this join (see its own comment);
+    // this mirrors that pattern instead of destroying in place via
+    // `stratum_ = std::make_unique<...>()`, which used to hold stratum_mutex_
+    // across the implicit destructor call and could self-deadlock exactly
+    // like disconnect() once did.
+    std::unique_ptr<StratumClient> old;
+    {
+        std::lock_guard<std::mutex> lock(stratum_mutex_);
+        old = std::move(stratum_);
+    }
+    old.reset(); // ~StratumClient()/disconnect() run here, lock-free.
+
     StratumClient* raw_stratum = nullptr;
     {
         std::lock_guard<std::mutex> lock(stratum_mutex_);

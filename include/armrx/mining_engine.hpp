@@ -202,14 +202,20 @@ private:
     unsigned int big_core_count_ = 1;
 
     std::shared_ptr<PartialDataset> partial_dataset_ = nullptr;
-    // Generation counter for the partial (light-mode) dataset fill. Bumped
-    // whenever the partial dataset must be re-filled — either the one-shot
-    // first fill, or a live seed rotation while running. Workers compare
-    // their local copy against this and re-wait on wait_for_fill() before
-    // hashing again, so they never read a seed-mismatched (stale) partial
-    // dataset after a job rotation. Monotonic-counter idiom (same as
-    // dataset_init_generation_) avoids any reset/race window.
-    std::atomic<std::uint64_t> partial_dataset_fill_generation_{0};
+    // NOTE: there used to be a MiningEngine-owned
+    // partial_dataset_fill_generation_ counter here, bumped by set_job()
+    // *after* PartialDataset::start_fill() returned. That was a real,
+    // confirmed race (audit follow-up, round 3): start_fill()'s exclusive
+    // section could reset the buffer and release its lock, and fill threads
+    // could already be publishing new-seed bytes, before this separate
+    // counter incremented -- a worker's re-validation check compares
+    // against whichever counter it was told to watch, and during that
+    // window this one hadn't moved, so a stale cache could pass the check
+    // while the prefix was already rotating underneath it. Fixed by
+    // removing this counter entirely and using
+    // PartialDataset::generation() instead, which is bumped INSIDE the
+    // same exclusive section that resets the buffer, so the two can never
+    // be observed out of step. See worker_loop() and set_job().
 
     // Guards PartialDataset::wait_for_fill()'s fill-thread join so that
     // multiple mining workers (each calling wait_for_fill at startup) do not

@@ -144,8 +144,12 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
     engine.set_affinity_mode(opts_.affinity_mode);
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
-    if (partial_dataset_) {
-        engine.set_partial_dataset(partial_dataset_);
+    // Fresh instance per session -- see partial_dataset_items_'s doc comment
+    // (miner_app.hpp) for why this must not be shared with run_pool_mining().
+    std::shared_ptr<PartialDataset> partial_dataset;
+    if (partial_dataset_items_ > 0) {
+        partial_dataset = std::make_shared<PartialDataset>(partial_dataset_items_);
+        engine.set_partial_dataset(partial_dataset);
     }
     engine.set_job(job);
 
@@ -242,8 +246,8 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
     // thread SIGSEGV during process exit). If fill is still in progress,
     // skip the wait and let the OS reclaim the mapping — the process is
     // exiting anyway.
-    if (partial_dataset_ && partial_dataset_->item_count() >= 8388608 /* 512 MiB items */) {
-        partial_dataset_->wait_for_fill();
+    if (partial_dataset && partial_dataset->item_count() >= 8388608 /* 512 MiB items */) {
+        partial_dataset->wait_for_fill();
     }
 
     // Compute steady-state rates from snapshot delta
@@ -307,8 +311,12 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     engine.set_affinity_mode(opts_.affinity_mode);
     engine.set_rt_priority(opts_.use_rt_priority);
     engine.set_stagger_ms(opts_.stagger_ms);
-    if (partial_dataset_) {
-        engine.set_partial_dataset(partial_dataset_);
+    // Fresh instance per session -- see partial_dataset_items_'s doc comment
+    // (miner_app.hpp) for why this must not be shared with run_local_benchmark().
+    std::shared_ptr<PartialDataset> partial_dataset;
+    if (partial_dataset_items_ > 0) {
+        partial_dataset = std::make_shared<PartialDataset>(partial_dataset_items_);
+        engine.set_partial_dataset(partial_dataset);
     }
 
     std::atomic<std::uint64_t> shares_submitted{0};
@@ -542,7 +550,7 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
                         static_cast<double>(now_snap.total - prev_dump_snap.total) / win;
                     std::cout << "\n[pool-test t=" << elapsed_sec << "s] INST agg=" << std::fixed
                               << std::setprecision(2) << agg_inst << " H/s | fill_items="
-                              << (partial_dataset_ ? partial_dataset_->item_count() : 0)
+                              << (partial_dataset ? partial_dataset->item_count() : 0)
                               << " | workers:";
                     for (unsigned w = 0; w < opts_.workers; ++w) {
                         const std::uint64_t a =
@@ -647,12 +655,36 @@ int MinerApp::run() {
               << "Selected mode (" << opts_.workers << " workers): " << armrx::mode_name(effective_mode)
               << " (requires " << required_bytes / (1024U * 1024U) << " MiB including reserve)\n";
 
-    // Create partial dataset if configured (Track B hybrid light mode)
+    // Create partial dataset if configured (Track B hybrid light mode).
+    // Audit P5 (partial-dataset size validation): validate the request
+    // against the real RandomX dataset extent and the total memory budget
+    // (Argon2 cache + every worker's scratchpad + the partial dataset itself
+    // + the OS reserve) BEFORE allocating/prefaulting anything. Without this,
+    // a request above the dataset extent could reach initialize_dataset()'s
+    // own range check inside a background fill thread (now caught there too,
+    // but that is a last-resort backstop, not the primary check), and a
+    // request that simply doesn't fit in RAM could OOM the process instead of
+    // producing a clear, synchronous error on this thread.
     if (opts_.dataset_mb > 0 && effective_mode == RandomXMode::light) {
-        const std::size_t item_count = (opts_.dataset_mb * 1024ULL * 1024ULL) / kRandomXDatasetItemBytes;
-        partial_dataset_ = std::make_shared<PartialDataset>(item_count);
-        std::cout << "Partial dataset: " << item_count << " items ("
-                  << opts_.dataset_mb << " MiB)\n";
+        const auto validation = armrx::validate_partial_dataset_request(
+            opts_.dataset_mb, opts_.workers, memory.available_bytes);
+        if (!validation.ok) {
+            std::cerr << "Invalid --dataset-mb request: " << validation.error << '\n';
+            return 64;
+        }
+        // Store the validated count only -- NOT a constructed PartialDataset.
+        // run_local_benchmark() and run_pool_mining() are independent mining
+        // sessions (both can run in one invocation: --mine and --pool are
+        // independent flags) and each constructs its own fresh instance from
+        // this count, since PartialDataset::cancel() (invoked by
+        // MiningEngine::stop(), which each session calls on its way out) is
+        // permanent -- sharing one instance across sessions would leave the
+        // second session's engine holding a PartialDataset that can never
+        // fill again, silently disabling the optimization.
+        partial_dataset_items_ = validation.item_count;
+        std::cout << "Partial dataset: " << validation.item_count << " items ("
+                  << opts_.dataset_mb << " MiB, " << validation.required_bytes / (1024U * 1024U)
+                  << " MiB total budget)\n";
     }
 
     // Lock all pages into RAM if requested

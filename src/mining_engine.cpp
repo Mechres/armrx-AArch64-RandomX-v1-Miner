@@ -208,6 +208,17 @@ void MiningEngine::stop() {
     // dataset rebuild — its wait predicate also checks !running_, but a
     // condition_variable only re-checks the predicate when notified.
     dataset_init_cv_.notify_all();
+    // Audit P1 (shutdown before first partial-dataset fill): workers call
+    // wait_for_fill() unconditionally at startup (see worker_loop) and again
+    // on every seed rotation. Without this, a worker blocked there because
+    // the pool never delivered a first job (or a fill is still in progress)
+    // can never notice running_ went false, and the join below hangs
+    // indefinitely. cancel() wakes every such waiter and lets any
+    // in-progress fill wind down within one bounded sub-chunk instead of
+    // running to completion.
+    if (partial_dataset_) {
+        partial_dataset_->cancel();
+    }
     for (auto& t : workers_) {
         if (t.joinable()) {
             t.join();
@@ -241,9 +252,14 @@ void MiningEngine::set_job(const Job& job) {
         // Case (2) is the bug fix: the partial dataset was filled exactly once
         // for the first seed and never rebuilt on rotation, so workers mined
         // on a seed-mismatched (stale) partial dataset -> silent wrong shares.
-        // We now re-run start_fill() with the new cache and bump
-        // partial_dataset_fill_generation_ so each running worker re-waits on
-        // wait_for_fill() before hashing again (see worker_loop).
+        // We now re-run start_fill() with the new cache so each running
+        // worker re-waits on wait_for_fill() before hashing again (see
+        // worker_loop()) -- start_fill() bumps PartialDataset::generation()
+        // itself, atomically with the reset, so there is no separate bump
+        // to do here anymore (audit follow-up, round 3: a MiningEngine-owned
+        // counter bumped AFTER this call used to leave a real window where
+        // the buffer had already reset/started refilling but the counter
+        // workers checked had not moved yet).
         //
         // NOTE: because the mining workers are blocked (waiting) for the fill
         // to finish, they consume no CPU during the fill -- so the fill is
@@ -251,12 +267,8 @@ void MiningEngine::set_job(const Job& job) {
         // (~164s on 8 A53 cores). Passing the miner cores as exclude would
         // leave only one core for the fill and turn the dead-start into ~20 min.
         if (partial_dataset_) {
-            const bool first_fill = (partial_dataset_fill_generation_.load(std::memory_order_relaxed) == 0);
+            const bool first_fill = (partial_dataset_->generation() == 0);
             partial_dataset_->start_fill(shared_cache_, core_order_, /*exclude_cores=*/{});
-            // Bump AFTER start_fill() so a worker that observes the new
-            // generation is guaranteed to see the freshly-reset (incomplete)
-            // fill and block in wait_for_fill().
-            partial_dataset_fill_generation_.fetch_add(1, std::memory_order_release);
             if (first_fill) {
                 ARMRX_LOG_INFO << "PartialDataset: started background fill (workers will wait_for_fill)";
             } else {
@@ -468,11 +480,35 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
     auto last_flush_time = std::chrono::steady_clock::now();
     std::uint64_t local_gen = 0;
     std::uint64_t local_dataset_init_gen = 0;
-    // Mirrors local_dataset_init_gen: tracks the partial-dataset fill
-    // generation so we re-wait (see partial_dataset_fill_generation_) when a
-    // seed rotation restarts the light-mode fill. Initialized to 0 so the
-    // first loop iteration always catches generation 1 and waits.
+    // Mirrors local_dataset_init_gen: tracks PartialDataset::generation() so
+    // we re-wait (see wait_for_fill() below) when a seed rotation restarts
+    // the light-mode fill. Initialized to 0 so the first loop iteration
+    // always catches generation 1 and waits.
     std::uint64_t local_partial_fill_gen = 0;
+    // Audit follow-up (P1, seed-rotation race): the fill-generation check
+    // above and the job-generation check below each independently decide
+    // "is my state current" BEFORE the ReadGuard is acquired for the actual
+    // hash call further down. A rotation can complete entirely in the
+    // window between those checks and the guard acquisition -- the guard
+    // stops start_fill() from tearing down the buffer WHILE held, but does
+    // NOT stop a worker from acquiring it *after* a rotation already
+    // finished while still holding stale (pre-rotation) active_cache_/VM
+    // state, reading the FRESH (post-rotation) prefix bytes with the STALE
+    // cache. That produces an internally-inconsistent hash: dataset items
+    // derived from one seed's cache mixed with prefix bytes generated from
+    // another. Fixed by snapshotting PartialDataset::generation() at the
+    // exact moment active_cache_ is refreshed (inside the job_mutex_-guarded
+    // block below, so the snapshot and the cache are read from a mutually
+    // consistent state -- see that block), then re-comparing against the
+    // CURRENT generation immediately after acquiring the ReadGuard, before
+    // every hash call. Because the guard blocks any new rotation from
+    // completing while held, a match at that point guarantees active_cache_
+    // and the prefix belong to the same generation for the entire hash --
+    // this depends on generation() being published atomically with the
+    // reset inside PartialDataset::start_fill() (round-3 fix: a separate,
+    // independently-timed MiningEngine counter here was NOT sufficient, since
+    // it could still lag behind the actual buffer reset/refill).
+    std::uint64_t local_partial_fill_gen_for_cache = 0;
     // Per-worker nonce: each worker gets thread_id + k * num_threads_
     std::uint64_t local_nonce = static_cast<std::uint64_t>(thread_id);
     // Per-worker buffer for block template — resized only on job changes
@@ -489,8 +525,7 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
         // hashes / invalid shares. Checked BEFORE the job-gen check below so the
         // re-wait always precedes any re-setup of the VM with the new seed.
         if (partial_dataset_) {
-            std::uint64_t current_fill_gen =
-                partial_dataset_fill_generation_.load(std::memory_order_acquire);
+            std::uint64_t current_fill_gen = partial_dataset_->generation();
             if (current_fill_gen != local_partial_fill_gen) {
                 local_partial_fill_gen = current_fill_gen;
                 partial_dataset_->wait_for_fill();
@@ -578,6 +613,13 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
                     // so a job rotation that swaps partial_dataset_ cannot leave the
                     // VM holding dangling data/atomic pointers mid-hash.
                     vm.set_partial_dataset(partial_dataset_);
+                    // Snapshot the fill generation THIS active_cache_ corresponds
+                    // to, still inside job_mutex_ (held for this whole block) so
+                    // it is read consistently with shared_cache_/active_cache_ --
+                    // no concurrent set_job() can be mutating either while we
+                    // hold this lock. See local_partial_fill_gen_for_cache's
+                    // declaration for why this is re-checked before every hash.
+                    local_partial_fill_gen_for_cache = partial_dataset_->generation();
                 }
                 if (mode_ == RandomXMode::fast && active_dataset) {
                     if (!vm.set_dataset(std::span<const std::byte>(active_dataset->data(), active_dataset->size()))) {
@@ -623,7 +665,34 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
 
         if (!pipelined_active) {
             // ── Prime: first hash ──
-            randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
+            // Reader-quiescence guard (audit P1, seed-rotation race): held for
+            // the WHOLE hash call because the VM snapshots the partial
+            // dataset's bound once per internal run and then relies on it
+            // (and on data() bytes below that bound) staying consistent for
+            // every access made during this call -- see vm.cpp's run_jit().
+            // start_fill() cannot begin overwriting the buffer for a seed
+            // rotation while this guard is held; see PartialDataset::ReadGuard.
+            if (partial_dataset_) {
+                PartialDataset::ReadGuard guard(*partial_dataset_);
+                // Round-2 audit fix: the guard alone stops the buffer from
+                // being rewritten WHILE held, but a rotation could have
+                // already completed in the window between this worker's
+                // generation checks above and this guard acquisition, using
+                // a cache this worker hasn't picked up yet. Re-validate now
+                // that we hold the guard (so no NEW rotation can complete
+                // until we release it): if the current generation doesn't
+                // match the one active_cache_ was refreshed for, our cache
+                // and the prefix we're about to read may belong to different
+                // seeds -- skip this hash and let the top-of-loop checks
+                // resync on the next iteration instead of computing a
+                // mixed-generation (silently wrong) hash.
+                if (partial_dataset_->generation() != local_partial_fill_gen_for_cache) {
+                    continue;
+                }
+                randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
+            } else {
+                randomx_calculate_hash(&vm, block_input.data(), block_input.size(), hash.data());
+            }
             ++local_hashes;
 
             if (meets_target(hash, local_job.target)) {
@@ -674,14 +743,32 @@ void MiningEngine::worker_loop(unsigned int thread_id) {
             // next_seed_out: Part A copies it into temp_hash before Part D
             // overwrites it with the next call's key, so the order is safe.
             const void* run_seed = (pipelined_calls > 0) ? pipeline_seed.data() : nullptr;
-            randomx_calculate_hash_pipelined(
-                &vm,
-                block_input.data(), block_input.size(), hash.data(),
-                next_block.data(), next_block.size(),
-                sp[sp_fill],
-                pipeline_seed.data(),
-                run_seed
-            );
+            // See the matching guard on the prime-hash path above: held for
+            // the whole pipelined call for the same reason, with the same
+            // post-acquisition generation re-validation.
+            if (partial_dataset_) {
+                PartialDataset::ReadGuard guard(*partial_dataset_);
+                if (partial_dataset_->generation() != local_partial_fill_gen_for_cache) {
+                    continue;
+                }
+                randomx_calculate_hash_pipelined(
+                    &vm,
+                    block_input.data(), block_input.size(), hash.data(),
+                    next_block.data(), next_block.size(),
+                    sp[sp_fill],
+                    pipeline_seed.data(),
+                    run_seed
+                );
+            } else {
+                randomx_calculate_hash_pipelined(
+                    &vm,
+                    block_input.data(), block_input.size(), hash.data(),
+                    next_block.data(), next_block.size(),
+                    sp[sp_fill],
+                    pipeline_seed.data(),
+                    run_seed
+                );
+            }
             ++pipelined_calls;
             // After: VM scratchpad = sp[sp_fill] (filled from next_seed by Part D)
             //        hash = output for block_input's nonce

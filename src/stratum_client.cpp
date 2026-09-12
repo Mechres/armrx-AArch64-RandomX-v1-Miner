@@ -125,6 +125,27 @@ void StratumClient::close_connection() {
 
 void StratumClient::connect() {
     if (connected_.load()) return;
+
+    // Audit P1 (TLS silently ignored without OpenSSL): a build without
+    // ARMRX_HAVE_TLS has no TLS connection path at all below (see the
+    // #ifdef ARMRX_HAVE_TLS block later in this function) -- it would
+    // otherwise fall straight through to a plain-TCP connect and send the
+    // login over it despite the caller's explicit --tls/enable_tls(true)
+    // request. Fail loudly here, before any socket is opened or any byte is
+    // sent, for both the initial connect() and every reconnect_loop() retry
+    // (both funnel through this function). CommandLineParser::parse()
+    // already rejects --tls at the CLI layer in a non-TLS build; this is the
+    // matching guard for direct StratumClient/PoolManager usage that
+    // bypasses the CLI.
+#ifndef ARMRX_HAVE_TLS
+    if (tls_enabled_) {
+        throw std::runtime_error(
+            "StratumClient: TLS was requested but this build has no OpenSSL "
+            "support (ARMRX_HAVE_TLS not defined) -- refusing to connect in "
+            "plaintext to a TLS-requested pool");
+    }
+#endif
+
     reconnect_enabled_.store(true);
     handshake_in_progress_.store(true);
 

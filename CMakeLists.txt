@@ -269,7 +269,7 @@ if(ARMRX_BUILD_TESTS)
     target_link_libraries(test_pool_protocol PRIVATE armrx_core)
     target_compile_options(test_pool_protocol PRIVATE -UNDEBUG)
     add_test(NAME test_pool_protocol COMMAND test_pool_protocol)
-    set_tests_properties(test_pool_protocol PROPERTIES TIMEOUT 300)
+    set_tests_properties(test_pool_protocol PROPERTIES TIMEOUT 450)
 
     # Opcode frequency benchmark (not part of regular CTest; invoke manually)
     # JIT-only — uses JitDumpEntry/setJitDumpEnabled/getJitDump (ARMRX_HAVE_JIT)

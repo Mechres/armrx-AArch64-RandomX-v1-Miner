@@ -153,7 +153,12 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
 *   **PGO compiler profiles:** ⚠️ Tooling integrated into CMake and works end-to-end, but measured
     as a null on current code (re-confirmed twice, most recently 2026-07-25 after the scheduler
     landed) — not currently a performance win, kept for future re-evaluation.
-*   **Stratum client state machine:** ✅ Stable with CryptoNote failover.
+*   **Stratum client state machine:** ✅ Stable with CryptoNote failover. **2026-09-12 (audit fix):**
+    `PoolManager::connect_to_current()` no longer destroys the previous `StratumClient` while holding
+    `stratum_mutex_` (that destruction joins its threads, and their error callback could re-enter the same
+    mutex — a real deadlock hazard on retry-exhaustion-triggered failover); a build without OpenSSL now
+    rejects `--tls` up front (CLI and direct API) instead of silently connecting in plaintext. See
+    `docs/code-audit-2026-09-12.md`.
 *   **NEON T-table AES AddRoundKey (Track G):** ✅ **+28.8% AES primitive throughput** (microbenchmark, σ ≤ 0.2%); E2E A/B (2026-08-01): **+1.68% H/s, −2.07% cycles, −4.93% instructions**. Enabled by default since 2026-08-01. See `docs/experiments/neon-ttable-aes.md`, `docs/experiments/track-g-e2e-ab.md`.
 *   **Hardware AESE/AESD AES funnel (Item 1, 2026-08-03):** ✅ **Adopted as the default aarch64+crypto AES path.** `encrypt_transform`/`decrypt_transform` now use the **zero-key** `vaesmcq_u8(vaeseq_u8(s, zero))` / `vaesimcq_u8(vaesdq_u8(s, zero))` form (byte-identical to the T-table path; gated on `__ARM_FEATURE_AES`), replacing ~10.7M T-table instructions/hash with 3 NEON ops. **Perf (CORRECTED 2026-08-06 re-baseline):** the original A/B reported −16.7% (107.36M → 89.47M, "below XMRig") but the 89.47M was a **contaminated-divisor artifact** (ungated division). A reproducible gated 500-hash re-baseline gives **−5.8% (107.36M → 101.10M)** at 1w; armrx at 101.10M is **~7% HEAVIER** than XMRig (94.5M) at 1w. The 2026-07-20 "AESE incompatible" revert was a *direct* `aese(state,key)` form (AddRoundKey-first = wrong order); the zero-key compensation fixes it. See `docs/archived/briefs/2026-08-03-hardware-aes-item1.md`, `docs/measurements/2026-08-06-head-rebaseline.md`.
 *   **W4 phase-2 — superscalar C* literal pool (dedicated PC-relative region):** ✅ **Correct, full gate set PASS (2026-08-02).** `IADD_C*`/`IXOR_C*` load their immediate from a dedicated per-program PC-relative literal pool (1 `LDR` vs 2–3 `MOVZ/MOVN+MOVK+ALU`), closing phase-1's shared-region collision. Root-cause of the 15+ prior failure iterations: the offset formula's spurious `-8` (A64 `LDR (literal)` targets `k + off*4`, no `+8`) made every C* load hit the previous slot — masked by a circular self-check. Fixed + Luna's sign-extend fix → all 703 pooled ops resolve correctly. **SUPERSEDED 2026-08-04 by E24:** the 2-instr pooled form was *too dense* for the in-order A53 — it put only one load between program-adjacent multiplies and saturated the 4-cycle MAC interlock (`other_interlock_stall` 23.3M/hash, 2.12× XMRig). E24 reverted this path to the 3-instr `MOVZ`/`MOVN`+`MOVK` form (XMRig-style), which pads the multiply gaps and **won +7.1% H/s (4.77→5.11, beating XMRig 5.04)** with interlocks dropping to 6.18M/hash (below XMRig). The W4 pool machinery was removed as dead code. See `changelogs.md` (2026-08-02 / E24 2026-08-04) and `docs/experiments/perf-tracking.md` (E24).
@@ -175,7 +180,12 @@ Full progress and metrics are in [`RETROSPECTIVE.md`](RETROSPECTIVE.md).
     an earlier *interleaved* hybrid variant (hash-during-fill, Gate B) measured **−N% at 8 workers**
     (extra DRAM traffic saturating the two-cluster interconnect) and was reverted; the current
     the current contiguous-publish path does NOT have that regression. Code stays gated behind `--dataset-mb=N`
-    (default 0, zero cost when off).
+    (default 0, zero cost when off). **2026-09-12 (audit fix):** a live seed rotation could previously let an
+    in-flight hash keep reading a bound/buffer that `start_fill()` was concurrently overwriting for the new
+    seed (a real, unsynchronized memory race, not just a stale-value risk); a reader-quiescence barrier
+    (`PartialDataset::ReadGuard`) now makes a rotation's reset wait for any in-flight hash to finish first.
+    `MiningEngine::stop()`/`PartialDataset::cancel()` also now bound shutdown latency when no job has arrived
+    yet or a fill is still in progress, instead of hanging indefinitely. See `docs/code-audit-2026-09-12.md`.
 
 *   **Dead superscalar C* literal-pool removal (P3a, 2026-08-07):** ✅ **Removed as dead code.** The `cpoolBase_`/`cpoolSlot_`/`cpoolLiteralPos_` members and their 128-slot inline literal pool were leftover from the pre-E24 W4 design (the E24 revert already switched emission to `MOVZ`/`MOVN`+`MOVK`; the pool was written but never read). Removed the 3 unused member writes and fixed two stale W4 comments that described the pre-E24 `LDR` behavior. Byte-identical: `test_jit_equivalence` 16/16 on-device. Adopted via `git merge --no-ff`.
 

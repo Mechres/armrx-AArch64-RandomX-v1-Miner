@@ -5,6 +5,173 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-09-12 — fix(audit): partial-dataset lifecycle, shutdown, pool replacement, TLS enforcement
+- **Source:** `docs/code-audit-2026-09-12.md` (six findings: seed-rotation race, shutdown-before-first-fill,
+  pool-replacement deadlock, TLS silently ignored without OpenSSL, partial-dataset size validation, empty
+  fill-affinity list). All six independently re-verified against source before fixing; none were inaccurate.
+- **Seed-rotation race (P1):** `PartialDataset` gained a reader-quiescence barrier (`ReadGuard`, held by
+  `MiningEngine::worker_loop` for the whole `randomx_calculate_hash`/`_pipelined` call) so `start_fill()`
+  cannot begin overwriting the buffer while an old-seed hash is still using a snapshotted bound/pointer —
+  closing the mixed-seed-hash race without a second large allocation. The synchronization primitive is a
+  hand-rolled **writer-preferring** reader-writer lock (`partial_dataset.hpp`'s `RotationLock`), not
+  `std::shared_mutex`: a first attempt with `std::shared_mutex` starved `start_fill()` indefinitely under
+  two continuously-hashing workers (reproduced as a 900+ s hang), since `std::shared_mutex`/`pthread_rwlock`
+  make no fairness guarantee. Not `pthread_rwlock` + the glibc `PREFER_WRITER_NONRECURSIVE_NP` attribute
+  either — musl (the aarch64 cross-compile target) doesn't implement it.
+- **Shutdown before first fill (P1):** `PartialDataset::cancel()` (new) wakes any `wait_for_fill()` waiter
+  even if `start_fill()` was never called; `MiningEngine::stop()` calls it. `fill_worker()` now runs its
+  assigned range as a loop of internal ≤64 MiB sub-chunks, checking cancellation between them, instead of one
+  uninterruptible `initialize_dataset()` call that could run for minutes before shutdown could observe it.
+- **Pool-replacement deadlock (P1):** `PoolManager::connect_to_current()` now moves the old `StratumClient`
+  out from under `stratum_mutex_` and destroys it unlocked (mirroring `disconnect()`'s existing pattern)
+  before installing the replacement — the old client's thread joins (and its error callback, which calls
+  back into `current_pool_name()`) no longer run while the mutex is held.
+- **TLS silently ignored without OpenSSL (P1):** `CommandLineParser::parse()` rejects a resolved `--tls`
+  (CLI or config file) with exit code 64 when `ARMRX_HAVE_TLS` isn't defined; `StratumClient::connect()`
+  throws the same way for direct API usage, before any socket is opened. Verified in both a normal build
+  and a `-DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE` build.
+- **Partial-dataset size validation (P2):** new `armrx::validate_partial_dataset_request()`
+  (`memory.hpp`/`.cpp`) checks a `--dataset-mb` request against MiB→bytes overflow, the real RandomX dataset
+  extent, and the total memory budget (Argon2 cache + worker scratchpads + the dataset itself + OS reserve)
+  before `MinerApp::run()` allocates anything. `PartialDataset`'s own constructor independently rejects an
+  over-extent `item_count` before `mmap`, and `fill_worker()` now catches `initialize_dataset()` exceptions
+  instead of letting them `std::terminate()` a background thread.
+- **Empty fill-affinity list (P2):** `PartialDataset::start_fill()` now throws `std::invalid_argument` for
+  an empty `core_order` or a null cache, instead of reaching `i % avail_cores.size()` with `size() == 0`.
+- **Tests:** `test_partial_dataset.cpp` +8 (reader-quiescence guard, concurrent-rotation no-mixed-generation
+  stress, cancel-before-any-fill, cancel-bounds-active-fill — self-calibrated against measured single-
+  sub-chunk time rather than a hard-coded wall-clock bound, invalid-input rejection, oversized-constructor
+  rejection, `validate_partial_dataset_request` boundaries); `test_mining.cpp` +2 (stop-before-first-job,
+  stop-during-active-fill, both bounded via `std::async`+`wait_for` so a regression fails the assertion
+  instead of hanging the suite); `test_pool_protocol.cpp` +2 (pool-replacement-no-deadlock stress test with
+  a hammering thread through a real ~31s failover, TLS-unavailable rejection); `test_cli_parser.cpp` +1
+  (TLS rejection, branches on `ARMRX_HAVE_TLS`).
+- **Verification:** host x86_64 full `ctest` green in both an OpenSSL build and a
+  `CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE` build (`test_mining` previously timed out at 900s under the
+  first, buggy `std::shared_mutex` attempt; now ~3-4 min). AArch64/musl cross-compile clean. On-device
+  (Cortex-A53): `armrx_tests` (JIT==interpreter KAT), `test_cli_parser`, `test_config`, `test_aes_hash`,
+  `test_partial_dataset` (every new test for the six findings above, including the seed-rotation and
+  cancellation fixes), `test_pool_protocol` (including the pool-replacement and TLS-rejection
+  regression tests), and `test_mining` (including the original seed-rotation regression test run
+  end-to-end through the real JIT hash pipeline, and both new shutdown tests) all passed — six for
+  six findings confirmed fixed on the real target CPU. See `docs/code-audit-2026-09-12.md`'s
+  Resolution section for the full breakdown, including a measured ~12x compute slowdown vs. the
+  x86_64 dev host. One on-device
+  test's timing bound was itself found and fixed to be hardware-portable (self-calibrated against a
+  measured baseline) after it flaked on the ~15x-slower A53 with a bound tuned to the x86_64 dev host.
+
+## 2026-09-12 — fix(audit): round-2 review closed four remaining concurrency gaps
+- **Source:** independent review of the same-day audit fix above found four remaining gaps in the round-1
+  fixes; all four re-verified against source (confirmed accurate) and fixed.
+- **Seed rotation still permits old-cache/new-prefix hashes (P1):** the round-1 `ReadGuard` stops
+  `start_fill()` from tearing down the buffer *while held*, but a worker's generation checks happen
+  *before* guard acquisition — a rotation completing in that window let a worker hash with a stale cache
+  against a freshly-rotated prefix. Fixed: `worker_loop` now snapshots the fill generation at the moment
+  `active_cache_` is refreshed and re-validates it immediately after acquiring the guard, before every hash
+  call, skipping the hash on a mismatch instead of computing a silently-mixed one.
+- **Cancellation exposed a concurrent thread-vector mutation (P1):** `start_fill()`'s thread-spawn loop
+  mutated `fill_threads_` without `fill_join_mutex_`, safe only because `cancel()` (round 1's own addition)
+  previously couldn't make `wait_for_fill()`'s join+clear race it — now it can. Fixed by wrapping the spawn
+  loop in the same mutex used by both join+clear sites.
+- **A concurrent refill could erase shutdown cancellation (P2):** `cancel()` signalled the *current* `stop_`
+  token, but a racing `start_fill()` could replace it with a fresh one right after, silently dropping the
+  signal for the new generation. Fixed with a persistent, never-cleared `shutdown_requested_` flag checked
+  everywhere the per-generation token is.
+- **Memory validation undercounted scratchpads (P2):** the engine allocates two double-buffered 2 MiB
+  scratchpads per worker (Track D2), not one; `validate_partial_dataset_request()` budgeted only one. New
+  `mining_worker_actual_scratchpad_bytes()` fixes the accounting (deliberately not touching the pre-existing,
+  separately-undercounting `randomx_worker_memory()`/`choose_randomx_mode()`, which feeds an unrelated
+  fast/light threshold decision outside this audit's scope).
+- **Tests:** `test_mining.cpp` +1 (`test_rapid_seed_rotation_hashes_never_mixed` — repeated back-to-back
+  rotations with no settling wait, cross-validating every hash against its claimed seed's reference);
+  `test_partial_dataset.cpp` +1 (`test_cancel_persists_across_racing_rotation` — deterministically forces
+  the token-swap race via a held `ReadGuard`, self-calibrated timing bound); updated
+  `test_validate_partial_dataset_request`'s assertion to the corrected scratchpad accounting.
+- **Verification:** host x86_64 green in both the OpenSSL and non-TLS builds; AArch64/musl cross-compile
+  clean; **on-device (Cortex-A53): `test_partial_dataset` and `test_mining` both passed in full**, including
+  both new round-2 tests — `test_cancel_persists_across_racing_rotation` measured a 20.72s natural fill on
+  this device and confirmed the cancel-vs-token-swap race resolves in 0.001s instead (four orders of
+  magnitude, no ambiguity), and `test_rapid_seed_rotation_hashes_never_mixed` cross-validated real hashes
+  from the actual JIT pipeline across 6 back-to-back rotations with none mixed-generation. See
+  `docs/code-audit-2026-09-12.md`'s round-2 section for the full breakdown. The thread-vector mutation fix
+  is the one round-2 item verified by inspection only (a data race needing precise thread-creation-timing
+  overlap to reproduce, impractical to force deterministically without test-only hooks or TSan, which isn't
+  in this project's current build config) plus the existing concurrent-stop tests continuing to pass on all
+  three targets including on-device.
+
+## 2026-09-12 — fix(audit): round-3 reviewer follow-up — PartialDataset reuse hazard from round 2's persistent flag
+- **Source:** reviewer follow-up on round 2's `shutdown_requested_` flag: making cancellation permanent means
+  any code that reuses one `PartialDataset` instance across two mining sessions would silently lose the
+  optimization for the second session after the first session's `engine.stop()`.
+- **Confirmed and fixed:** `MinerApp` (`miner_app.cpp`/`.hpp`) held exactly this hazard — a single shared
+  `PartialDataset` handed to both `run_local_benchmark()` and `run_pool_mining()`, which are independent
+  sessions reachable together in one process (`--mine` and `--pool` are independent flags). `MinerApp` now
+  stores only the validated item count and each session constructs its own fresh `PartialDataset` from it.
+  Verified functionally: `armrx --mode=light --mine --seconds=2 --dataset-mb=4 ... --pool=127.0.0.1:1`
+  against an unreachable pool shows two independent `"PartialDataset: allocated"` log lines, one per session.
+- **Steady-state A/B, extended to 9 runs:** cross-compiled the pre-audit commit (`60b49b4`, via `git
+  worktree`) and the current tree with identical flags, ran both on-device in reversed order (4 workers,
+  64 MiB partial dataset, 90s post-warmup windows), alternating before/after 9 times total to control for
+  thermal drift. **after (n=5): mean 13.662 H/s [13.61–13.72]. before (n=4): mean 13.7575 H/s
+  [13.72–13.82]. Difference ≈ 0.70%**, down from the first 3-run snapshot's 1.34% (an earlier draft of
+  this entry claimed that 3-run result showed "no regression" in "the opposite direction" — wrong, caught
+  by reviewer: after was already lower, the regression direction, in that snapshot too). The ranges now
+  touch (after's max = before's min), which is weaker separation than after 7 runs, not stronger — **this
+  is reported as inconclusive, not as "confirmed no regression"**: n=9 of quantized, single-device data
+  can narrow but not close the question of whether a small (roughly 1% or less) real overhead exists from
+  `RotationLock` serializing every worker's hash entry/exit through one mutex (all 4 workers here contend
+  on the same one; the recommended config runs 8, un-measured).
+- **`RotationLock` isolated at 8 workers:** the 9-run comparison above has a confound the reviewer
+  identified: `60b49b4` vs. current differs by the *entire* six-finding fix set, not the guard alone, and
+  general PMU counters wouldn't isolate the lock's cost either. Fixed both: built two binaries from the
+  **identical** current (all-fixes) source, differing only in whether `ReadGuard` is constructed at the
+  hash-call sites, run at **8 workers** (the recommended config) with **240s** windows (vs. 90s), 4
+  alternating pairs, raw hash-count/elapsed-time pairs retained at full precision. Result: **guard mean
+  24.4856 H/s vs. no-guard mean 24.4048 H/s (guard +0.33%, the opposite direction from an overhead
+  hypothesis)**, Welch t ≈ 0.63 and paired t ≈ 0.53 — both far below any threshold indicating a real
+  effect. **Conclusion (as scoped by reviewer): no `RotationLock` throughput penalty was detected in this
+  8-worker experiment; retaining the guard is the right choice.** Two limits stated plainly, not smoothed
+  over: four pairs don't establish zero overhead (only that none was detected at this precision), and this
+  result does not retrospectively identify the cause of the earlier ~0.7–1.3% whole-change gap (an earlier
+  draft of this entry claimed it did — overstated, corrected). Performance investigation closed here per
+  reviewer guidance unless a reproducible regression appears in real use; no further profiling pursued.
+  See `docs/code-audit-2026-09-12.md`'s round-3 section for the full raw data.
+
+## 2026-09-12 — fix(audit): round-4 reviewer follow-up ("codex") — generation counter not published atomically with the buffer reset
+- **Source:** reviewer follow-up on round 2's seed-rotation fix: the generation counter checked inside
+  `ReadGuard` (`MiningEngine::partial_dataset_fill_generation_`) was bumped *after* `PartialDataset::
+  start_fill()` had already reset the buffer and released its exclusive lock, not atomically with that
+  reset — leaving a window where a worker could acquire a fresh `ReadGuard`, see the old (not-yet-bumped)
+  generation still match, and hash a stale cache against an already-rotating/reset prefix. One remaining P1.
+- **Confirmed and fixed:** moved the generation counter out of `MiningEngine` entirely and into
+  `PartialDataset` itself (`generation()`, new). It is now incremented inside the *same* exclusive
+  `rotation_mutex_` section in `start_fill()` that resets `item_count_`/`contiguous_done_`/`fill_complete_`,
+  so the reset and the generation bump can never be observed out of step by any `ReadGuard` acquired after
+  `start_fill()` returns. `worker_loop()`'s snapshot-then-revalidate logic (round 2) is otherwise unchanged —
+  only the counter it reads from moved from a second, independently-timed source to one `PartialDataset`
+  publishes atomically with its own state change. Did not move the increment to before `start_fill()`
+  instead, per the reviewer's explicit warning that doing so "would create a different ordering problem."
+- **Tests:** `test_partial_dataset.cpp` +1 (`test_generation_published_atomically_with_reset` — a
+  deterministic, non-sleep-dependent barrier: fills a multi-sub-chunk single-core dataset so a second
+  `start_fill()`'s refill is still in progress when the call returns, then asserts the new generation, the
+  reset `item_count_`, and a concurrently-acquired `ReadGuard`'s view of both are all mutually consistent and
+  never mix with the old seed's data). `test_mining.cpp`'s `test_rapid_seed_rotation_hashes_never_mixed` had
+  its final assertion strengthened from "at least one of seed A or seed B" (true even if every rotation
+  happened to land on one seed, per reviewer's finding) to requiring genuine coverage of *both* seeds,
+  guaranteed deterministically via an explicit settle-and-poll phase after the rapid-fire rotation loop
+  rather than hoping the loop leaves samples of both behind.
+- **Verification:** host x86_64 full `ctest` green in both the OpenSSL and non-TLS builds (7/7 each,
+  including the new/strengthened tests above); AArch64/musl cross-compile clean, binaries confirmed genuine
+  `ARM aarch64`/`ld-musl-aarch64.so.1` via `file`. **On-device (Cortex-A53), `ctest -j1`: 7/7 passed**,
+  including `test_mining` (336.84s, real JIT pipeline) and `test_partial_dataset` (817.57s, including
+  `test_generation_published_atomically_with_reset` with real device timing, generation 1→2 observed
+  mid-refill). One unrelated, pre-existing test (`test_contiguous_publish_no_uninitialized_read`, from
+  2026-08-07, not touched this round) flaked intermittently under CTest's default `-j2` parallelism on this
+  device (device-only, 8/8 clean on host) — a timing-margin issue in that test's own fixed artificial-lag
+  assumption, not a data race (never reached the uninitialized-read check) and not caused by this round's
+  change; reported here rather than fixed as an unrelated change. See `docs/code-audit-2026-09-12.md`'s
+  round-4 section for the full evidence.
+
 ## 2026-08-10 — fix(port): Android/bionic portability (fleet re-validation on Unisoc Cortex-A55)
 - **Source:** fleet re-validation (Tier 8 #3) on the Unisoc SC9863A (Cortex-**A55**, Termux/Android
   11, bionic). Native Termux build surfaced two portability defects that block the whole fleet build

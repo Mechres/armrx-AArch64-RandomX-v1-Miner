@@ -527,6 +527,145 @@ void test_disconnect_interrupts_reconnect_backoff() {
     std::cout << "[test_pool_protocol] test_disconnect_interrupts_reconnect_backoff passed\n";
 }
 
+// ── Scenario 7b: pool-replacement deadlock (audit finding). connect_to_current()
+// used to replace the owning unique_ptr via
+// `stratum_ = std::make_unique<StratumClient>(...)` WHILE HOLDING
+// stratum_mutex_ -- an assignment that first destroys the OLD client, and
+// ~StratumClient() joins its reader/reconnect threads. Those threads' error
+// callback is wired (exactly as miner_app.cpp wires it) to
+// PoolManager::current_pool_name(), which takes the SAME stratum_mutex_. If
+// replacement overlapped a callback in flight (retry exhaustion racing a
+// failover is the realistic trigger), the callback thread would wait for the
+// lock while connect_to_current() waited for that same thread to finish
+// inside the destructor -- deadlock. The fix moves the old client out from
+// under the lock and destroys it unlocked (mirroring disconnect()'s existing
+// pattern) before installing the replacement.
+//
+// This reuses test_pool_failover's real drop-then-failover scenario (same
+// ~31s hardcoded 5-retry/1s-base backoff) and adds: (1) an error callback
+// that calls back into the manager exactly like production code, and (2) a
+// separate thread that hammers current_pool_name()/is_connected()/
+// reconnect_attempts() throughout the whole failover window, overlapping
+// whatever the internal reconnect/replacement machinery is doing. If the old
+// locking pattern regressed, connect_to_current() (or the hammering thread)
+// would wedge and the bounded wait_until below reports a clear failure
+// instead of hanging the rest of the suite.
+void test_pool_replacement_no_deadlock_during_failover() {
+    std::uint16_t first_port = 0;
+    int first_listen_fd = listen_on_ephemeral_port(first_port);
+
+    std::uint16_t good_port = 0;
+    int good_listen_fd = listen_on_ephemeral_port(good_port);
+
+    std::thread first_pool_server([&] {
+        int c = accept_one(first_listen_fd);
+        if (c < 0) return;
+        std::string line;
+        if (server_recv_line(c, line)) {
+            const auto id = armrx::json::get_raw(line, "id");
+            server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                                 "\"result\":{\"id\":\"sess0\"}}");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ::close(c); // drop mid-session -- arms reconnect_loop, which will
+                    // eventually call the error callback on retry exhaustion
+        ::close(first_listen_fd);
+    });
+
+    std::atomic<bool> good_pool_connected{false};
+    std::thread good_pool_server([&] {
+        int c = accept_one(good_listen_fd, /*timeout_ms=*/60000);
+        if (c < 0) return;
+        std::string line;
+        bool got = server_recv_line(c, line);
+        if (!got) { ::close(c); return; }
+        const auto id = armrx::json::get_raw(line, "id");
+        server_send_line(c, "{\"id\":" + id + ",\"jsonrpc\":\"2.0\",\"error\":null,"
+                             "\"result\":{\"id\":\"sess1\"}}");
+        good_pool_connected.store(true);
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        ::close(c);
+    });
+
+    std::vector<armrx::PoolConfig> pools = {
+        {"127.0.0.1", first_port, false},
+        {"127.0.0.1", good_port, false},
+    };
+    armrx::PoolManager mgr(pools, "test_wallet", "x");
+
+    // Wire the error callback exactly the way miner_app.cpp does: it calls
+    // straight back into the manager's own stratum_mutex_-guarded accessor.
+    // This is the specific call that used to be able to deadlock against
+    // connect_to_current()'s in-lock destruction.
+    mgr.set_error_callback([&](const std::string&) {
+        (void)mgr.current_pool_name();
+    });
+
+    mgr.connect(); // succeeds against the first pool
+    first_pool_server.join();
+
+    // Hammer the same lock-taking accessors from a separate thread for the
+    // whole failover window. A short pause keeps this from starving
+    // connect_to_current()'s own brief critical sections (plain std::mutex
+    // contention doesn't have rwlock-style reader/writer starvation, but
+    // there's no reason to hammer harder than needed to get overlap).
+    std::atomic<bool> hammer_stop{false};
+    std::thread hammer([&] {
+        while (!hammer_stop.load(std::memory_order_acquire)) {
+            (void)mgr.current_pool_name();
+            (void)mgr.is_connected();
+            (void)mgr.reconnect_attempts();
+            std::this_thread::sleep_for(std::chrono::microseconds(500));
+        }
+    });
+
+    bool failed_over = wait_until([&] {
+        mgr.tick();
+        return good_pool_connected.load();
+    }, std::chrono::seconds(60));
+
+    hammer_stop.store(true, std::memory_order_release);
+    hammer.join();
+
+    assert(failed_over);
+    assert(mgr.current_pool_name() == ("127.0.0.1:" + std::to_string(good_port)));
+
+    mgr.disconnect();
+    good_pool_server.join();
+    ::close(good_listen_fd);
+    std::cout << "[test_pool_protocol] test_pool_replacement_no_deadlock_during_failover passed\n";
+}
+
+// ── Scenario 7c: TLS requested in a build without OpenSSL must be rejected
+// clearly before any socket is opened, not silently downgraded to plaintext
+// (audit finding). Only meaningful in a non-TLS build; the TLS-available
+// build's normal connect path is already exercised by the scenarios above. ──
+#ifndef ARMRX_HAVE_TLS
+void test_tls_unavailable_rejected() {
+    // No server at all -- if this incorrectly fell through to a plain-TCP
+    // connect attempt, it would fail with a DNS/connect error instead of the
+    // expected TLS-unavailable rejection, which this test would still catch
+    // (wrong exception message / no throw at all) but let's also make sure
+    // no socket work happens by using a port nothing listens on.
+    armrx::StratumClient client("127.0.0.1", 1, "test_wallet", "x");
+    client.enable_tls(true);
+
+    bool threw = false;
+    try {
+        client.connect();
+    } catch (const std::exception& ex) {
+        threw = true;
+        const std::string what = ex.what();
+        assert(what.find("TLS") != std::string::npos);
+    }
+    assert(threw);
+    assert(!client.is_connected());
+
+    std::cout << "[test_pool_protocol] test_tls_unavailable_rejected passed "
+                 "(connect() refused TLS in a non-TLS build before opening a socket)\n";
+}
+#endif
+
 // ── Scenario 7: malformed/partial JSON from the server doesn't crash the
 //    client or wedge the reader thread — a subsequent valid message must
 //    still be processed correctly afterward. ──
@@ -603,7 +742,11 @@ int main() {
     test_malformed_input_robustness();
     test_disconnect_interrupts_reconnect_backoff();
     test_failover_from_pool_dead_at_startup();
+#ifndef ARMRX_HAVE_TLS
+    test_tls_unavailable_rejected();
+#endif
     test_pool_failover(); // slowest scenario (~30s real backoff) — run last
+    test_pool_replacement_no_deadlock_during_failover(); // also ~30s real backoff
 
     std::cout << "ALL POOL PROTOCOL TESTS PASSED SUCCESSFULLY!\n";
     return 0;

@@ -29,7 +29,19 @@ private:
     void run_pool_mining(RandomXMode effective_mode);
 
     MinerOptions opts_;
-    std::shared_ptr<PartialDataset> partial_dataset_;
+    // Validated item count for the partial dataset (Track B), 0 = disabled.
+    // Deliberately NOT a shared PartialDataset instance: run_local_benchmark()
+    // and run_pool_mining() are independent mining sessions that can BOTH run
+    // in one process invocation (`--mine` and `--pool` are independent flags,
+    // see run()), each with its own MiningEngine that calls stop() on exit.
+    // PartialDataset::cancel() (called by MiningEngine::stop()) is permanent
+    // and one-way by design (see its doc comment) -- sharing one instance
+    // across two sequential sessions would leave the second session's
+    // engine holding a PartialDataset that can never fill again, silently
+    // disabling the optimization with no warning (reviewer-identified gap).
+    // Each run_* function that needs one constructs its own fresh instance
+    // from this validated count instead.
+    std::size_t partial_dataset_items_ = 0;
 
     // Start snapshot for --pool-test steady-state delta (taken right before
     // the mining loop begins). Only meaningful when opts_.pool_test is set.

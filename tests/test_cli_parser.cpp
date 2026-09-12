@@ -183,16 +183,60 @@ void test_pool_flags() {
 
 void test_wallet_password_tls() {
     const auto res = run({"--wallet=abcWalletAddr", "--password=hunter2", "--tls", "--no-verify-tls"});
-    assert(!res.should_exit);
     assert(res.options.pool_wallet == "abcWalletAddr");
     assert(res.options.pool_password == "hunter2");
-    assert(res.options.pool_tls);
     assert(!res.options.pool_tls_verify);
+#ifdef ARMRX_HAVE_TLS
+    // This build has OpenSSL: --tls is accepted normally.
+    assert(!res.should_exit);
+    assert(res.options.pool_tls);
+#else
+    // Audit finding (TLS silently ignored without OpenSSL): a build with no
+    // TLS support must reject --tls up front rather than accept it and
+    // silently mine in plaintext. See test_tls_rejected_without_openssl_support().
+    assert(res.should_exit);
+    assert(res.exit_code == 64);
+#endif
 
     const auto res2 = run({"--tls", "--no-tls"});
-    assert(!res2.options.pool_tls); // last flag wins
+    assert(!res2.options.pool_tls); // last flag wins, and --no-tls always parses cleanly
+    assert(!res2.should_exit);
 
     std::cout << "[test_cli_parser] test_wallet_password_tls passed\n";
+}
+
+// Audit finding (TLS silently ignored without OpenSSL): CommandLineParser::parse()
+// must reject a --tls request in a build without ARMRX_HAVE_TLS, with a clear
+// error and exit code, before MinerApp is ever constructed -- so no socket is
+// ever opened and no login is ever sent in plaintext despite the user's
+// explicit encryption request. Named so it reads sensibly regardless of which
+// build this test binary itself was compiled as (see the #ifdef branches).
+void test_tls_rejected_without_openssl_support() {
+#ifdef ARMRX_HAVE_TLS
+    // This test binary was built WITH OpenSSL, so it cannot exercise the
+    // rejection branch (that requires compiling cli_parser.cpp itself without
+    // ARMRX_HAVE_TLS, i.e. a separate CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE
+    // build+test run). Confirm the positive-path contract instead: --tls is
+    // accepted, and --no-tls always parses cleanly with no ARMRX_HAVE_TLS
+    // dependency either way.
+    assert(!run({"--tls"}).should_exit);
+    assert(!run({"--no-tls"}).should_exit);
+    std::cout << "[test_cli_parser] test_tls_rejected_without_openssl_support: "
+                 "SKIPPED positive-branch-only (this binary has ARMRX_HAVE_TLS; "
+                 "rerun under CMAKE_DISABLE_FIND_PACKAGE_OpenSSL=TRUE to exercise the rejection)\n";
+#else
+    const auto res = run({"--wallet=w", "--pool=127.0.0.1:1", "--tls"});
+    assert(res.should_exit);
+    assert(res.exit_code == 64);
+
+    // A config-file-sourced pool_tls must be rejected the same way as the
+    // CLI flag -- both funnel through the same final o.pool_tls check.
+    // (--no-tls must still always parse cleanly regardless.)
+    assert(!run({"--no-tls"}).should_exit);
+
+    std::cout << "[test_cli_parser] test_tls_rejected_without_openssl_support passed "
+                 "(--tls rejected with exit code 64 in a non-TLS build)\n";
+#endif
 }
 
 void test_tui_flags() {
@@ -355,6 +399,7 @@ int main() {
     test_affinity_mode();
     test_pool_flags();
     test_wallet_password_tls();
+    test_tls_rejected_without_openssl_support();
     test_tui_flags();
     test_jit_dump_flags();
     test_log_level_flag();

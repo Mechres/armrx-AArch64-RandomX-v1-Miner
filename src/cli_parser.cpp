@@ -430,6 +430,27 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
         return result;
     }
 
+    // Audit P1 (TLS silently ignored without OpenSSL): a build without
+    // ARMRX_HAVE_TLS has no TLS connection path at all (see
+    // stratum_client.cpp) -- without this check, --tls (or a config file's
+    // pool_tls) would be accepted here and the miner would silently connect
+    // in plaintext and send the login, despite the user's explicit
+    // encryption request. Checked once at the end, after CLI flags have
+    // applied over config-file defaults, so it covers both sources. Fails
+    // clearly before any network I/O is attempted (StratumClient::connect()
+    // carries the matching guard for direct API usage that bypasses the CLI).
+#ifndef ARMRX_HAVE_TLS
+    if (o.pool_tls) {
+        std::cerr << "--tls requires a build with OpenSSL support; this build "
+                     "has none (ARMRX_HAVE_TLS not defined). Rebuild with "
+                     "OpenSSL available, or drop --tls / set \"pool_tls\": "
+                     "false in the config file.\n";
+        result.should_exit = true;
+        result.exit_code = 64;
+        return result;
+    }
+#endif
+
     // --pool-test convenience: when no explicit --pool/--wallet were given,
     // default to the project's dedicated TEST pool + wallet so the mode is
     // directly runnable for debug (e.g. `armrx --pool-test --dataset-mb=512
