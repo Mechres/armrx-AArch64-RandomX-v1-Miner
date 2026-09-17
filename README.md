@@ -4,7 +4,6 @@
   <img src="https://img.shields.io/badge/Architecture-AArch64%20%7C%20ARMv8--A%20%2B%20Crypto-blue.svg" alt="Architecture">
   <img src="https://img.shields.io/badge/Language-C%2B%2B20%20%2F%20Assembly-00599C.svg" alt="Language">
   <img src="https://img.shields.io/badge/Correctness%20Tests-100%25%20Passing-brightgreen.svg" alt="Tests">
-  <img src="https://img.shields.io/badge/License-MIT-orange.svg" alt="License">
 </p>
 
 `armrx` is a **clean-room, highly optimized CPU-only Monero RandomX v1 miner** specifically engineered for AArch64 Linux platforms. Built from the ground up against the official [RandomX Specification](https://github.com/tevador/RandomX), it is entirely independent of any existing mining client codebases.
@@ -115,7 +114,10 @@ ctest --test-dir build --output-on-failure
               --mode=light --dataset-mb=512 --workers=8
 
 # Or use the built-in test pool for a quick validation run:
-./build/armrx --pool-test --dataset-mb=512 --workers=8 --seconds=300
+# --pool-test needs a TEST pool (herominers); YOU must supply your own
+# wallet via --wallet (no default wallet is shipped):
+./build/armrx --pool-test --wallet=<YOUR_MONERO_ADDRESS> \
+              --dataset-mb=512 --workers=8 --seconds=300
 ```
 
 ---

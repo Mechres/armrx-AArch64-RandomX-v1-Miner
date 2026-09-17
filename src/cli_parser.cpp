@@ -452,16 +452,20 @@ ParsedArgs CommandLineParser::parse(int argc, char** argv) {
 #endif
 
     // --pool-test convenience: when no explicit --pool/--wallet were given,
-    // default to the project's dedicated TEST pool + wallet so the mode is
+    // default to the project's dedicated TEST pool so the mode is
     // directly runnable for debug (e.g. `armrx --pool-test --dataset-mb=512
-    // --seconds=120`). These are TEST credentials, not production defaults.
+    // --seconds=120`). Pool is TEST; wallet must be your own via --wallet.
     if (o.pool_test) {
         if (o.pool_list.empty()) {
             o.pool_list.emplace_back("tr.monero.herominers.com", 1111);
             o.should_connect_pool = true;
         }
         if (o.pool_wallet.empty()) {
-            o.pool_wallet = "4A5nCraCbYeFELjYTpzJgXbt58GaEnVMd6pVDNQVid5sUppTB5ALY9d8Mayk6vS7txX8stmH776enPSjS3ePSHc4U2qLAP8";
+            std::cerr << "--pool-test requires --wallet=<your_address> "
+                         "(no default wallet set)\n";
+            result.should_exit = true;
+            result.exit_code = 64;
+            return result;
         }
         if (o.pool_password.empty()) {
             o.pool_password = "armrx-core";
