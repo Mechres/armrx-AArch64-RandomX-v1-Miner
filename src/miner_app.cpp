@@ -159,7 +159,7 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
         shares_found.fetch_add(1, std::memory_order_relaxed);
         std::cout << "[Mining] Valid share found! Job: " << j.job_id
                   << " | Nonce: " << std::hex << nonce
-                  << " | Hash: " << hash_to_hex(hash) << std::dec << std::endl;
+                  << " | Hash: " << hash_to_hex(hash) << std::dec << '\n';
     };
 
     engine.start(share_callback);
@@ -235,7 +235,7 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
         }
         std::cout << "\r" << std::flush;
     }
-    std::cout << std::endl;
+    std::cout << '\n';
 
     // Take end snapshot for steady-state computation
     const auto snap_end = engine.snapshot();
@@ -560,14 +560,14 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
                         std::cout << " w" << w << "=" << std::fixed << std::setprecision(2)
                                   << (static_cast<double>(a) / win);
                     }
-                    std::cout << std::endl;
+                    std::cout << '\n';
                 }
             }
             prev_dump_snap = now_snap;
             prev_dump_valid = true;
         }
     }
-    std::cout << std::endl;
+    std::cout << '\n';
 
     // TUI mode is ending: restore normal logging (logs go back to stdout)
     // before the post-loop summary / teardown prints below.
