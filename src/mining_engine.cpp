@@ -28,7 +28,7 @@ std::vector<unsigned int> filter_to_isolated(std::vector<unsigned int> order) {
     auto isolated = isolated_cpu_list();
     if (isolated.empty()) return order;
     std::vector<unsigned int> filtered;
-    for (auto cpu : order) {
+    for (const auto& cpu : order) {
         if (std::find(isolated.begin(), isolated.end(), cpu) != isolated.end())
             filtered.push_back(cpu);
     }
