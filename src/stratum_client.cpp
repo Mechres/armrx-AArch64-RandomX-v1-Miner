@@ -739,8 +739,7 @@ void StratumClient::handle_reply(const std::string& line) {
     }
 
     // Keepalive response or duplicate handshake
-    if (line.find("KEEPALIVED") != std::string::npos ||
-        line.find("\"status\":\"KEEPALIVED\"") != std::string::npos) {
+    if (line.find("KEEPALIVED") != std::string::npos) {
         return;
     }
 
