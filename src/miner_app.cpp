@@ -171,6 +171,7 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
         bench_metrics = std::make_unique<armrx::MetricsExporter>(opts_.metrics_port,
             [&engine, &shares_found]() -> std::string {
                 std::string out;
+                out.reserve(1024);
                 out += "# HELP armrx_hashrate_total Current total hashrate H/s\n"
                        "# TYPE armrx_hashrate_total gauge\n"
                        "armrx_hashrate_total " +
@@ -187,8 +188,11 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
                     out += "# HELP armrx_cpu_temp_celsius CPU thermal zone temperature\n"
                            "# TYPE armrx_cpu_temp_celsius gauge\n";
                     for (const auto& z : zones) {
-                        out += "armrx_cpu_temp_celsius{zone=\"" + z.name + "\"} " +
-                               std::to_string(z.temp_c) + "\n";
+                        out.append("armrx_cpu_temp_celsius{zone=\"")
+                           .append(z.name)
+                           .append("\"} ")
+                           .append(std::to_string(z.temp_c))
+                           .append("\n");
                     }
                 }
                 out += "# EOF\n";
@@ -330,6 +334,7 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
         metrics = std::make_unique<armrx::MetricsExporter>(opts_.metrics_port,
             [&engine, &pool_mgr, &shares_submitted]() -> std::string {
                 std::string out;
+                out.reserve(2048);
                 // Hashrate
                 out += "# HELP armrx_hashrate_total Current total hashrate H/s\n"
                        "# TYPE armrx_hashrate_total gauge\n"
@@ -371,8 +376,11 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
                     out += "# HELP armrx_cpu_temp_celsius CPU thermal zone temperature\n"
                            "# TYPE armrx_cpu_temp_celsius gauge\n";
                     for (const auto& z : zones) {
-                        out += "armrx_cpu_temp_celsius{zone=\"" + z.name + "\"} " +
-                               std::to_string(z.temp_c) + "\n";
+                        out.append("armrx_cpu_temp_celsius{zone=\"")
+                           .append(z.name)
+                           .append("\"} ")
+                           .append(std::to_string(z.temp_c))
+                           .append("\n");
                     }
                 }
                 out += "# EOF\n";
