@@ -448,3 +448,6 @@ if(ipo_supported AND NOT ARMRX_PGO STREQUAL "GENERATE" AND NOT ARMRX_PGO STREQUA
 elseif(NOT ipo_supported)
     message(STATUS "LTO/IPO is not supported: ${ipo_error}")
 endif()
+
+add_executable(bench_thermal tests/bench_thermal.cpp)
+target_link_libraries(bench_thermal PRIVATE armrx_core)
