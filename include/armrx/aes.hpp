@@ -142,23 +142,20 @@ using AesBlock = std::array<std::byte, 16>;
 namespace detail {
 
 // General GF(2^4) multiply of two vectors (both operands vary per-lane), via log/antilog
-// tables (GF(2^4)* is cyclic of order 15) with explicit zero-masking (log(0) is undefined;
-// kLog4[0] is an unused sentinel, masked out below rather than relied upon).
+// tables (GF(2^4)* is cyclic of order 15). log(0) is undefined, so kLog4[0] is set
+// to 240 as a sentinel. If either operand is 0, the sum of logs easily exceeds 15,
+// mapping to 0 via vqtbl1q_u8's out-of-bounds behavior.
 [[nodiscard]] inline uint8x16_t aes_gf4_mul_neon(uint8x16_t a, uint8x16_t c) {
-    static const uint8_t kLog4[16]     = {0, 0, 1, 4, 2, 8, 5, 10, 3, 14, 9, 7, 6, 13, 11, 12};
+    static const uint8_t kLog4[16]     = {240, 0, 1, 4, 2, 8, 5, 10, 3, 14, 9, 7, 6, 13, 11, 12};
     static const uint8_t kAntilog4[16] = {1, 2, 4, 8, 3, 6, 12, 11, 5, 10, 7, 14, 15, 13, 9, 0};
     const uint8x16_t log_tbl = vld1q_u8(kLog4);
     const uint8x16_t antilog_tbl = vld1q_u8(kAntilog4);
-    const uint8x16_t zero = vdupq_n_u8(0);
-    const uint8x16_t a_zero = vceqq_u8(a, zero);
-    const uint8x16_t c_zero = vceqq_u8(c, zero);
     const uint8x16_t la = vqtbl1q_u8(log_tbl, a);
     const uint8x16_t lc = vqtbl1q_u8(log_tbl, c);
-    uint8x16_t s = vaddq_u8(la, lc); // 0..28
+    uint8x16_t s = vaddq_u8(la, lc); // 0..28 for valid, large for 0s
     const uint8x16_t ge15 = vcgeq_u8(s, vdupq_n_u8(15));
     s = vsubq_u8(s, vandq_u8(ge15, vdupq_n_u8(15))); // mod 15 (single conditional subtract suffices)
-    const uint8x16_t result = vqtbl1q_u8(antilog_tbl, s);
-    return vbicq_u8(result, vorrq_u8(a_zero, c_zero)); // force 0 where either operand was 0
+    return vqtbl1q_u8(antilog_tbl, s); // out-of-bounds indices yield 0
 }
 
 // Nibble-split forward map (GF(2^8) byte -> tower repr, packed as hi<<4|lo) followed by
