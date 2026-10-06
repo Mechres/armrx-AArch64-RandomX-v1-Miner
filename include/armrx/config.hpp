@@ -23,6 +23,12 @@ struct AppConfig {
     unsigned seconds = 10;    // benchmark duration
 };
 
+/**
+ * Range-validated unsigned parse: rejects negative input and values above
+ * max_value. Throws std::out_of_range so callers' existing try/catch handles both cases.
+ */
+unsigned long long parse_bounded_ull(const std::string& s, unsigned long long max_value);
+
 /** Parse config from a JSON file path. Returns defaults if file missing. */
 AppConfig load_config(const std::string& path);
 

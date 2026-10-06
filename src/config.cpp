@@ -10,7 +10,6 @@
 #include <stdexcept>
 
 namespace armrx {
-namespace {
 
 // Range-validated unsigned parse: rejects negative input (std::stoul would
 // silently wrap "-1" to 2^64-1) and values above max_value (a plain
@@ -25,6 +24,8 @@ unsigned long long parse_bounded_ull(const std::string& s, unsigned long long ma
         throw std::out_of_range("value exceeds allowed maximum");
     return v;
 }
+
+namespace {
 
 // Parse "host:port" string
 PoolConfig parse_pool_str(const std::string& s) {
