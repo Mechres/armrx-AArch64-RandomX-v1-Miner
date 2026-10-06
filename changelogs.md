@@ -5,6 +5,45 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-10-06 — merge: 7 Jules bot PRs (stratum cleanup, config tests, AES sentinel, self-pipe)
+- **PR #6 (merged):** `src/stratum_client.cpp` — dropped the redundant
+  `line.find("\"status\":\"KEEPALIVED\"")` disjunct; subsumed by the `"KEEPALIVED"`
+  substring check. Logically identical.
+- **PR #7 (merged):** `include/armrx/stratum_client.hpp` + `src/stratum_client.cpp` —
+  `StratumClient` ctor `std::string` by-value+`move` → `const std::string&`+copy.
+  Sole call site (`pool_manager.cpp`) passes lvalues, so one move per arg is saved;
+  cold path, no hot-loop effect. Behavior identical.
+- **PR #8 (merged):** `src/cpu_thermal.cpp` — `zones.reserve(16)` before the
+  `/sys/class/thermal` scan; plus new `tests/bench_thermal.cpp` wired as a
+  `bench_thermal` CMake target (not a ctest case). Trivially safe.
+- **PR #5 (merged via gh):** `src/config.cpp` + `include/armrx/config.hpp` —
+  `parse_pool_str()` moved out of the anonymous namespace and declared in the
+  header; 8 new edge-case asserts in `tests/test_config.cpp` (bad/empty/negative/
+  oversize ports, IPv4, bracketed IPv6). Test-only exposure, no behavior change.
+- **PR #10 (merged locally — conflicted with #5):** `parse_bounded_ull()` exposed
+  in `include/armrx/config.hpp`, duplicate copy removed from `src/cli_parser.cpp`
+  (verified byte-identical logic before dedup; `cli_parser.cpp` already includes
+  `config.hpp`), error-path tests added. Manual conflict resolution kept both
+  PRs' tests; remote branch deleted after GitHub marked it MERGED.
+- **PR #9 (merged):** `include/armrx/aes.hpp` — `aes_gf4_mul_neon()` drops 5
+  zero-masking NEON insns by seeding `kLog4[0]=240` and relying on `vqtbl1q_u8`
+  OOB→0. Highest-risk of the batch (consensus-critical tower-field path, not
+  compilable/testable on x86): verified by exhaustive scalar simulation of old
+  vs new semantics over all 256 nibble pairs — 256/256 equivalent, zero-involved
+  sums always land out-of-bounds, max valid log-sum 28 (single subtract holds).
+  Caller audit confirms all inputs are nibbles (masks/table outputs).
+- **PR #11 (merged):** `src/miner_app.cpp` — both 1s-cadence loops (benchmark +
+  pool) switched from 10×100ms `sleep_for` polling to `poll()` on a self-pipe
+  (byte written from the SIGINT handler; `write()` is async-signal-safe; pipe
+  non-blocking; old polling loop retained as fallback if `pipe()` fails).
+  No lost-wakeup race (byte precedes flag re-check).
+- **Verification:** cross-build CI green on all 7 (on-device KAT gate still
+  pending/offline — same infra flake); post-merge native build clean;
+  `armrx_tests`, `test_config` (both new suites), `test_cli_parser`,
+  `test_aes_hash`, `test_pool_protocol` all pass; live SIGINT test exits <1s;
+  `--seconds=5` run keeps exact 1s cadence with clean summary (exit 2 is the
+  pre-existing non-AArch64 `run()` return, unrelated).
+
 ## 2026-10-06 — merge: 4 Jules bot PRs (sscanf hardening + micro-opts)
 - **PR #1 (merged):** `src/virtual_memory.c` — `sscanf(ut.release, "%d.%d", …)` →
   `"%9d.%9d"` in the macOS-only `__isOSVersionAtLeast()` path, bounding the parse to
