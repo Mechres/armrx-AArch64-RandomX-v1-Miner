@@ -124,11 +124,56 @@ void test_parse_pool_str() {
     std::cout << "[test_config] test_parse_pool_str passed\n";
 }
 
+void test_parse_bounded_ull_error_paths() {
+    // Valid cases
+    assert(armrx::parse_bounded_ull("100", 100) == 100);
+    assert(armrx::parse_bounded_ull("  42  ", 100) == 42);
+    assert(armrx::parse_bounded_ull("0", 10) == 0);
+
+    // Negative inputs
+    bool caught_negative = false;
+    try {
+        armrx::parse_bounded_ull("-1", 100);
+    } catch (const std::out_of_range& e) {
+        caught_negative = true;
+    }
+    assert(caught_negative);
+
+    bool caught_negative_spaces = false;
+    try {
+        armrx::parse_bounded_ull("   -42", 100);
+    } catch (const std::out_of_range& e) {
+        caught_negative_spaces = true;
+    }
+    assert(caught_negative_spaces);
+
+    // Value exceeding max
+    bool caught_exceeding = false;
+    try {
+        armrx::parse_bounded_ull("101", 100);
+    } catch (const std::out_of_range& e) {
+        caught_exceeding = true;
+    }
+    assert(caught_exceeding);
+
+    // Non-numeric garbage (should throw invalid_argument via stoull)
+    bool caught_invalid = false;
+    try {
+        armrx::parse_bounded_ull("abc", 100);
+    } catch (const std::invalid_argument& e) {
+        caught_invalid = true;
+    }
+    assert(caught_invalid);
+
+    std::cout << "[test_config] test_parse_bounded_ull_error_paths passed\n";
+}
+
 int main() {
     test_malformed_numeric_fields_dont_crash();
     test_valid_numeric_fields_still_parse();
     test_missing_file_returns_defaults();
     test_parse_pool_str();
+    test_parse_bounded_ull_error_paths();
     std::cout << "ALL CONFIG TESTS PASSED SUCCESSFULLY!\n";
     return 0;
 }

@@ -13,22 +13,6 @@
 
 namespace armrx {
 
-namespace {
-// Range-validated unsigned parse (mirrors config.cpp): rejects negative
-// input (std::stoul silently wraps "-1" to 2^64-1) and values above
-// max_value (a bare static_cast silently truncates, e.g. port 65539 -> 3).
-// Throws std::out_of_range so callers' existing try/catch handles both.
-unsigned long long parse_bounded_ull(const std::string& s, unsigned long long max_value) {
-    const auto first = s.find_first_not_of(" \t");
-    if (first != std::string::npos && s[first] == '-')
-        throw std::out_of_range("negative value not allowed");
-    const auto v = std::stoull(s);
-    if (v > max_value)
-        throw std::out_of_range("value exceeds allowed maximum");
-    return v;
-}
-} // namespace
-
 ParsedArgs CommandLineParser::parse(int argc, char** argv) {
     ParsedArgs result;
     MinerOptions& o = result.options;
