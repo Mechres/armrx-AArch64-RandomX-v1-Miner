@@ -45,8 +45,8 @@ public:
     using JobCallback  = std::function<void(const Job&)>;
     using ErrorCallback = std::function<void(const std::string& reason)>;
 
-    StratumClient(std::string host, std::uint16_t port,
-                  std::string wallet, std::string password = "x");
+    StratumClient(const std::string& host, std::uint16_t port,
+                  const std::string& wallet, const std::string& password = "x");
     ~StratumClient();
 
     // Disable copy
