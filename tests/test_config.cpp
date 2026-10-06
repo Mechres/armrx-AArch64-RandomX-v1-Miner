@@ -79,10 +79,56 @@ void test_missing_file_returns_defaults() {
     std::cout << "[test_config] test_missing_file_returns_defaults passed\n";
 }
 
+void test_parse_pool_str() {
+    // Test normal host without port
+    auto p1 = armrx::parse_pool_str("pool.example.com");
+    assert(p1.host == "pool.example.com");
+    assert(p1.port == 3333); // default
+
+    // Test normal host with valid port
+    auto p2 = armrx::parse_pool_str("pool.example.com:4444");
+    assert(p2.host == "pool.example.com");
+    assert(p2.port == 4444);
+
+    // Test invalid port: non-numeric
+    auto p3 = armrx::parse_pool_str("pool.example.com:notaport");
+    assert(p3.host == "pool.example.com");
+    assert(p3.port == 3333); // default
+
+    // Test invalid port: out-of-bounds (exceeds 65535)
+    auto p4 = armrx::parse_pool_str("pool.example.com:65536");
+    assert(p4.host == "pool.example.com");
+    assert(p4.port == 3333); // default
+
+    // Test invalid port: negative
+    auto p5 = armrx::parse_pool_str("pool.example.com:-1");
+    assert(p5.host == "pool.example.com");
+    assert(p5.port == 3333); // default
+
+    // Test invalid port: empty
+    auto p6 = armrx::parse_pool_str("pool.example.com:");
+    assert(p6.host == "pool.example.com");
+    assert(p6.port == 3333); // default
+
+    // IPv4 address with port
+    auto p7 = armrx::parse_pool_str("127.0.0.1:8080");
+    assert(p7.host == "127.0.0.1");
+    assert(p7.port == 8080);
+
+    // IPv6 without brackets but using colons (this simple parser splits at the *last* colon,
+    // which is not fully robust for raw IPv6 without brackets, but we test current behavior).
+    auto p8 = armrx::parse_pool_str("[::1]:9999");
+    assert(p8.host == "[::1]");
+    assert(p8.port == 9999);
+
+    std::cout << "[test_config] test_parse_pool_str passed\n";
+}
+
 int main() {
     test_malformed_numeric_fields_dont_crash();
     test_valid_numeric_fields_still_parse();
     test_missing_file_returns_defaults();
+    test_parse_pool_str();
     std::cout << "ALL CONFIG TESTS PASSED SUCCESSFULLY!\n";
     return 0;
 }
