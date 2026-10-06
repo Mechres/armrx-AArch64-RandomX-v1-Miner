@@ -22,14 +22,24 @@
 #include <signal.h>
 #include <sys/mman.h>
 #include <cstdlib>
+#include <unistd.h>
+#include <poll.h>
+#include <fcntl.h>
 
 namespace armrx {
 
 namespace {
 
 std::atomic<bool> keep_running{true};
+int signal_pipe[2] = {-1, -1};
+
 void signal_handler(int) {
     keep_running = false;
+    if (signal_pipe[1] != -1) {
+        char c = 1;
+        auto res = write(signal_pipe[1], &c, 1);
+        (void)res;
+    }
 }
 
 armrx::Target difficulty_to_target(std::uint64_t diff) {
@@ -68,6 +78,11 @@ void MinerApp::install_signal_handlers() {
     // instead of auto-restarting, so the keep_running loop exits promptly on
     // Ctrl-C. A plain SIGINT handler is async-signal-safe (only an atomic
     // store), so it is safe to run inside the signal context.
+    if (pipe(signal_pipe) == 0) {
+        fcntl(signal_pipe[0], F_SETFL, O_NONBLOCK);
+        fcntl(signal_pipe[1], F_SETFL, O_NONBLOCK);
+    }
+
     struct sigaction sa{};
     sa.sa_handler = signal_handler;
     sa.sa_flags = 0;  // SA_RESTART intentionally NOT set
@@ -210,12 +225,20 @@ void MinerApp::run_local_benchmark(RandomXMode effective_mode) {
                                        : opts_.warmup_secs;
 
     while (keep_running && (opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
-        // Interruptible 1s cadence: sleep in short 100ms slices that re-check
-        // keep_running, so a SIGINT (which only sets the flag) is observed
-        // promptly. std::this_thread::sleep_for swallows EINTR and re-sleeps,
-        // so a single 1s sleep would ignore the signal until it elapsed.
-        for (int i = 0; i < 10 && keep_running; ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Interruptible 1s cadence using a self-pipe. This completely avoids
+        // polling wakeups while ensuring instantaneous response to SIGINT.
+        if (signal_pipe[0] != -1) {
+            struct pollfd pfd;
+            pfd.fd = signal_pipe[0];
+            pfd.events = POLLIN;
+            if (poll(&pfd, 1, 1000) > 0) {
+                char buf[16];
+                while (read(signal_pipe[0], buf, sizeof(buf)) > 0) {}
+            }
+        } else {
+            for (int i = 0; i < 10 && keep_running; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
         elapsed_sec = static_cast<unsigned>(std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - start_time).count());
 
@@ -449,11 +472,20 @@ void MinerApp::run_pool_mining(RandomXMode effective_mode) {
     static constexpr double kSpeedWindowSec = 10.0;
 
     while (keep_running && (!opts_.pool_test || opts_.runtime_seconds == 0 || elapsed_sec < opts_.runtime_seconds)) {
-        // Interruptible 1s cadence (see run_local_benchmark for rationale):
-        // sleep in 100ms slices that re-check keep_running so SIGINT is seen
-        // promptly instead of being swallowed by sleep_for's EINTR restart.
-        for (int i = 0; i < 10 && keep_running; ++i)
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // Interruptible 1s cadence using a self-pipe. This completely avoids
+        // polling wakeups while ensuring instantaneous response to SIGINT.
+        if (signal_pipe[0] != -1) {
+            struct pollfd pfd;
+            pfd.fd = signal_pipe[0];
+            pfd.events = POLLIN;
+            if (poll(&pfd, 1, 1000) > 0) {
+                char buf[16];
+                while (read(signal_pipe[0], buf, sizeof(buf)) > 0) {}
+            }
+        } else {
+            for (int i = 0; i < 10 && keep_running; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
         ++elapsed_sec;
 
         // Pool failover handled internally by PoolManager
