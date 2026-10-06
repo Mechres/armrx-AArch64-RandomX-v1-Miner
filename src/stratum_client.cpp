@@ -72,12 +72,12 @@ static bool valid_job_hex(const std::string& blob_hex, const std::string& seed_h
 // StratumClient — construction / destruction
 // ─────────────────────────────────────────────────────────────────────────────
 
-StratumClient::StratumClient(std::string host, std::uint16_t port,
-                             std::string wallet, std::string password)
-    : host_(std::move(host))
+StratumClient::StratumClient(const std::string& host, std::uint16_t port,
+                             const std::string& wallet, const std::string& password)
+    : host_(host)
     , port_(port)
-    , wallet_(std::move(wallet))
-    , password_(std::move(password))
+    , wallet_(wallet)
+    , password_(password)
 {}
 
 StratumClient::~StratumClient() {
