@@ -24,6 +24,9 @@ std::vector<CpuThermalZone> read_cpu_temperatures() {
     std::vector<CpuThermalZone> zones;
     DIR* dir = ::opendir("/sys/class/thermal");
     if (!dir) return zones;
+
+    // Reserve to avoid multiple reallocations. 16 is a reasonable heuristic for typical thermal zones.
+    zones.reserve(16);
     while (auto* entry = ::readdir(dir)) {
         const std::string name = entry->d_name;
         if (name.rfind("thermal_zone", 0) != 0) continue;
