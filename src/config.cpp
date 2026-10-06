@@ -26,6 +26,8 @@ unsigned long long parse_bounded_ull(const std::string& s, unsigned long long ma
     return v;
 }
 
+} // namespace
+
 // Parse "host:port" string
 PoolConfig parse_pool_str(const std::string& s) {
     PoolConfig pc;
@@ -44,8 +46,6 @@ PoolConfig parse_pool_str(const std::string& s) {
     pc.tls = false;
     return pc;
 }
-
-} // namespace
 
 AppConfig load_config(const std::string& path) {
     AppConfig cfg;

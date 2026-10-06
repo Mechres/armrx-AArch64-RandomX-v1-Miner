@@ -23,6 +23,9 @@ struct AppConfig {
     unsigned seconds = 10;    // benchmark duration
 };
 
+/** Parse "host:port" string */
+PoolConfig parse_pool_str(const std::string& s);
+
 /** Parse config from a JSON file path. Returns defaults if file missing. */
 AppConfig load_config(const std::string& path);
 
