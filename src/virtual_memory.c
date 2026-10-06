@@ -75,7 +75,7 @@ static int32_t __isOSVersionAtLeast(int32_t major, int32_t minor, int32_t submin
 	    struct utsname ut;
 		int mmaj, mmin;
 		uname(&ut);
-		sscanf(ut.release, "%d.%d", &mmaj, &mmin);
+		sscanf(ut.release, "%9d.%9d", &mmaj, &mmin);
 		// The utsname release version is 9 greater than the canonical OS version
 		mmaj -= 9;
 		MacOSver = (mmaj << 8) | mmin;
