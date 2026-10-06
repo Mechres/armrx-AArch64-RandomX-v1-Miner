@@ -5,6 +5,27 @@
 > The complete alpha-phase changelog is preserved at
 > [`docs/archived/alpha-changelogs.md`](docs/archived/alpha-changelogs.md).
 
+## 2026-10-06 — merge: 4 Jules bot PRs (sscanf hardening + micro-opts)
+- **PR #1 (merged):** `src/virtual_memory.c` — `sscanf(ut.release, "%d.%d", …)` →
+  `"%9d.%9d"` in the macOS-only `__isOSVersionAtLeast()` path, bounding the parse to
+  9 digits so it cannot overflow a 32-bit `int`. Zero behavior change on Linux/AArch64.
+- **PR #2 (merged):** `src/miner_app.cpp` — `std::endl` → `'\n'` on 4 console-output
+  sites (share-found message, benchmark `\r` loop terminator, pool stats dumps).
+  Removes unneeded synchronous flushes; no flush-dependent correctness relied on them.
+  (The PR's claimed +20% H/s is run-to-run variance — share logging is far too rare
+  to move hashrate; the change itself is harmless and idiomatic.)
+- **PR #3 (merged):** `src/mining_engine.cpp` — `for (auto cpu : order)` →
+  `for (const auto& cpu : order)` in `filter_to_isolated()`. Functionally identical
+  (`unsigned int` copies are register-cheap); style hygiene only.
+- **PR #4 (merged):** `src/miner_app.cpp` — Prometheus metrics lambdas (benchmark +
+  pool paths) gain `out.reserve()` and `.append()` chains instead of `+` temporaries
+  in the thermal-zone loop. Functionally identical output, fewer allocations on a
+  rarely-called endpoint.
+- **Verification:** cross-build CI passed on all 4 PRs (on-device KAT gate
+  cancels identically on `main` — offline runner infra flake, not a regression);
+  post-merge native build clean + `test_config`, `test_cli_parser`, `test_aes_hash`,
+  `test_pool_protocol` green.
+
 ## 2026-09-12 — fix(audit): partial-dataset lifecycle, shutdown, pool replacement, TLS enforcement
 - **Source:** `docs/code-audit-2026-09-12.md` (six findings: seed-rotation race, shutdown-before-first-fill,
   pool-replacement deadlock, TLS silently ignored without OpenSSL, partial-dataset size validation, empty
